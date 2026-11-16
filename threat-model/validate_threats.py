@@ -9,7 +9,7 @@ the actual security controls implemented in the codebase.
 2026 edition on 2026-08-04 and **renumbered** several entries
 (agency is now LLM03:2026; output handling is LLM10:2026; hidden
 context is the new LLM08:2026). Coverage is still 10/10 of the 2025
-list. See ``governance/ai_risk_manifest.yaml`` ``owasp_llm_2026_crosswalk``.
+list. See ``governance/systems/ura-ai-chatbot/manifest.yaml`` ``owasp_llm_2026_crosswalk``.
 
 Usage:
     python threat-model/validate_threats.py

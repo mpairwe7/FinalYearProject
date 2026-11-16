@@ -11,7 +11,7 @@ Following the October 2026 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) and Phase 3
 2. **Incomplete Hierarchical `AGENTS.md` Coverage**:
    - Top-level domains `ml/`, `monitoring/`, `threat-model/`, and `plugins/` lacked scoped `AGENTS.md` guides and entries in the root `AGENTS.md` router.
 3. **Agentic Security & AIBOM Manifest Lag**:
-   - `governance/ai_risk_manifest.yaml` listed only `["en", "lg"]` instead of all five production locales (`["en", "lg", "sw", "nyn", "ach"]`) and lacked the **OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`)** and **CycloneDX AI Bill of Materials (`aibom_inventory`)** sections.
+   - `governance/systems/ura-ai-chatbot/manifest.yaml` listed only `["en", "lg"]` instead of all five production locales (`["en", "lg", "sw", "nyn", "ach"]`) and lacked the **OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`)** and **CycloneDX AI Bill of Materials (`aibom_inventory`)** sections.
    - `pyproject.toml` version (`1.1.0`) and Python constraint (`>=3.11,<3.13`) lagged behind the runtime (`1.2.0`, Python `3.10–3.14`).
 4. **Missing Unconditional CI Layer-Boundary Gate**:
    - `App/backend/tests/test_runtime_package_boundary.py` checked only `app -> ml` imports and was not in the `tests/` root tree executed by the primary CI coverage gate.
@@ -28,7 +28,7 @@ Following the October 2026 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) and Phase 3
 - Added scoped, contract-first `AGENTS.md` guides in `ml/AGENTS.md`, `monitoring/AGENTS.md`, `threat-model/AGENTS.md`, and `plugins/AGENTS.md`, and wired them into the root `AGENTS.md` router table.
 
 ### Phase 3 — OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`) & CycloneDX AIBOM
-- Extended `governance/ai_risk_manifest.yaml` and `governance/compliance_check.py` with:
+- Extended `governance/systems/ura-ai-chatbot/manifest.yaml` and `governance/compliance_check.py` with:
   - Full 5-locale declaration (`en`, `lg`, `sw`, `nyn`, `ach`).
   - `owasp_agentic_2026` (`ASI01` Agent Goal Hijack through `ASI10` Rogue Agents & Unaudited Autonomy), each backed by `verified_by` test references verified by `compliance_check.py`.
   - `aibom_inventory` documenting all five local serving models (`Sunbird/Sunflower-Qwen3.5-9B`, `Sunbird/orpheus-3b-tts-multilingual`, `Sunbird/SunflowerASR-51-african-languages`, `BAAI/bge-m3`, `mixedbread-ai/mxbai-rerank-base-v2`).

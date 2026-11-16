@@ -1064,7 +1064,7 @@ All framework citations are to *SWEBOK Guide v4.0*, IEEE Computer Society, 2024
 | `docs/Reports/EMOTIONAL_INTELLIGENCE_INTENT_STRESS_REPORT_2026-08-21.md` | Intent determination and distress-recognition accuracy |
 | `docs/Reports/LOAD_STRESS_ENDURANCE_TEST_REPORT_2026-08-21.md` | Peak throughput, multi-format ingestion, CI gate status |
 | `docs/EVALUATION_REPORT.md` | Faithfulness, citation coverage, the 9 quality gates |
-| `docs/MODEL_CARD.md` | Model inventory and component parameters |
-| `governance/ai_risk_manifest.yaml` | NIST AI RMF, ISO/IEC 42001, EU AI Act control status |
+| `governance/systems/ura-ai-chatbot/model_card.md` | Model inventory and component parameters |
+| `governance/systems/ura-ai-chatbot/manifest.yaml` | NIST AI RMF, ISO/IEC 42001, EU AI Act control status |
 | `docs/capstone/week10-standards-relationship-map.md` | The 10-standard compliance map and gap status |
 | `docs/Reports/URA AI Intelligent Assistant - Proposal Summary.pdf` | Engagement terms this document prices (§5.1–5.7) |

@@ -25,7 +25,7 @@ We adopt a four-part monorepo standardization and enforcement architecture:
    - `ml/` never imports `plugins.*`, and `ml/ -> app.*` is frozen to the three evaluation/MT bridges.
    - `governance/` and `threat-model/` never import `app.*`.
    - `App/backend/app/ -> ml/` is frozen to the four legacy modules in `KNOWN_ML_IMPORTERS`.
-3. **OWASP ASI 2026 (`ASI01`–`ASI10`) & CycloneDX AIBOM**: `governance/ai_risk_manifest.yaml` codifies all 10 agentic security risks with runnable `verified_by` test references and maintains `aibom_inventory` for all five serving models.
+3. **OWASP ASI 2026 (`ASI01`–`ASI10`) & CycloneDX AIBOM**: `governance/systems/ura-ai-chatbot/manifest.yaml` codifies all 10 agentic security risks with runnable `verified_by` test references and maintains `aibom_inventory` for all five serving models.
 4. **Unconditional CI Enforcement**: `tests/test_monorepo_architecture_governance.py` runs in the root `pytest tests/` CI gate and fails the build on any boundary, router, ADR, or manifest regression.
 
 ## Consequences

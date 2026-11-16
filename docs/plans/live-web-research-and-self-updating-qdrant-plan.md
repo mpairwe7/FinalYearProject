@@ -399,6 +399,6 @@ Read `App/backend/app/rag/pipeline.py` (lines `1830–1940`, `2200–2360`, `110
 ### G.2 Documentation & Governance (Same PR as Final Verification)
 - **ADR-0008:** `docs/adr/0008-live-web-research-ephemeral-pdf-sandbox-and-self-updating-qdrant.md` (registered in `docs/adr/README.md`).
 - **Runbook:** `docs/runbooks/live-web-research-and-qdrant-sync.md` (configuring `FLAG_LIVE_WEB_RESEARCH`, `FLAG_AUTO_QDRANT_WEB_SYNC`, inspecting `web_sync_ledger` and `corpus_tombstones`, rolling back an auto-synced document from `App/Data/archive/`).
-- **Update:** `docs/RAG_ARCHITECTURE.md`, `docs/MODEL_CARD.md`, `docs/GAPS_AND_AGENTIC_ROADMAP.md` (closing `G222` live FX / BoU rate gap), and `.env.example`.
+- **Update:** `docs/RAG_ARCHITECTURE.md`, `governance/systems/ura-ai-chatbot/model_card.md`, `docs/GAPS_AND_AGENTIC_ROADMAP.md` (closing `G222` live FX / BoU rate gap), and `.env.example`.
 
 **Deliverable / PR #7:** `docs(governance): ADR-0008, live web research & Qdrant auto-sync runbook, and evaluation report`.

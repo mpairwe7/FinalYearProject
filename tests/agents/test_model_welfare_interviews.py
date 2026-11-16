@@ -346,7 +346,7 @@ def test_every_table_9_1_a_question_matches_without_escalation_or_low_faithfulne
     assert res["agent_role"] == "conversational_agent"
     assert res["response_judge"]["decision"] == "approve"
     assert res["response_judge"]["confidence_band"] == "high"
-    assert res["sources"] == ["docs/MODEL_CARD.md"]
+    assert res["sources"] == ["governance/systems/ura-ai-chatbot/model_card.md"]
     assert res["citations"]
     assert "Respond directly" not in res["reply"]
 

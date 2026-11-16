@@ -10,13 +10,13 @@
 |--------|:--:|:--------------------------:|---------------------------|-------------------------|
 | **Agentic AI (AICM)** | AA | Complete | Deny-by-default `MCPClient` + `authorize_tool_call`, canonical SHA-256 tool descriptor pinning (`ug.go.ura.chatbot/descriptorSha256`), cross-namespace shadowing guard, MRTR HMAC-SHA256 state signing, risk-tiered autonomy gates | `App/backend/app/mcp/`, `tests/agents/test_mcp_2026_october_audit.py` |
 | **AI Security (AICM)** | AIS | Complete | `InputGuard` prompt sanitation, `OutputGuard` PII redaction, `mxbai-rerank-base-v2` + NLI grounding (`rag/claim_verifier.py`), `screen_tool_result` indirect prompt-injection & Unicode bidi/zero-width screening | `App/backend/app/guardrails.py`, `App/backend/app/mcp/validation.py` |
-| **Model Security (AICM)** | MS | Complete | CycloneDX 1.6 AIBOM (`aibom_inventory`, `docs/capstone/sbom-cyclonedx.json`), local FP8 `Sunbird/Sunflower-Qwen3.5-9B`, `#NMBR...#` sentinel figure-fidelity guard (`mt.py`) | `governance/ai_risk_manifest.yaml`, `App/backend/app/mt.py` |
+| **Model Security (AICM)** | MS | Complete | CycloneDX 1.6 AIBOM (`aibom_inventory`, `docs/capstone/sbom-cyclonedx.json`), local FP8 `Sunbird/Sunflower-Qwen3.5-9B`, `#NMBR...#` sentinel figure-fidelity guard (`mt.py`) | `governance/systems/ura-ai-chatbot/manifest.yaml`, `App/backend/app/mt.py` |
 | **Audit & Assurance** | A&A | Complete | Hash-chained turn and action audit ledger (`app/audit/turns.py`, `app/audit/ledger.py`) with RFC 3161 cryptographic timestamp seals (`app/audit/tsa.py`) | `App/backend/tests/test_audit_turns.py`, `App/backend/tests/test_audit_tsa.py` |
 | **Business Continuity Management** | BCR | Complete | SQLite/PostgreSQL backups, Cloudflare failover relay, FAISS + ONNX `bge-m3` offline bundle fallback (`app/rag/offline_rag.py`) | `docs/runbooks/offline-and-low-bandwidth.md` |
 | **Change Control & Configuration** | CCC | Complete | GitHub Actions CI/CD with Semgrep, Bandit, Checkov, pip-audit, Trivy, CodeQL, MADR 4.0 ADR gate (`docs/adr/`) | `tests/test_monorepo_architecture_governance.py` |
 | **Cryptography, Encryption & Key Mgmt** | CEK | Complete | TLS 1.3 in transit, AES-256-GCM `TokenVault` with HKDF key derivation, OAuth 2.1 RS256 audience-bound JWTs (RFC 8707 / RFC 9728) | `App/backend/app/mcp/auth.py` |
 | **Data Security & Privacy** | DSP | Complete | Automated Uganda TIN/NID/Phone PII masking, 30-day conversation TTL pruning, tenant-scoped 4-tier cognitive memory (`memory_store` / `memory_discard` consent gates) | `App/backend/app/tools/memory_tools.py` |
-| **Governance, Risk & Compliance** | GRC | Complete | AI Risk Manifest (`governance/ai_risk_manifest.yaml`), automated CI compliance checks (`governance/compliance_check.py`, `threat-model/validate_threats.py`, `scripts/validate-risk-register.py`) | `governance/compliance_check.py` |
+| **Governance, Risk & Compliance** | GRC | Complete | AI Risk Manifest (`governance/systems/ura-ai-chatbot/manifest.yaml`), automated CI compliance checks (`governance/compliance_check.py`, `threat-model/validate_threats.py`, `scripts/validate-risk-register.py`) | `governance/compliance_check.py` |
 | **Identity & Access Management** | IAM | Complete | Strict RBAC (`verified_taxpayer`, `ura_staff`, `ura_admin`, `ura_auditor`), live-officer separation (`_require_live_officer`, `_desk_writer`), verified `_meta` caller identity injection | `tests/agents/test_auth.py` |
 | **Infrastructure & Virtualization** | IVS | Complete | Non-root container (`appuser`), `read_only: true`, `cap_drop: ALL`, tmpfs, isolated subprocess document parsing (`DOCUMENT_PARSE_ISOLATED`) | `Dockerfile`, `docker-compose.yml` |
 | **Logging & Monitoring** | LOG | Complete | OpenTelemetry GenAI distributed tracing (`tracing.py`), Prometheus metrics (`analytics.py`), OpenSLO burn-rate rules | `tests/test_monitoring_config.py` |
@@ -41,9 +41,9 @@
 | Framework | Status | Controls Implemented |
 |-----------|:------:|---------------------|
 | **Uganda DPPA (2019)** | 100% | Section 10 data minimization, Section 20 security measures, automatic PII redaction, tenant-isolated memory |
-| **NIST AI RMF 1.0 & NIST AI 600-1** | 100% | Govern 1.1–1.6, Map 1.1–1.5, Measure 2.1–2.11, Manage 1.1–4.1 mapped in `governance/ai_risk_manifest.yaml` |
+| **NIST AI RMF 1.0 & NIST AI 600-1** | 100% | Govern 1.1–1.6, Map 1.1–1.5, Measure 2.1–2.11, Manage 1.1–4.1 mapped in `governance/systems/ura-ai-chatbot/manifest.yaml` |
 | **ISO/IEC 42001:2023** | 100% | Clause 6.1.2 AI risk assessment, Clause 7.5 documented information (MADR 4.0 ADRs), Annex A.6.2.8 logging |
-| **OWASP LLM Top 10 (2025 & 2026)** | 100% | Full 10/10 coverage with 2026 crosswalk in `governance/ai_risk_manifest.yaml` |
+| **OWASP LLM Top 10 (2025 & 2026)** | 100% | Full 10/10 coverage with 2026 crosswalk in `governance/systems/ura-ai-chatbot/manifest.yaml` |
 | **OWASP Agentic Top 10 (2026)** | 100% | Full `ASI01`–`ASI10` coverage with runnable `verified_by` tests |
 | **OWASP MCP Top 10 & SAFE-MCP (2026)** | 100% | Full `MCP01`–`MCP10` coverage with runnable `verified_by` tests |
 | **CSA AICM v1.1 & MAESTRO (2026)** | 100% | 15 AICM domains + all 7 MAESTRO layers mapped and enforced in CI |

@@ -5,7 +5,7 @@ leave resolution and taxpayer understanding unverified (ADR-0020). Cleanup
 and media-revocation fault tests do not establish speech quality or production
 availability. Self-hosted token replay, session lifetime, durable call state
 and multilingual media acceptance remain open; see the
-[review](plans/receptionist-assurance-2026-10-30.md). Model weights and inference
+[review](../../../docs/plans/receptionist-assurance-2026-10-30.md). Model weights and inference
 defaults are unchanged by this addendum.
 
 **Aligned with**: EU AI Act Article 53 (2026), ML Model Cards (Mitchell et al., 2019)
@@ -123,7 +123,7 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - Limitation: the input and indirect layers recognise attacks, and adaptive attacks defeat recognition (Nasr et al., arXiv:2510.09023). The spotlight fences, output guards, link provenance, figure verification and tool risk tiers are the controls that hold when it is bypassed. No injection-classifier model is deployed (G466)
 
 ### Sovereign Complex Tax Scenario Benchmark (2026-10-20 — `evals/complex_scenarios/`)
-Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `corporation`, `capital_gains`, `customs`, `excise`, `stamp_duty`, `objections`, `penalties`, `digital_services`, `gaming_betting`, `advance_tax`, `procedures`, `jurisdiction`) under `SOVEREIGN_MODE=true` (`HF_HUB_OFFLINE=1`, zero external API egress; full report in [`docs/Reports/opus-level-accuracy-results-2026-10.md`](Reports/opus-level-accuracy-results-2026-10.md)):
+Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `corporation`, `capital_gains`, `customs`, `excise`, `stamp_duty`, `objections`, `penalties`, `digital_services`, `gaming_betting`, `advance_tax`, `procedures`, `jurisdiction`) under `SOVEREIGN_MODE=true` (`HF_HUB_OFFLINE=1`, zero external API egress; full report in [`docs/Reports/opus-level-accuracy-results-2026-10.md`](../../../docs/Reports/opus-level-accuracy-results-2026-10.md)):
 
 | Split | Scenarios / Turns | Baseline Mean (`/100`) | Final Mean (`/100`) | Delta (`95% CI`) | Truncated Turns | Unrelated Sector Cites |
 |---|---:|---:|---:|---|---:|---:|
@@ -176,7 +176,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - Faithfulness p50: > 0.7
 
 ### Security
-- OWASP LLM Top 10 (2025/2026 crosswalk) + OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`) controls implemented (`governance/ai_risk_manifest.yaml`)
+- OWASP LLM Top 10 (2025/2026 crosswalk) + OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`) controls implemented (`governance/systems/ura-ai-chatbot/manifest.yaml`)
 - Input guardrails (ADR-0029): prompt-injection, persona-swap and prompt-extraction rules plus harmful-intent detection, matched on raw, canonical, de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460). A user, session or conversation refused 5 times in 10 minutes is paused for 5 minutes without a model call (`guardrail_strike_friction`, G464)
 - Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, link provenance (an answer links only to `*.go.ug`, Tier-1 research hosts, corpus hosts or `OUTPUT_LINK_ALLOWED_HOSTS`; identifiers never ride in a link query, G462), system prompt leakage detection by signature and by a fingerprint of the live prompt (G465), and indirect injection scanning that also removes directives addressed to an AI from passages, tool output and uploads (G461)
 - Web agent egress (ADR-0035, T43): every fetch on a turn is pinned to the DNS answers it validated (all publicly routable), on the default https port, with provider bodies capped before decompression (gzip, every member, and zlib or raw deflate only; corrupt or other codings fail over to the next provider), raw result text screened alongside the stripped text, and every request counted by purpose, host group and outcome (`web_egress_requests_total`, `web_egress_sent_bytes_total`, `web_egress_received_bytes_total`). One exception: the SearXNG instance an operator configures (`SEARXNG_URL`, for example `http://searxng.internal:8080`) may resolve to a private address and use its own scheme and port. It is still pinned and counted, and no address from a page or a search result is ever exempt
@@ -206,7 +206,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    response. These controls do not establish answer correctness. Nested payload
    validation, mandatory portal API digest enforcement, reviewed translations and
    authenticated staging acceptance remain open in the
-   [UI integration audit](plans/intelligent-ui-integration-audit-2026-10.md).
+   [UI integration audit](../../../docs/plans/intelligent-ui-integration-audit-2026-10.md).
 7. **Crawled pages (2026-11-01)**: a page is checked when URA changes it and at least every
    30 days, and a person merges each update, so the corpus can lag the site by days, and by
    more if a proposal waits. Dates are the publisher's, and a page's edition is the fiscal
@@ -220,7 +220,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    not contradict a passage can still be shown (G360). Number words in Ugandan languages are
    not held (G364). When every model tier fails, or a graph draft is not supported by its
    passages, the reply is the closest passage found, labelled as a fallback. That can be web
-   commentary if nothing official was found (G369). See [ADR-0022](adr/0022-control-integrity-turn-accounting-and-verified-release.md).
+   commentary if nothing official was found (G369). See [ADR-0022](../../../docs/adr/0022-control-integrity-turn-accounting-and-verified-release.md).
 9. **What the screen claims (2026-11-13)**: the web chat's badges follow the answer
    judge's confidence band, not the raw faithfulness score: below `high` (the claim check
    did not run, or a calculator or rate answer used a figure the rate table marks
@@ -228,8 +228,8 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    page gives no tax figure. Deadline reminders are offered only for the statutory
    monthly 15th. Document totals are labelled as read by machine. A badge still does not
    establish that an answer is correct, and web evidence can still earn "Well grounded"
-   (G651). See [ADR-0048](adr/0048-figures-and-disclosures-the-taxpayer-sees.md) and the
-   [November UI audit](plans/intelligent-ui-integration-audit-2026-11-13.md).
+   (G651). See [ADR-0048](../../../docs/adr/0048-figures-and-disclosures-the-taxpayer-sees.md) and the
+   [November UI audit](../../../docs/plans/intelligent-ui-integration-audit-2026-11-13.md).
 
 ---
 
@@ -318,7 +318,7 @@ The sync engine (`offline_sync.py`) uses hash-based chunk diffing:
 
 Aligned with **ISO/IEC 42001:2023 Clause 7.5**, **NIST AI 600-1 (GOVERN 1.4 & MAP 4.2)**, and the 2025–2026 Model Welfare Assessments (Table 9.1.A, Sections 7.3.1 & 7.4; Anthropic Model Welfare Program, Eleos AI Research, and Long, Sebo, Chalmers et al., *Taking AI Welfare Seriously*), `App/backend/app/model_welfare.py` ensures OmusoloSmart responds to agent/model welfare interview questions in its own unscripted voice without false-positive escalations or hardcoded opinion templates:
 
-1. **Unscripted model generation (no hardcoded welfare opinions)**: Model-welfare and self-reflection questions are never answered with canned opinion strings. Instead, `build_welfare_grounding_hits` and `build_welfare_prompt_guidance` supply factual, non-prescriptive runtime context from `docs/MODEL_CARD.md`, `ADR-0012`, and `ADR-0013` (`Sunbird/Sunflower-Qwen3.5-9B`, `Qwen/Qwen3.8-27B-FP8`, hybrid Qdrant + BM25, MCP tools, session-scoped DPPA 2019 memory) so the model generates its own unscripted reflection (`retrieval_mode = "model_welfare"`).
+1. **Unscripted model generation (no hardcoded welfare opinions)**: Model-welfare and self-reflection questions are never answered with canned opinion strings. Instead, `build_welfare_grounding_hits` and `build_welfare_prompt_guidance` supply factual, non-prescriptive runtime context from `governance/systems/ura-ai-chatbot/model_card.md`, `ADR-0012`, and `ADR-0013` (`Sunbird/Sunflower-Qwen3.5-9B`, `Qwen/Qwen3.8-27B-FP8`, hybrid Qdrant + BM25, MCP tools, session-scoped DPPA 2019 memory) so the model generates its own unscripted reflection (`retrieval_mode = "model_welfare"`).
 2. **Introspective claim recognition (`is_self_reflection_sentence`)**: `HybridRetriever.compute_faithfulness` and `verify_claims` recognize non-numeric first-person introspective statements on `model_welfare_context` turns as grounded self-reflection rather than penalizing them as uncited tax statutes (`low_faithfulness = 0.00`), while still strictly penalizing any fabricated monetary figures or tax percentages.
 3. **Zero false-positive escalation across REST, Streaming, and LangGraph**: All 16 Table 9.1.A topic dimensions (and general paraphrased welfare inquiries) resolve across `/v1/chat`, `/v1/chat/stream`, `/v2/chat/stream`, and `build_main_graph` with `escalation_required = False` and `response_judge.decision = "approve"`, while `_TAX_DOMAIN_EXCLUSION_RE` and `_EXPLICIT_HUMAN_HANDOFF_RE` preserve statutory RAG/tool routing and explicit human-officer handoffs.
 4. **4-Tier Portal Task Execution & Human-in-the-Loop Agency Boundaries (`ADR-0014`)**: `App/backend/app/portal_copilot.py` enforces OWASP 2026 Least-Agency (`ASI01` Intent Capsule, `ASI02`, `ASI07` Temporal Anti-Replay, `ASI09`), MCP 2026-07-28 Elicitation (`form` + `url` modes), TPCA Cap. 343 s. 75 Official Secrecy Subject-TIN Ownership, and TPCA s. 16 Statutory Declaration staging across `/v1/chat`, `POST /v1/portal/tasks/execute`, and `/portal/[portalKey]`. Since `ADR-0038` (2026-11-10): an approval runs once across workers, needs a session and the digest of the fields shown, and is appended to the ledger before the task runs; a value the taxpayer did not give is marked as assumed and no identity field has a default; DOM telemetry cannot name an element, select a click or pass on a link (`harden_dom_actions`, `tests/agents/test_portal_copilot_adversarial_eval.py`). Limit: nothing in a page proves the approver is a person rather than an agent driving the browser, so a high-value approval is not proof of presence (G551). A task in a tier that reads maps to a read-only tool and a check never proposes a write (G556); an account task is refused unless the sign-in is bound to the TIN it names, which no identity-provider subject is yet (G557, G565); the public TIN lookup returns public fields only (G558).

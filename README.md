@@ -16,7 +16,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 | [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
 | [Agent Architecture](docs/AGENT_ARCHITECTURE.md) | Supervisor routing, 72 MCP tools across 18 namespaces, 21 guided workflows, and 85-flag registry |
 | [Architecture Decision Records (MADR 4.0)](docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0013`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`, `ADR-0013`), CI supply chain (`ADR-0011`), and storage parity (`ADR-0012`) |
-| [Model Card](docs/MODEL_CARD.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
+| [Model Card](governance/systems/ura-ai-chatbot/model_card.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
 | [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
@@ -402,4 +402,4 @@ Dashboards and datasources are auto-provisioned via `monitoring/grafana/provisio
 - Configure Hugging Face repository at `mpairweLandwind/ura-chatbot`
 - Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment guide
 - Review [docs/MONITORING.md](docs/MONITORING.md) for observability setup
-- Review [docs/MODEL_CARD.md](docs/MODEL_CARD.md) for EU AI Act Article 53 model card
+- Review [governance/systems/ura-ai-chatbot/model_card.md](governance/systems/ura-ai-chatbot/model_card.md) for EU AI Act Article 53 model card

@@ -593,12 +593,12 @@ If a bar fails: report it honestly with the per-scenario failures. Fixing it mea
 
 ### I.1 Documentation (same PRs as the code, per `docs/AGENTS.md`)
 - **ADR** `docs/adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md` (MADR 4.0, like 0006), indexed in `docs/adr/README.md`. Decision: local Qwen3.8-27B-FP8 (or the bake-off winner) as T3 on GPU 7; Sunflower-9B stays T1 + MT; no commercial APIs; rules as data; the figure lock.
-- `docs/MODEL_CARD.md`: both models, the tiers, the sovereign constraint, the evaluation results.
+- `governance/systems/ura-ai-chatbot/model_card.md`: both models, the tiers, the sovereign constraint, the evaluation results.
 - `docs/RAG_ARCHITECTURE.md`: new flags (`reasoner_for_translated_locales`, any others), `SOVEREIGN_MODE`, updated `model_tiering` text, the verified-facts block, the figure lock, the sector demotion.
 - `docs/MODEL_SWAP_GUIDE.md`: how to swap the T3 model (env vars, compose overlay, bake-off script).
 - New runbook `docs/runbooks/reasoning-tier-and-complex-eval.md`: bring-up/down of `vllm-reasoner`, GPU choice, health checks, how to run the bake-off and the complex-scenario eval, the held-out rule, rollback (`FLAG_MODEL_TIERING=false`).
 - `docs/GAPS_AND_AGENTIC_ROADMAP.md`: add G213+ entries (the last id is G212) for D1–D8, each linked to its PR, plus follow-ups: housing-rule interpretation review, the BoU discount rate source, single-model consolidation (contender C), heads still without tools, human review of the held-out expectations.
-- `governance/ai_risk_manifest.yaml` and the AIBOM / model inventory (search `grep -rln "Sunflower-Qwen3.5-9B" governance docs`): add the reasoner model with licence, sha and hosting = local.
+- `governance/systems/ura-ai-chatbot/manifest.yaml` and the AIBOM / model inventory (search `grep -rln "Sunflower-Qwen3.5-9B" governance docs`): add the reasoner model with licence, sha and hosting = local.
 - `.env.example`, `configs/prototype.env`: new env vars (`REASONER_*`, `SOVEREIGN_MODE`, `EVAL_DEBUG` documented as dev-only, `LLM_MAX_TOKENS=768`).
 - `evals/AGENTS.md` and `evals/README.md`: add the complex-scenario set row.
 

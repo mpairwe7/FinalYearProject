@@ -44,7 +44,7 @@ def test_the_manifest_evidence_all_exists():
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    refs = module._verified_by_refs(PROJECT_ROOT / "governance" / "ai_risk_manifest.yaml")
+    refs = module._verified_by_refs(PROJECT_ROOT / "governance" / "systems" / "ura-ai-chatbot" / "manifest.yaml")
     assert refs, "the manifest names no verified_by evidence"
     problems = [(control, ref, module._missing_evidence(ref)) for control, ref in refs]
     assert [p for p in problems if p[2]] == []

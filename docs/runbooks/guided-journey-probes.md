@@ -162,7 +162,7 @@ journey row can contain collected answers until conversation retention expires;
 it is then reduced to flow, status and step metadata. The applicable lawful
 basis for guided service state and aggregate measurement remains a privacy
 governance decision, documented in
-[`PRIVACY_COMPLIANCE_306.md`](../compliance/PRIVACY_COMPLIANCE_306.md).
+[`PRIVACY_COMPLIANCE_306.md`](../../governance/systems/ura-ai-chatbot/privacy_controls.md).
 
 ## Crisis lines
 

@@ -1086,5 +1086,5 @@ See [docs/MONITORING.md](MONITORING.md).
 5. Review [Model Swap Guide](MODEL_SWAP_GUIDE.md) for LLM/embedding/reranker alternatives
 6. Configure GitHub secrets for deployment
 7. Set up the Hugging Face Docker Space (`App/deploy/hf-space/`)
-8. Review [Model Card](MODEL_CARD.md) for EU AI Act compliance
+8. Review [Model Card](../governance/systems/ura-ai-chatbot/model_card.md) for EU AI Act compliance
 9. Review [PIA](capstone/PIA.md) for NDPA 2019 privacy assessment

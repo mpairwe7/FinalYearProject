@@ -40,4 +40,4 @@ The user question is fenced so it cannot forge a passage tag. Verified calculato
 
 ## Confirmation
 
-Verified by `tests/agents/test_spotlight_fence.py`, including a long-tab delimiter case. Threat T46 and ASI01 in `governance/ai_risk_manifest.yaml` cite the same fence.
+Verified by `tests/agents/test_spotlight_fence.py`, including a long-tab delimiter case. Threat T46 and ASI01 in `governance/systems/ura-ai-chatbot/manifest.yaml` cite the same fence.

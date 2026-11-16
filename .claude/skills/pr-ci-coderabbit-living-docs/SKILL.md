@@ -18,7 +18,7 @@ Apply this workflow on **every** code, configuration, model, feature-flag, route
 2. **MADR 4.0 Architectural Decision Records (`docs/adr/`)**:
    - Every architectural, model-routing, security, or failover decision must include `## Context and Problem Statement`, `## Decision Outcome`, `## Consequences`, and `## Confirmation`, and be indexed in `docs/adr/README.md`.
 3. **AI Governance, Model Cards & AIBOM (ISO/IEC 42001 Clause 7.5, NIST AI RMF `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, CycloneDX 1.6)**:
-   - Update `docs/MODEL_CARD.md` and `governance/ai_risk_manifest.yaml` (`aibom_inventory` + `verified_by` pytest pointers) whenever primary or fallback LLM, ASR, TTS, or MT models change.
+   - Update `governance/systems/ura-ai-chatbot/model_card.md` and `governance/systems/ura-ai-chatbot/manifest.yaml` (`aibom_inventory` + `verified_by` pytest pointers) whenever primary or fallback LLM, ASR, TTS, or MT models change.
 4. **Automated Docs-as-Code Verification**:
    ```bash
    PYTHONPATH=App/backend python3 -m app.freshness --check
