@@ -380,7 +380,7 @@ _FX_AMOUNT_RE = re.compile(
 _EXCHANGE_RATE_RE = re.compile(
     r"(?:\b(?:exchange\s+rate|fx\s+rate|rate\s+of\s+exchange|bou\s+(?:mid[-\s]?)?rate|mid[-\s]?rate|converted\s+at|at\s+a\s+rate\s+of)\b[^0-9]{0,25}?"
     r"(?:ugx|shs\.?)?\s*(?P<rate1>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,5}(?:\.\d+)?))"
-    r"|(?:\b1\s*(?:usd|eur|gbp|\$|dollar|euro|pound)\s*(?:=|is|at|equals)\s*(?:ugx|shs\.?)?\s*(?P<rate2>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,5}(?:\.\d+)?))"
+    r"|(?:\b1\s*(?:usd|eur|gbp|\$|dollar|euro|pound)\s*(?:=|is|at|equals)\s*(?:(?:ugx|shs\.?)\s*)?(?P<rate2>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,5}(?:\.\d+)?))"
     r"|(?:(?:ugx|shs\.?)\s*(?P<rate3>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,5}(?:\.\d+)?)\s*(?:per|/)\s*(?:usd|eur|gbp|dollar|euro|pound))",
     re.IGNORECASE,
 )

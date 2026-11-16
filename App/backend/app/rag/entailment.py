@@ -18,6 +18,8 @@ import os
 import re
 from typing import Any
 
+from ..linear_text import strip_spans
+
 logger = logging.getLogger(__name__)
 
 # e.g. "cross-encoder/nli-deberta-v3-small"; empty → deterministic numeric only.
@@ -202,6 +204,74 @@ _ACHOLI_PCT_WORDS = [
     ("miya", "100"),
 ]
 
+_DOT_GAP_RE = re.compile(r"\.\s+")
+_DIGIT_RUN_RE = re.compile(r"\d+")
+_SPACE_RUN_END_RE = re.compile(r"\s*")
+
+
+def _join_decimal_gaps(text: str) -> str:
+    """``re.sub(r"(\\d+)\\.\\s+(\\d+)", r"\\1.\\2", text)`` in one pass: "1. 5" becomes "1.5".
+
+    A match's second number cannot start the next one, so "1. 2. 3" becomes "1.2. 3".
+    """
+    out: list[str] = []
+    kept = taken = 0
+    n = len(text)
+    for gap in _DOT_GAP_RE.finditer(text):
+        start, end = gap.span()
+        if start - 1 >= taken and text[start - 1].isdecimal() and end < n and text[end].isdecimal():
+            out += (text[kept:start], ".")
+            kept = end
+            taken = _DIGIT_RUN_RE.match(text, end).end()
+    out.append(text[kept:])
+    return "".join(out)
+
+
+def _amount_figures(text: str) -> list[tuple[str, str | None]]:
+    """``(digits, suffix)`` of each ``_AMOUNT_RE.finditer(text)`` match.
+
+    Unanchored, the pattern restarts inside every digit run and rescans it. A match can only
+    begin at a digit run's first digit, at the whitespace before it, or at a currency word that
+    ends where that whitespace begins; the anchored pattern runs there, on a slice that ends
+    one character past the furthest an amount could reach.
+    """
+    found: list[tuple[str, str | None]] = []
+    n = len(text)
+    taken = previous_run_end = 0
+    for run in _DIGIT_RUN_RE.finditer(text):
+        # A currency word holds no digit, so it lies after the previous run: each window is new text.
+        floor = max(taken, previous_run_end)
+        previous_run_end = run.end()
+        if run.start() < taken:
+            continue
+        reach = run.end()
+        if run.end() - run.start() <= 3:  # "1,500,000" and "1 500 000"
+            while reach + 3 < n and (text[reach] == "," or text[reach].isspace()) and text[reach + 1 : reach + 4].isdecimal():
+                reach += 4
+        if run.end() + 1 < n and text[run.end()] == "." and text[run.end() + 1].isdecimal():
+            decimal_end = run.end() + 1
+            while decimal_end < n and text[decimal_end].isdecimal():
+                decimal_end += 1
+            reach = max(reach, decimal_end)
+        while reach < n and text[reach].isspace():
+            reach += 1
+        while reach < n and text[reach].isalpha():  # the suffix word
+            reach += 1
+        ws = run.start()
+        while ws > taken and text[ws - 1].isspace():
+            ws -= 1
+        starts = [ws]
+        head = _CURRENCY_BEFORE_RE.search(text, floor, ws) if ws > floor else None
+        if head is not None:
+            starts.insert(0, head.start())
+        for at in starts:
+            # One character past the reach decides the closing \b.
+            if (match := _AMOUNT_AT_RE.match(text[at : reach + 1])) is not None:
+                found.append((match.group(1), match.group(2)))
+                taken = at + match.end()
+                break
+    return found
+
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
 _AMOUNT_RE = re.compile(
@@ -210,6 +280,9 @@ _AMOUNT_RE = re.compile(
     r"(k|m|bn|b|thousand|million|billion|mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)?\b",
     re.IGNORECASE,
 )
+#: The optional currency of ``_AMOUNT_RE``, ending where the search window ends.
+_AMOUNT_AT_RE = re.compile(r"\A(?:" + _AMOUNT_RE.pattern + ")", re.IGNORECASE)
+_CURRENCY_BEFORE_RE = re.compile(_AMOUNT_RE.pattern.split(")?", 1)[0] + r")\Z", re.IGNORECASE)
 _AMOUNT_SUFFIX = {
     "k": 1_000,
     "thousand": 1_000,
@@ -316,7 +389,7 @@ _model_loaded = False
 def percentages(text: str) -> set[str]:
     """Numeric values stated as percentages, e.g. {"18"} from "18%" / "asilimia 18"."""
     results: set[str] = set()
-    lowered = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", (text or "").lower())
+    lowered = _join_decimal_gaps((text or "").lower())
     for m in _PCT_RE.finditer(lowered):
         val = m.group(1) or m.group(2)
         if val:
@@ -363,8 +436,8 @@ def canonical_amounts(text: str) -> set[float]:
     (Luganda obukadde, Swahili milioni) were dropped, falsely triggering
     numerical mismatch warnings on correct translations.
     """
-    clean_text = re.sub(r"<[^>]+>", " ", text or "")
-    clean_text = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", clean_text)
+    clean_text = strip_spans(text or "", "<", ">", " ", min_inner=1)
+    clean_text = _join_decimal_gaps(clean_text)
     lowered = clean_text.lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
@@ -401,7 +474,7 @@ def canonical_amounts(text: str) -> set[float]:
     remainder = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", remainder, flags=re.IGNORECASE)
     # Strip common non-numeric idioms containing cardinal/ordinal words (e.g. "third party", "mtu wa tatu", "pande mbili")
     remainder = re.sub(r"\b(?:mtu|watu|upande|pande|chama|mtu\s+yeyote)\s+wa\s+tatu\b", " ", remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r"\b(?:pande|upande|sehemu)\s+(?:za|ya|wa)?\s*mbili\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:pande|upande|sehemu)\s+(?:(?:za|ya|wa)\s*)?mbili\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\b(?:njuyi|enjuyi|empande)\s+(?:zombi|z'ebbiri)\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\bthird[-\s]part(?:y|ies)\b", " ", remainder, flags=re.IGNORECASE)
     # Strip legal references (e.g. Cap 340, Cap. 343, Section 118, Article VII) so statute chapters are not parsed as monetary rules
@@ -413,13 +486,13 @@ def canonical_amounts(text: str) -> set[float]:
     )
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
-    for match in _AMOUNT_RE.finditer(remainder):
-        digits = match.group(1).replace(",", "").replace(" ", "")
+    for figure, suffix in _amount_figures(remainder):
+        digits = figure.replace(",", "").replace(" ", "")
         try:
             value = float(digits)
         except ValueError:
             continue
-        value *= _AMOUNT_SUFFIX.get((match.group(2) or "").lower(), 1)
+        value *= _AMOUNT_SUFFIX.get((suffix or "").lower(), 1)
         amounts.add(value)
 
     # 3. Small cardinal integers across English, Luganda, and Swahili
