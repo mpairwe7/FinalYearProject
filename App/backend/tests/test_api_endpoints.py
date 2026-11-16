@@ -31,6 +31,7 @@ from app.auth.jwt_auth import make_dev_token  # noqa: E402
 from app.config.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
 from app import main as main_mod  # noqa: E402
+from app.api import deps as api_deps, documents as documents_api  # noqa: E402
 
 
 def setUpModule() -> None:
@@ -309,7 +310,7 @@ class AdminEndpoints(_Base):
         flags.set("auth_required", False)
         c = _client()
         for key in ("", "secret-ops-key"):
-            with mock.patch.object(main_mod, "_INDEX_API_KEY", key):
+            with mock.patch.object(api_deps, "INDEX_API_KEY", key):
                 for path in ("/v1/admin/tickets", "/v1/admin/flags", "/v1/admin/calls"):
                     r = c.get(path)
                     self.assertEqual(r.status_code, 401, f"{path} key={bool(key)}: {r.text}")
@@ -435,7 +436,7 @@ class OpsKeyEndpoints(_Base):
 
     def test_ops_endpoints_reject_when_key_configured(self):
         c = _client()
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"):
+        with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"):
             for path in ("/v1/index", "/v1/evaluate", "/v1/export/artifacts"):
                 self.assertEqual(c.post(path).status_code, 403, f"{path} no key")
                 self.assertEqual(
@@ -444,14 +445,14 @@ class OpsKeyEndpoints(_Base):
 
     def test_ops_endpoint_503_when_key_unset(self):
         c = _client()
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", ""):
+        with mock.patch.object(api_deps, "INDEX_API_KEY", ""):
             self.assertEqual(c.post("/v1/index").status_code, 503)
 
     def test_index_runs_the_staged_lifecycle_never_an_in_place_rebuild(self):
         """G286: it used to recreate the live collection from FAQ rows only."""
         c = _client()
         stats = {"reindexed": True, "alias": "ura_knowledge_base", "collection": "ura_knowledge_base__build_x"}
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+        with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"), mock.patch(
             "app.vectorstore.index_lifecycle.rebuild_if_needed", return_value=dict(stats)
         ) as rebuild, mock.patch("app.ingestion.indexer.build_index") as in_place:
             r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
@@ -466,7 +467,7 @@ class OpsKeyEndpoints(_Base):
         from app.vectorstore.index_lifecycle import IndexLifecycleError
 
         c = _client()
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+        with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"), mock.patch(
             "app.vectorstore.index_lifecycle.rebuild_if_needed",
             side_effect=IndexLifecycleError("'ura_knowledge_base' is a physical legacy collection, not an alias."),
         ), mock.patch("app.freshness.write_lifecycle_status") as status:
@@ -479,7 +480,7 @@ class OpsKeyEndpoints(_Base):
     def test_index_failure_after_promotion_still_rebinds_the_retriever(self):
         """Bookkeeping after the alias swap re-raises; the process must not keep the old binding."""
         c = _client()
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+        with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"), mock.patch(
             "app.vectorstore.index_lifecycle.rebuild_if_needed", side_effect=OSError("read-only file system")
         ), mock.patch("app.freshness.write_lifecycle_status") as status:
             r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
@@ -490,7 +491,7 @@ class OpsKeyEndpoints(_Base):
     def test_a_tombstone_retires_cached_answers_on_this_replica_at_once(self):
         """Without this, a withdrawn passage's cached answer lived out the 60 s memo (G277)."""
         c = _client()
-        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch.object(
+        with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"), mock.patch.object(
             db, "add_corpus_tombstone", return_value={"id": "tomb_x", "source_uri": "old.pdf"}
         ), mock.patch.object(db, "delete_corpus_tombstone", return_value=True), mock.patch(
             "app.rag.cache.reset_index_stamp"
@@ -502,14 +503,14 @@ class OpsKeyEndpoints(_Base):
 
     def test_a_second_rebuild_is_refused_while_one_runs(self):
         c = _client()
-        self.assertTrue(main_mod._INDEX_REBUILD_LOCK.acquire(blocking=False))
+        self.assertTrue(documents_api._INDEX_REBUILD_LOCK.acquire(blocking=False))
         try:
-            with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+            with mock.patch.object(api_deps, "INDEX_API_KEY", "secret-ops-key"), mock.patch(
                 "app.vectorstore.index_lifecycle.rebuild_if_needed"
             ) as rebuild:
                 r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
         finally:
-            main_mod._INDEX_REBUILD_LOCK.release()
+            documents_api._INDEX_REBUILD_LOCK.release()
         self.assertEqual(r.status_code, 409, r.text)
         rebuild.assert_not_called()
 
@@ -730,7 +731,7 @@ class MeEndpoints(_Base):
 
         challenge = 'Bearer error="invalid_token"'
         with mock.patch.object(
-            main_mod,
+            api_deps,
             "current_user",
             side_effect=HTTPException(status_code=401, detail="x", headers={"WWW-Authenticate": challenge}),
         ):

@@ -178,7 +178,7 @@ class ChatReadyRefreshTests(unittest.TestCase):
         # The status that /ready reports and the status the gauge is set from
         # are one answer, not two probes that could disagree.
         with _env(URA_PROCESS_ROLE="chat"), patch.object(httpx, "get", return_value=_ready_response("ready")) as get:
-            from app.main import _receptionist_status
+            from app.api.health import _receptionist_status
 
             self.assertEqual(_receptionist_status(), "ready")
         get.assert_called_once()
@@ -186,7 +186,7 @@ class ChatReadyRefreshTests(unittest.TestCase):
     def test_ready_in_the_calls_role_leaves_the_gauge_alone(self) -> None:
         for role in ("calls", ""):
             with self.subTest(role=role), _env(URA_PROCESS_ROLE=role), patch.object(httpx, "get") as get:
-                from app.main import _receptionist_status
+                from app.api.health import _receptionist_status
 
                 with patch("app.receptionist.status", return_value="off"):
                     self.assertEqual(_receptionist_status(), "off")

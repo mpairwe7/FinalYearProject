@@ -161,9 +161,9 @@ class AnswerLanguageDirectiveTest(unittest.TestCase):
         self.assertIn("Write the answer in lg.", content)
 
     def test_the_system_prompt_no_longer_decides_the_language_by_itself(self):
-        from app.rag import generator
+        from app.rag import prompt_builder
 
-        self.assertNotIn("respond in the same language", generator.SYSTEM_PROMPT.lower())
+        self.assertNotIn("respond in the same language", prompt_builder.SYSTEM_PROMPT.lower())
         self.assertIn("## Answer language", self._language_section("en", True))
 
 

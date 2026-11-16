@@ -61,7 +61,7 @@ def _index_corpus_hash() -> str:
 
 def _prompt_template_sha256() -> str:
     try:
-        from ..rag.generator import SYSTEM_PROMPT
+        from ..rag.prompt_builder import SYSTEM_PROMPT
     except Exception:
         return ""
     return _sha256(SYSTEM_PROMPT)

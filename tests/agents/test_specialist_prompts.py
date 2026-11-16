@@ -17,7 +17,8 @@ from __future__ import annotations
 import pytest
 
 from app.agents.prompts import specialist_prompt, specialist_roles
-from app.rag.generator import SYSTEM_PROMPT, _build_tool_messages
+from app.rag.generator import _build_tool_messages
+from app.rag.prompt_builder import SYSTEM_PROMPT
 
 
 def _system_for(role: str) -> str:

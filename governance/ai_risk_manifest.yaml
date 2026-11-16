@@ -203,7 +203,7 @@ owasp_llm:
     name: "System Prompt Leakage"
     status: "mitigated"
     evidence: "App/backend/app/guardrails.py:InputGuard + OutputGuard.check_prompt_leakage()"
-    controls: "Blocks reveal-prompt and extraction probes; scrubs signature phrases that a test keeps in sync with the live prompts, and flags a reply sharing two word 8-grams with generator.SYSTEM_PROMPT outside its sanctioned refusal/contact text (G465, ADR-0029). A system prompt IS used (rag/generator.py) — confidentiality of that prompt is not treated as a security boundary (OWASP LLM08:2026 Hidden Context)."
+    controls: "Blocks reveal-prompt and extraction probes; scrubs signature phrases that a test keeps in sync with the live prompts, and flags a reply sharing two word 8-grams with prompt_builder.SYSTEM_PROMPT outside its sanctioned refusal/contact text (G465, ADR-0029). A system prompt IS used (rag/generator.py) — confidentiality of that prompt is not treated as a security boundary (OWASP LLM08:2026 Hidden Context)."
     verified_by:
       - "tests/agents/test_ai_security_layer_2026_11.py"
       - "App/backend/tests/test_output_guard.py"

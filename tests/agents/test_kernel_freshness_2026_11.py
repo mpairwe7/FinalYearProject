@@ -209,5 +209,5 @@ def test_the_kernel_state_is_reported_for_readiness(monkeypatch: pytest.MonkeyPa
 def test_ready_includes_the_kernel_state() -> None:
     from pathlib import Path
 
-    main = (Path(precedence.__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
-    assert "readiness_capabilities()" in main
+    health = (Path(precedence.__file__).resolve().parents[1] / "api" / "health.py").read_text(encoding="utf-8")
+    assert "readiness_capabilities()" in health

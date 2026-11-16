@@ -21,10 +21,10 @@ from __future__ import annotations
 import re
 
 import pytest
-from app.rag import generator, pipeline
+from app.rag import generator, pipeline, prompt_builder
 from app.agents import prompts
 
-_CLOUD = generator.CLOUD_SYSTEM_PROMPT
+_CLOUD = prompt_builder.CLOUD_SYSTEM_PROMPT
 
 
 # --------------------------------------------------------------------------- G475
@@ -59,7 +59,7 @@ def test_the_cloud_prompt_carries_every_guarding_rule(rule: str, evidence: str) 
 
 
 def test_the_refusal_wording_matches_the_local_prompt() -> None:
-    refusal = re.search(r'Respond: "([^"]+)"', generator.SYSTEM_PROMPT.replace("\\\n", ""))
+    refusal = re.search(r'Respond: "([^"]+)"', prompt_builder.SYSTEM_PROMPT.replace("\\\n", ""))
     local = " ".join(refusal.group(1).split()) if refusal else ""
 
     assert local
@@ -68,7 +68,7 @@ def test_the_refusal_wording_matches_the_local_prompt() -> None:
 
 def test_the_cloud_prompt_is_compact() -> None:
     """The smallest set of high-signal instructions: under 40% of the local prompt."""
-    assert len(_CLOUD) < 0.4 * len(generator.SYSTEM_PROMPT)
+    assert len(_CLOUD) < 0.4 * len(prompt_builder.SYSTEM_PROMPT)
     assert len(_CLOUD) < 2000
 
 
@@ -127,7 +127,7 @@ _FY_LITERAL = re.compile(r"FY\s?20\d\d")
 
 
 def test_no_prompt_fragment_names_a_fiscal_year_literal() -> None:
-    fragments = [generator.SYSTEM_PROMPT, _CLOUD, prompts._GOVERNANCE_V3_PROMPT, *prompts._SPECIALIST_PROMPTS.values()]
+    fragments = [prompt_builder.SYSTEM_PROMPT, _CLOUD, prompts._GOVERNANCE_V3_PROMPT, *prompts._SPECIALIST_PROMPTS.values()]
 
     assert [f[:60] for f in fragments if _FY_LITERAL.search(f)] == []
 

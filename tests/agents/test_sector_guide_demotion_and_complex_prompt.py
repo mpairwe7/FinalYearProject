@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from app.rag.generator import COMPLEX_ANSWER_CONTRACT, _build_messages, _build_tool_messages
+from app.rag.generator import _build_messages, _build_tool_messages
+from app.rag.prompt_builder import COMPLEX_ANSWER_CONTRACT
 from app.providers.routing import ENDPOINTS, ModelTier
 from app.rag.query import decompose_query, extract_retrieval_preferences
 from app.rag.retriever import (

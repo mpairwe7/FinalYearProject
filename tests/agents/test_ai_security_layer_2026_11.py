@@ -37,7 +37,7 @@ from app.guardrails import (
     scan_external_tool_text,
     scan_retrieved_text,
 )
-from app.rag.generator import SYSTEM_PROMPT
+from app.rag.prompt_builder import SYSTEM_PROMPT
 
 # --------------------------------------------------------------------------- G460
 

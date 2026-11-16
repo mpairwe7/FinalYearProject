@@ -13,7 +13,8 @@ from typing import Any
 import pytest
 from app import portal_copilot as pc
 from app.config.flags import flags
-from app.main import app, limiter
+from app.main import app
+from app.middleware.rate_limiter import limiter
 from app.rag.pipeline import ChatModel
 from app.tools.portal_navigator_data import selector_targets_a_credential
 from fastapi.testclient import TestClient

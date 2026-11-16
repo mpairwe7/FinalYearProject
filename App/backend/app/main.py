@@ -7,7 +7,6 @@ and Prometheus-compatible metrics (2026 observability standards).
 
 import asyncio
 import contextlib
-import datetime
 import hashlib
 import hmac
 import json
@@ -24,13 +23,10 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
-from fastapi.exception_handlers import http_exception_handler as _fastapi_http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi.responses import JSONResponse, StreamingResponse
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
-from sse_starlette.sse import EventSourceResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket
@@ -49,7 +45,7 @@ from pydantic import BaseModel, Field, field_validator
 from .db import database as db
 from . import documents
 from . import officer_hours
-from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
+from .analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .security_events import record_http_security_event
 from .text_signals import ESCALATION_NOT_QUEUED_REPLY
 from .tracing import current_traceresponse
@@ -80,26 +76,19 @@ from .api.models import (
     CFRelayEmbedRequest,
     CFRelayVectorizeQueryRequest,
     ChatRatingRequest,
-    ChatRequest,
-    ChatResponse,
-    ChatTitleRequest,
-    ChatTitleResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
-    DocumentAnalysisResponse,
     EndChatRequest,
     EscalationDetailResponse,
     EscalationRequest,
     EscalationResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
-    FAQResponse,
     FeedbackCommentRequest,
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummary,
-    HealthResponse,
     JourneyFunnelResponse,
     OfficerChatThreadResponse,
     OfficerHoursStatus,
@@ -113,7 +102,6 @@ from .api.models import (
     SpeechHealthResponse,
     SynthesizeRequest,
     SynthesizeResponse,
-    TagListResponse,
     TaxpayerReplyRequest,
     TranscribeResponse,
     TranslateRequest,
@@ -122,7 +110,6 @@ from .api.models import (
     VoiceVisionChatResponse,
 )
 from .rag.query import gate_locale
-from .rag.retriever import active_retrieval_mode
 from .seed_prototype import seed as _seed_prototype
 from .seed_prototype import should_seed as _should_seed
 from .rag.pipeline import ChatModel, localize_reply
@@ -139,7 +126,6 @@ from .workflows.registry import WorkflowRegistry
 from .middleware.logger import REQUEST_ID, install_logging
 from .process_role import (
     ProcessRoleMiddleware,
-    calls_process_status,
     process_role,
     refresh_call_process_gauge,
 )
@@ -1130,13 +1116,6 @@ async def lifespan(app: FastAPI):
         logger.info("ChatModel shut down.")
 
 
-# ---------------------------------------------------------------------------
-# Rate limiter (2026 production: Redis-backed when SLOWAPI_STORAGE_URI set)
-# ---------------------------------------------------------------------------
-# Set SLOWAPI_STORAGE_URI=redis://redis:6379 for multi-worker / multi-replica
-# deploys.  When unset, the limiter uses an in-process memory bucket — this
-# is fine for a single-worker dev server but will NOT correctly enforce a
-# shared limit across workers or Kubernetes replicas.
 # What a taxpayer is told after asking for a person. English source text —
 # localize_reply renders it into their language on the way out, the same path
 # every chat answer takes, so these get the figure and collapse guards too.
@@ -1171,32 +1150,27 @@ _ESCALATION_REUSED_OFF_DUTY_MESSAGE = (
 # One sentence for every route into the queue that cannot reach it (G627).
 _ESCALATION_QUEUE_OFF_MESSAGE = ESCALATION_NOT_QUEUED_REPLY
 
-_RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+from .api.deps import (
+    experiment_log_fields,
+    get_model,
+    get_speech_model,
+    require_admin_access,
+    require_ops_key,
+)
+from .middleware.error_handler import http_exception_with_challenge
+from .middleware.rate_limiter import CHAT_POLL_RATE_LIMIT, EXPORT_RATE_LIMIT, RATE_LIMIT, limiter
+from .api import documents as documents_api, health as health_api, rag as rag_api
+from .config.settings import API_DESCRIPTION, API_TITLE, API_VERSION
+
 #: An active guided journey untouched for this long counts as abandoned in the
 #: analytics journey funnel (GET /v1/analytics/journeys).
 _JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
-_EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
-_DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
-#: The taxpayer's chat polls its officer thread every few seconds (more often
-#: than a person types), so the poll has its own, higher ceiling.
-_CHAT_POLL_RATE_LIMIT = os.getenv("CHAT_POLL_RATE_LIMIT", "120/minute")
-_SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
-_DOCUMENT_MULTIPART_OVERHEAD_BYTES = int(
-    os.getenv("DOCUMENT_MULTIPART_OVERHEAD_BYTES", str(512 * 1024))
-)
-_DOCUMENT_UPLOAD_CHUNK_BYTES = 64 * 1024
 
-_limiter_kwargs: dict = {"key_func": get_remote_address, "default_limits": []}
-if _SLOWAPI_STORAGE_URI:
-    _limiter_kwargs["storage_uri"] = _SLOWAPI_STORAGE_URI
-    logger.info("Rate limiter using Redis storage: %s", _SLOWAPI_STORAGE_URI.split("@")[-1])
-
-limiter = Limiter(**_limiter_kwargs)
 
 app = FastAPI(
-    title="URA Chatbot API",
-    version="1.2.0",
-    description="AI-powered customer-service chatbot for the Uganda Revenue Authority",
+    title=API_TITLE,
+    version=API_VERSION,
+    description=API_DESCRIPTION,
     lifespan=lifespan,
 )
 app.state.limiter = limiter
@@ -1216,82 +1190,7 @@ except Exception:
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-async def _http_exception_with_challenge(request: Request, exc: StarletteHTTPException):
-    """Give every 401 a ``WWW-Authenticate: Bearer`` challenge (RFC 9110 §15.5.2).
-
-    The API's 401s (no login, a bad or expired token) had none, so a client
-    could not tell which scheme would work. A 401 that names its own challenge
-    keeps it; every other status, and the rest of the response, is FastAPI's
-    default. Any other response that is a 401 (MCP's ``wire.py``) builds its own
-    challenge and does not come through here.
-    """
-    if exc.status_code == 401 and not any(k.lower() == "www-authenticate" for k in (exc.headers or {})):
-        exc = StarletteHTTPException(
-            exc.status_code, detail=exc.detail, headers={**(exc.headers or {}), "WWW-Authenticate": "Bearer"}
-        )
-    return await _fastapi_http_exception_handler(request, exc)
-
-
-app.add_exception_handler(StarletteHTTPException, _http_exception_with_challenge)
-
-
-# ---------------------------------------------------------------------------
-# Dependency
-# ---------------------------------------------------------------------------
-def get_model(request: Request) -> ChatModel:
-    """Retrieve the ChatModel from app state; 503 if unavailable."""
-    model = getattr(request.app.state, "model", None)
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not initialized")
-    return model
-
-
-def get_speech_model(request: Request) -> SpeechModel:
-    """Retrieve the SpeechModel from app state; 503 if unavailable."""
-    speech = getattr(request.app.state, "speech", None)
-    if speech is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Speech pipeline disabled or failed to initialise (set SPEECH_ENABLED=true)",
-        )
-    return speech
-
-
-def _reject_oversized_document_request(request: Request) -> None:
-    """Fail before multipart parsing when a client provides an oversized body."""
-    raw_length = request.headers.get("content-length")
-    if not raw_length:
-        return
-    try:
-        content_length = int(raw_length)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid Content-Length header") from None
-    if content_length < 0:
-        raise HTTPException(status_code=400, detail="Invalid Content-Length header")
-    max_request_bytes = documents.MAX_FILE_BYTES + _DOCUMENT_MULTIPART_OVERHEAD_BYTES
-    if content_length > max_request_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Request exceeds the {max_request_bytes // (1024 * 1024)} MiB document upload limit",
-        )
-
-
-async def _read_document_upload_bounded(upload: Any) -> bytes:
-    """Read an upload in chunks, enforcing the byte limit before a full copy exists."""
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await upload.read(_DOCUMENT_UPLOAD_CHUNK_BYTES)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > documents.MAX_FILE_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
-            )
-        chunks.append(chunk)
-    return b"".join(chunks)
+app.add_exception_handler(StarletteHTTPException, http_exception_with_challenge)
 
 
 # ---------------------------------------------------------------------------
@@ -1413,116 +1312,6 @@ app.add_middleware(ProcessRoleMiddleware)
 # ---------------------------------------------------------------------------
 
 
-@app.get("/health", tags=["system"])
-@limiter.limit("120/minute")
-def health_liveness(request: Request) -> dict:
-    """Liveness probe for orchestrators (Docker, K8s)."""
-    return {"status": "alive", "version": app.version}
-
-
-@app.get("/ready", response_model=HealthResponse, tags=["system"])
-def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
-    """Readiness probe; returns 503 if model is unavailable.
-
-    Checks both FAQ index AND Qdrant retriever health.
-    """
-    # "hybrid" only when dense vectors are actually in play. A retriever that
-    # fell back to SPARSE-ONLY — no embedder stamp on the collection, or no
-    # sentence-transformers in the image — still had _retriever_ready True, so
-    # this reported "hybrid" while BM25 did all the work. That is the field
-    # operators read to decide whether retrieval is healthy, and on the
-    # deployed Space it was saying yes while dense was off.
-    #
-    # "vector" is its own label, checked BEFORE _sparse_only: the CPU-only
-    # deployments serve a sparse-only Qdrant collection whenever Vectorize is
-    # unavailable, so _sparse_only stays True even while Vectorize is actively
-    # serving dense queries (initialize() keeps that Qdrant state as a fallback
-    # rather than discarding it). Reporting "sparse" there would be the same
-    # false-negative this field was fixed to stop making. "vector" is also
-    # deliberately not folded into "hybrid": Vectorize is dense-only with a
-    # client-side lexical re-score, not Qdrant's reranked dense+BM25 fusion,
-    # and operators reading this field should be able to tell them apart.
-    retrieval_mode = active_retrieval_mode(
-        model._retriever, ready=model._retriever_ready
-    )
-    qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
-    # Optional capabilities report the backend they actually resolved to. Both
-    # of these degrade silently by design — detection drops to a character
-    # heuristic, translation drops to serving English — and both degradations
-    # shipped unnoticed. An operator should not have to ask the assistant a
-    # Luganda question to find out.
-    from .rag import generator
-    from . import sunbird
-    from .rag.query import language_detection_backend
-
-    if sunbird.is_available():
-        trans_cap = "sunbird"
-    elif generator.is_available():
-        trans_cap = "prompted_local"
-    else:
-        trans_cap = "unavailable"
-
-    has_reranker = bool(getattr(getattr(model, "_retriever", None), "_reranker", None))
-    dense_dev = str(getattr(getattr(model, "_retriever", None), "_dense_device", "cpu"))
-
-    capabilities = {
-        "language_detection": language_detection_backend(),
-        "translation": trans_cap,
-        "sunbird_accounts": sunbird.account_summary(),
-        "retrieval": retrieval_mode,
-        "reranker": "active" if has_reranker else "disabled",
-        "dense_device": dense_dev,
-        # The pgvector dense leg beside a sparse-only collection (ADR-0034): its
-        # model and size, "off", or why it is unavailable. An unavailable leg
-        # degrades to BM25 alone, which only this field shows.
-        "local_dense": _local_dense_status(getattr(model, "_retriever", None)),
-        "procedural_memory": "active",
-        # Calls: "off", "ready", or "unavailable: <why>" when the receptionist
-        # is switched on and could not start. The probe itself stays ready:
-        # the chat does not depend on it. In the chat role (G306) the value is
-        # the call process's own, read from its /ready, not this process's.
-        "voice_receptionist": _receptionist_status(),
-    }
-    # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
-    # tables. Never fails the probe.
-    from .kernel.status import readiness_capabilities
-
-    capabilities.update(readiness_capabilities())
-    return HealthResponse(
-        status="ready" if qdrant_healthy else "degraded",
-        version=app.version,
-        model_loaded=True,
-        tags_loaded=len(model._faq_index),
-        retrieval_mode=retrieval_mode,
-        capabilities=capabilities,
-    )
-
-
-def _receptionist_status() -> str:
-    try:
-        if process_role() == "chat":
-            # This process never starts the receptionist; the call process's
-            # own value is the answer (G306). The same answer sets
-            # `receptionist_call_process_up` (G614), so /ready and the gauge
-            # cannot disagree.
-            status = calls_process_status()
-            refresh_call_process_gauge(status)
-            return status
-        from . import receptionist
-
-        return receptionist.status()
-    except Exception:  # noqa: BLE001 - never fails the probe
-        return "unknown"
-
-
-def _local_dense_status(retriever: Any) -> str:
-    status = getattr(retriever, "local_dense_status", None)
-    try:
-        return str(status()) if callable(status) else "off"
-    except Exception:  # noqa: BLE001 - never fails the probe
-        return "unknown"
-
-
 @app.get("/v1/authority/status", tags=["admin"])
 def authority_status(
     _: AuthContext = Depends(require_role("ura_staff", "ura_admin", "ura_auditor")),
@@ -1531,156 +1320,8 @@ def authority_status(
     return get_authority_status()
 
 
-@app.get("/v1/index/freshness", tags=["system"])
-def index_freshness() -> dict[str, Any]:
-    """Last corpus-hash check (G27). Does not re-hash on this request.
-
-    Cron writes the status file: ``python -m app.freshness --check --write-status``.
-    Missing file means the check has not run yet — not that the index is fresh.
-    ``ok`` says the index matches the shipped corpus. ``crawl`` says how old that
-    corpus is against URA's site, and is ``null`` when no manifest shipped.
-    """
-    from .freshness import load_crawl_status, load_status
-
-    status = load_status()
-    crawl = load_crawl_status()
-    if status is None:
-        return {"ok": None, "snapshot_missing": True, "checked_at": None, "crawl": crawl}
-    return {**status, "crawl": crawl}
-
-
-# ---------------------------------------------------------------------------
-# Chat endpoint (with conversation logging)
-# ---------------------------------------------------------------------------
-def _resolve_chat_connectors(body: ChatRequest, ctx: AuthContext) -> tuple[list[str], list[dict[str, str]]]:
-    """The selected services this turn may use, and a notice for each one it may not.
-
-    Nothing outside the caller's current catalog is ever dispatched (fail
-    closed), but an unusable selection no longer fails the turn: a service
-    that stops answering, or that this account may no longer use, is left
-    out and named in ``connector_notices`` so the client can say so and
-    update the chip. It used to answer 403/409, which the client's retry
-    met again, and every later message read "could not reach the URA
-    knowledge base" until the taxpayer found the chip and removed it.
-    """
-    if not body.connector_namespaces:
-        return [], []
-    from .mcp import get_client
-    from .mcp.chat_connectors import resolve_chat_connector_selection
-
-    selection = resolve_chat_connector_selection(
-        get_client(),
-        body.connector_namespaces,
-        user_role=ctx.role,
-        granted_purposes=ctx.user.granted_purposes if ctx.user else [],
-    )
-    for skipped in selection.skipped:
-        metrics.inc("chat_connector_skipped_total", labels={"reason": skipped["reason"]})
-    return selection.usable, selection.skipped
-
-
-@app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
-def chat(
-    body: ChatRequest,
-    request: Request,
-    model: ChatModel = Depends(get_model),
-    ctx: AuthContext = Depends(optional_user),
-) -> ChatResponse:
-    connector_namespaces, connector_notices = _resolve_chat_connectors(body, ctx)
-    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
-    request_id = getattr(request.state, "request_id", None)
-    # The answer's id in the conversation log, returned with it so a rating
-    # names the row it rates (see FeedbackRequest.turn_id).
-    turn_id = uuid.uuid4().hex
-    t0 = time.perf_counter()
-
-    attachments = documents.resolve_attachments(
-        body.attachment_ids, session_id=session_id, user_id=ctx.user_id
-    )
-    result = model.generate(
-        message=body.message,
-        conversation_id=body.conversation_id,
-        top_k=body.top_k,
-        locale=body.locale or "",
-        locale_explicit=body.locale_explicit,
-        session_id=session_id or None,
-        request_id=request_id,
-        user_id=ctx.user_id or None,
-        tenant_id=ctx.tenant_id,
-        user_role=ctx.role,
-        granted_purposes=ctx.user.granted_purposes if ctx.user else [],
-        attachments=attachments or None,
-        connector_namespaces=connector_namespaces,
-        portal_context=body.portal_context.model_dump() if body.portal_context else None,
-        portal_task_submission=body.portal_task_submission,
-        channel="rest",
-    )
-
-    elapsed_ms = (time.perf_counter() - t0) * 1000
-    record_chat_turn(result, elapsed_ms=elapsed_ms, channel="rest")
-
-    # Classify to get topic tag for analytics
-    topic_tag = ""
-    confidence = 0.0
-    try:
-        classify_result = model.classify(body.message, top_k=1)
-        if classify_result["predictions"]:
-            topic_tag = classify_result["predictions"][0]["tag"]
-            confidence = classify_result["predictions"][0]["confidence"]
-    except Exception:
-        logger.warning("Classification failed during chat analytics", exc_info=True)
-        metrics.inc("classification_errors_total")
-
-    # Log conversation with PII redaction (privacy-by-design)
-    try:
-        from .rag.pipeline import ChatModel as _CM
-
-        db.log_conversation(
-            session_id=session_id or None,
-            conversation_id=result.get("conversation_id"),
-            user_id=ctx.user_id or "",
-            user_message=_CM.redact_for_storage(body.message),
-            bot_reply=_CM.redact_for_storage(result["reply"]),
-            sources=json.dumps(result.get("sources", [])),
-            contexts=_CM.contexts_json(result),
-            response_time_ms=round(elapsed_ms, 2),
-            confidence=confidence,
-            topic_tag=topic_tag,
-            tenant_id=ctx.tenant_id or "default",
-            row_id=turn_id,
-            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or "en"),
-            **_CM.english_forms(result, served_reply=str(result.get("reply") or "")),
-        )
-    except Exception:
-        logger.warning("Conversation logging failed", exc_info=True)
-
-    # Durable escalation event for consented users (the counter is in record_chat_turn)
-    if result.get("escalation_required"):
-        if ctx.authenticated and db.has_active_consent(ctx.user_id, "analytics"):
-            try:
-                db.track_event(
-                    "escalation_required",
-                    json.dumps(
-                        {
-                            "reason": result.get("escalation_reason", ""),
-                            "topic_tag": topic_tag,
-                        }
-                    ),
-                    session_id=session_id or None,
-                    user_id=ctx.user_id,
-                )
-            except Exception:
-                logger.debug("Escalation event tracking failed", exc_info=True)
-
-    # With a ticket, whether officers are on duty now and when they are next (G196).
-    # A fresh dict: the result may be the answer cache's own.
-    served = officer_hours.attach_status({**result, "turn_id": turn_id, "connector_notices": connector_notices})
-    return ChatResponse(**served)
-
-
 @app.post("/v1/portal/tasks/execute", response_model=PortalTaskDecisionResponse, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def execute_portal_task_decision(
     body: PortalTaskDecisionRequest,
     request: Request,
@@ -1827,255 +1468,6 @@ def execute_portal_task_decision(
 
 
 # ---------------------------------------------------------------------------
-# SSE streaming chat endpoint (Phase 3)
-# ---------------------------------------------------------------------------
-@app.post("/v1/chat/stream", tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
-async def chat_stream(
-    body: ChatRequest,
-    request: Request,
-    model: ChatModel = Depends(get_model),
-    ctx: AuthContext = Depends(optional_user),
-):
-    """Server-Sent Events streaming chat — tokens arrive progressively.
-
-    Thin adapter around :func:`pipeline.run_chat_turn`.  Maps the
-    transport-agnostic ``(event_type, payload)`` tuples into SSE frames.
-    """
-    from .rag import pipeline as pipeline_module
-
-    connector_namespaces, connector_notices = _resolve_chat_connectors(body, ctx)
-
-    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
-    request_id = getattr(request.state, "request_id", None)
-    attachments = documents.resolve_attachments(
-        body.attachment_ids, session_id=session_id, user_id=ctx.user_id
-    )
-    # Minted before generation: it goes out in the ``metadata`` frame, long
-    # before the turn is logged, so a rating can name the row it rates.
-    turn_id = uuid.uuid4().hex
-
-    async def event_generator():
-        # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
-        # summary emitted just before ``grounding``.  Live tool-call frames
-        # are exclusive to the WS path.
-        from .guardrails import OutputGuard, StreamingDLPFilter, user_stated_identifiers
-
-        agent_trace: list[dict[str, Any]] = []
-        stated_ids = user_stated_identifiers(body.message)
-        dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
-        async for event_type, payload in pipeline_module.run_chat_turn(
-            model,
-            message=body.message,
-            conversation_id=body.conversation_id,
-            top_k=body.top_k,
-            locale=body.locale or "",
-            locale_explicit=body.locale_explicit,
-            session_id=session_id or None,
-            request_id=request_id,
-            user_id=ctx.user_id or None,
-            tenant_id=ctx.tenant_id,
-            channel="sse",
-            should_continue=lambda: _sse_not_disconnected(request),
-            sentence_batching=True,  # SSE keeps historical behaviour
-            user_role=getattr(ctx, "role", "public"),
-            granted_purposes=ctx.user.granted_purposes if ctx.user else [],
-            attachments=attachments or None,
-            connector_namespaces=connector_namespaces,
-            portal_context=body.portal_context.model_dump() if body.portal_context else None,
-            portal_task_submission=body.portal_task_submission,
-        ):
-            if event_type == "_keepalive":
-                yield {
-                    "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
-                }
-                continue
-            if event_type == "_log":
-                await asyncio.to_thread(
-                    _log_stream_conversation,
-                    body,
-                    session_id,
-                    payload,
-                    user_id=ctx.user_id or "",
-                    tenant_id=ctx.tenant_id,
-                    turn_id=turn_id,
-                )
-                continue
-            if event_type.startswith("translation."):
-                # Reply localization is the slow leg of a non-English turn and
-                # the client shows it as its own phase. Not buffered into
-                # agent_trace: it is a presentation cue, not a retrieval step.
-                yield {"event": "phase", "data": event_type}
-                continue
-            if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
-                # Retrieval boundaries go out live, as a name and nothing else.
-                # The client needs them to say what it is doing right now, and
-                # the buffered agent_trace below cannot serve that: it is held
-                # back until just before `grounding`, which is after generation
-                # has already streamed. The payloads still go into that summary
-                # unchanged — this only adds a frame, it does not divert one.
-                if event_type in ("retrieval.started", "retrieval.completed"):
-                    yield {"event": "phase", "data": event_type}
-                # Buffer for the agent_trace summary; do not forward live.
-                event_dict = payload if isinstance(payload, dict) else {"value": payload}
-                safe_trace_fields = {
-                    "name",
-                    "call_id",
-                    "iteration",
-                    "iterations",
-                    "truncated",
-                    "tool_call_count",
-                    "admission",
-                    "ok",
-                    "elapsed_ms",
-                    # Which connector a tool call went to, whether it is
-                    # a simulator, its display name and how the lookup
-                    # ended: a namespace, a label and two enums, no payload.
-                    "connector",
-                    "connector_mode",
-                    "connector_label",
-                    "connector_outcome",
-                }
-                agent_trace.append(
-                    {
-                        "type": event_type,
-                        **{
-                            key: value
-                            for key, value in event_dict.items()
-                            if key in safe_trace_fields
-                        },
-                    }
-                )
-                continue
-            if event_type == "grounding" and agent_trace:
-                yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
-                agent_trace = []
-            if event_type == "metadata":
-                frame = {**payload, "turn_id": turn_id}
-                if connector_notices:
-                    frame["connector_notices"] = connector_notices
-                yield {"event": event_type, "data": json.dumps(frame)}
-            elif event_type == "grounding":
-                yield {"event": event_type, "data": json.dumps(payload)}
-            elif event_type == "error":
-                yield {"event": "error", "data": payload.get("message", "Internal server error")}
-            elif event_type == "token":
-                chunk = payload if isinstance(payload, str) else ""
-                sanitized_chunk = dlp_filter.process_chunk(chunk)
-                if sanitized_chunk:
-                    yield {"event": "token", "data": sanitized_chunk}
-            elif event_type == "done":
-                trailing = dlp_filter.flush()
-                if trailing:
-                    yield {"event": "token", "data": trailing}
-                yield {"event": "done", "data": payload if isinstance(payload, str) else ""}
-            elif event_type == "revision":
-                dlp_filter.flush()
-                sanitized_rev = OutputGuard.redact_pii(payload if isinstance(payload, str) else "", allowed_values=stated_ids)
-                yield {"event": "revision", "data": sanitized_rev}
-            else:
-                yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}
-
-        # Flush trailing trace (e.g. if grounding was skipped).
-        if agent_trace:
-            yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
-
-    return EventSourceResponse(
-        event_generator(),
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-async def _sse_not_disconnected(request: Request) -> bool:
-    """Adapter for ``run_chat_turn.should_continue`` over Starlette HTTP."""
-    return not (await request.is_disconnected())
-
-
-def _experiment_log_fields(user_id: str = "", locale: str = "") -> dict[str, str]:
-    """Flag variants + locale persisted on each turn (G26)."""
-    from .config.flags import flags
-
-    return flags.experiment_log_fields(subject=user_id or None, locale=locale)
-
-
-def _log_stream_conversation(
-    body: ChatRequest,
-    session_id: str,
-    log_payload: dict[str, Any],
-    user_id: str = "",
-    tenant_id: str = "default",
-    turn_id: str | None = None,
-) -> None:
-    """Mirror the old SSE ``finally`` block — log to analytics DB.
-
-    Turn metrics and the audit row are recorded by ``pipeline.run_chat_turn``
-    itself, for every streaming transport alike.
-    """
-    from .rag.pipeline import ChatModel as _CM
-
-    result = log_payload.get("result") or {}
-    full_reply = log_payload.get("full_reply", "")
-    elapsed_ms = log_payload.get("elapsed_ms", 0.0)
-
-    try:
-        db.log_conversation(
-            session_id=session_id or None,
-            conversation_id=result.get("conversation_id"),
-            user_message=_CM.redact_for_storage(body.message),
-            bot_reply=_CM.redact_for_storage(full_reply),
-            sources=json.dumps(result.get("sources", []) if result else []),
-            contexts=_CM.contexts_json(result),
-            response_time_ms=round(elapsed_ms, 2),
-            user_id=user_id,
-            tenant_id=tenant_id or "default",
-            row_id=turn_id,
-            **_experiment_log_fields(user_id, result.get("locale") or body.locale or "en"),
-            **_CM.english_forms(
-                result,
-                served_reply=full_reply,
-                english_reply=str(log_payload.get("english_reply") or ""),
-            ),
-        )
-    except Exception:
-        logger.warning("Stream conversation logging failed", exc_info=True)
-
-
-@app.post("/v1/chat/title", response_model=ChatTitleResponse, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
-async def chat_title(
-    request: Request,
-    body: ChatTitleRequest,
-    _ctx: AuthContext = Depends(optional_user),
-) -> ChatTitleResponse:
-    """A few-word summary title for a conversation, for the chat sidebar.
-
-    The client asks once per conversation, after the first answer lands — the
-    way ChatGPT, Claude and Gemini name a chat. A null title means no usable
-    one came back; the client keeps the provisional title it already shows.
-    """
-    from .chat_title import generate_title
-    from .guard_friction import principal_key
-
-    user_text = next(message.content for message in body.messages if message.role == "user")
-    assistant_text = next((message.content for message in body.messages if message.role == "assistant"), "")
-    # No session or conversation reaches this route, so an anonymous caller is
-    # keyed on the client address for strike friction (G464), hashed and in memory only.
-    principal = principal_key(
-        user_id=_ctx.user_id if _ctx.authenticated else None,
-        tenant_id=_ctx.tenant_id,
-        client_address=request.client.host if request.client else None,
-    )
-    title, source = await asyncio.to_thread(
-        generate_title, user_text, assistant_text, gate_locale(body.locale), principal=principal
-    )
-    metrics.inc("chat_title_total", labels={"source": source})
-    return ChatTitleResponse(title=title, source=source)
-
-
-# ---------------------------------------------------------------------------
 # Speech endpoints (2026 — ASR / TTS / MT)
 # ---------------------------------------------------------------------------
 # Audio in/out uses raw bytes to avoid the base64 tax on the fast path.
@@ -2100,7 +1492,7 @@ def _declared_raw_pcm(request: Request, audio_bytes: bytes, sample_rate: int) ->
 
 
 @app.post("/v1/asr", response_model=TranscribeResponse, tags=["speech"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def transcribe_audio(
     request: Request,
     speech: SpeechModel = Depends(get_speech_model),
@@ -2179,7 +1571,7 @@ async def transcribe_audio(
 
 
 @app.post("/v1/tts/stream", tags=["speech"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def synthesize_audio_stream(
     request: Request,
     body: SynthesizeRequest,
@@ -2241,7 +1633,7 @@ async def synthesize_audio_stream(
 
 
 @app.post("/v1/tts", response_model=SynthesizeResponse, tags=["speech"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def synthesize_audio(
     request: Request,
     body: SynthesizeRequest,
@@ -2270,7 +1662,7 @@ async def synthesize_audio(
 
 
 @app.post("/v1/translate", response_model=TranslateResponse, tags=["speech"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def translate_text(
     request: Request,
     body: TranslateRequest,
@@ -2321,7 +1713,7 @@ async def translate_text(
 
 
 @app.post("/v1/export/conversation", tags=["export"])
-@limiter.limit(_EXPORT_RATE_LIMIT)
+@limiter.limit(EXPORT_RATE_LIMIT)
 def export_conversation(
     request: Request,
     body: ExportConversationRequest,
@@ -2351,7 +1743,7 @@ def export_conversation(
 
 
 @app.post("/v1/export/tax-summary", tags=["export"])
-@limiter.limit(_EXPORT_RATE_LIMIT)
+@limiter.limit(EXPORT_RATE_LIMIT)
 def export_tax_summary(
     request: Request,
     body: ExportTaxSummaryRequest,
@@ -2377,183 +1769,6 @@ def export_tax_summary(
             "Content-Disposition": f'attachment; filename="ura_tax_summary_{int(time.time())}.pdf"',
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# Document attachments (analysis + report)
-# ---------------------------------------------------------------------------
-
-
-@app.post(
-    "/v1/documents/analyze",
-    response_model=DocumentAnalysisResponse,
-    tags=["documents"],
-)
-@limiter.limit(_DOCUMENT_RATE_LIMIT)
-async def analyze_uploaded_document(
-    request: Request,
-    ctx: AuthContext = Depends(optional_user),
-) -> DocumentAnalysisResponse:
-    """Analyse an uploaded document (PDF, DOCX, XLSX, CSV, image, or text).
-
-    Accepts multipart/form-data with a single ``file`` part. Extracts text
-    and tables, classifies the document against the URA taxonomy, and pulls
-    URA-specific fields (TINs, UGX amounts, dates, references).
-
-    The returned ``document_id`` can be passed in chat ``attachment_ids``
-    to ground answers on the document, and used with
-    ``GET /v1/documents/{document_id}/report`` to download a PDF report.
-    Documents are held in memory only and expire after a TTL.
-    """
-    import asyncio
-
-    _reject_oversized_document_request(request)
-    session_id = request.headers.get("X-Session-ID", "")
-    if not session_id and not ctx.user_id:
-        raise HTTPException(
-            status_code=422,
-            detail="X-Session-ID or an authenticated identity is required for document uploads",
-        )
-    try:
-        form = await request.form(
-            max_files=1,
-            max_fields=8,
-            max_part_size=documents.MAX_FILE_BYTES,
-        )
-    except Exception as err:
-        logger.info("Document multipart parsing rejected: %s", err)
-        raise HTTPException(status_code=422, detail="Invalid or oversized multipart document upload") from err
-    uploads = form.getlist("file")
-    upload = uploads[0] if len(uploads) == 1 else None
-    if upload is None or isinstance(upload, str):
-        raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
-
-    data = await _read_document_upload_bounded(upload)
-    if not data:
-        raise HTTPException(status_code=422, detail="Empty file")
-    if len(data) > documents.MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
-        )
-
-    started = time.perf_counter()
-    try:
-        record = await asyncio.to_thread(
-            documents.analyze_document,
-            data,
-            upload.filename or "document",
-            upload.content_type or "",
-            session_id=session_id,
-            user_id=ctx.user_id or "",
-        )
-    except documents.UnsupportedDocumentError as err:
-        raise HTTPException(status_code=415, detail=str(err)) from err
-    except ValueError as err:
-        detail = str(err)
-        code = 422
-        if "malware" in detail.lower():
-            code = 422
-        raise HTTPException(status_code=code, detail=detail) from err
-    finally:
-        metrics.observe("document_analysis_duration_ms", (time.perf_counter() - started) * 1000)
-
-    metrics.inc("documents_analyzed_total")
-    ocr_status = str(record.meta.get("ocr_status", "not_used"))
-    ocr_backend = str(record.meta.get("ocr_backend", "not_used"))
-    metrics.inc("document_ocr_total", labels={"backend": ocr_backend, "status": ocr_status})
-    if record.meta.get("ocr_regions"):
-        metrics.observe("document_ocr_regions", float(record.meta["ocr_regions"]))
-    return DocumentAnalysisResponse(**record.to_response_payload())
-
-
-@app.get("/v1/documents/{document_id}/report", tags=["documents"])
-@limiter.limit(_DOCUMENT_RATE_LIMIT)
-def document_report(
-    request: Request,
-    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
-    _ctx: AuthContext = Depends(optional_user),
-) -> Response:
-    """Download the branded PDF analysis report for an analysed document."""
-    record = documents.get_document(
-        document_id,
-        session_id=request.headers.get("X-Session-ID", ""),
-        user_id=_ctx.user_id,
-    )
-    if record is None:
-        raise HTTPException(status_code=404, detail="Document not found or expired")
-
-    etag = f'W/"{document_id}-{hashlib.sha256(str(record.meta.get("source_sha256", "")).encode()).hexdigest()[:12]}"'
-    if_none_match = request.headers.get("if-none-match")
-    if if_none_match and if_none_match.strip() == etag:
-        return Response(
-            status_code=304,
-            headers={
-                "ETag": etag,
-                "Cache-Control": "private, no-transform, max-age=300",
-            },
-        )
-
-    cached_bytes = record.meta.get("_cached_report_pdf")
-    if cached_bytes is not None and isinstance(cached_bytes, bytes):
-        pdf_bytes = cached_bytes
-    else:
-        # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
-        # on a runtime without fpdf2.
-        from .pdf_export import generate_document_report_pdf
-
-        started = time.perf_counter()
-        pdf_bytes = generate_document_report_pdf(record.to_report_payload())
-        record.meta["_cached_report_pdf"] = pdf_bytes
-        metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
-        metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
-        metrics.observe(
-            "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
-        )
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
-            ),
-            "ETag": etag,
-            "Cache-Control": "private, no-transform, max-age=300",
-        },
-    )
-
-
-@app.get("/v1/documents/{document_id}/status", tags=["documents"])
-@limiter.limit(_DOCUMENT_RATE_LIMIT)
-def document_status(
-    request: Request,
-    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
-    _ctx: AuthContext = Depends(optional_user),
-) -> dict[str, Any]:
-    """Inspect processing status and metadata of an analysed document."""
-    record = documents.get_document(
-        document_id,
-        session_id=request.headers.get("X-Session-ID", ""),
-        user_id=_ctx.user_id,
-    )
-    if record is None:
-        raise HTTPException(status_code=404, detail="Document not found or expired")
-
-    now = time.time()
-    ttl_left = max(0, int(record.created_at + documents.DOCUMENT_TTL_SECONDS - now))
-    return {
-        "document_id": record.doc_id,
-        "filename": record.filename,
-        "kind": record.kind,
-        "doc_type": record.doc_type,
-        "status": "ready",
-        "size_bytes": record.size_bytes,
-        "tables_count": len(record.tables),
-        "fields_count": sum(len(v) for v in record.fields.values()),
-        "has_cached_report": bool(record.meta.get("_cached_report_pdf")),
-        "expires_in_seconds": ttl_left,
-    }
 
 
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
@@ -2654,7 +1869,7 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
 
 
 @app.post("/v1/voice/chat", response_model=VoiceChatResponse, tags=["speech"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def voice_chat(
     request: Request,
     speech: SpeechModel = Depends(get_speech_model),
@@ -2873,7 +2088,7 @@ async def voice_chat(
             contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
             tenant_id=ctx.tenant_id or "default",
-            **_experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
+            **experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
             **_CM.english_forms(chat_result, served_reply=reply_text),
         )
     except Exception:
@@ -2947,20 +2162,6 @@ async def admin_ticket_stream_ws(websocket: WebSocket) -> None:
     await ticket_stream_ws(websocket)
 
 
-@app.websocket("/v2/chat/stream")
-async def chat_stream_ws_v2(websocket: WebSocket) -> None:
-    """V2 WebSocket — persistent text chat with agentic event surface.
-
-    Gated by the ``ws_chat`` feature flag.  See ``chat_ws_v2.py`` and
-    ``docs/ws_chat_protocol.md``.  Phase 0 ships lifecycle + protocol
-    negotiation only; ``response.create`` returns a ``not_implemented``
-    error until Phase 1 wires the existing chat pipeline through.
-    """
-    from .chat_ws_v2 import chat_stream_ws
-
-    await chat_stream_ws(websocket, app)
-
-
 @app.websocket("/v1/calls/stream")
 async def call_stream_ws(websocket: WebSocket) -> None:
     """Taxpayer phone call simulation WebSocket.
@@ -3005,48 +2206,6 @@ def classify_batch(
     return BatchClassifyResponse(**results)
 
 
-# ---------------------------------------------------------------------------
-# Knowledge base endpoints
-# ---------------------------------------------------------------------------
-@app.get("/tags", response_model=TagListResponse, tags=["knowledge"])
-def list_tags(model: ChatModel = Depends(get_model)) -> TagListResponse:
-    result = model.list_tags()
-    return TagListResponse(**result)
-
-
-@app.get("/faq/{tag}", response_model=FAQResponse, tags=["knowledge"])
-def get_faq(
-    tag: str = Path(..., pattern=r"^[a-z][a-z0-9_]{0,63}$"),
-    model: ChatModel = Depends(get_model),
-) -> FAQResponse:
-    result = model.get_faq(tag=tag)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Tag not found")
-    return FAQResponse(**result)
-
-
-_INDEX_API_KEY = os.getenv("INDEX_API_KEY", "")
-
-
-def _has_valid_ops_key(request: Request) -> bool:
-    """Return True when the request presents the configured ops API key."""
-    if not _INDEX_API_KEY:
-        return False
-    auth = request.headers.get("Authorization", "")
-    return hmac.compare_digest(auth, f"Bearer {_INDEX_API_KEY}")
-
-
-def _require_ops_key(request: Request) -> None:
-    """Require the configured bearer token for operator-only endpoints."""
-    if not _INDEX_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="INDEX_API_KEY not configured for operator endpoint",
-        )
-    if not _has_valid_ops_key(request):
-        raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
-
-
 def _require_relay_key(request: Request) -> None:
     """Require the configured bearer token for the Cloudflare relay endpoints.
 
@@ -3063,31 +2222,6 @@ def _require_relay_key(request: Request) -> None:
     auth = request.headers.get("Authorization", "")
     if not hmac.compare_digest(auth, f"Bearer {secret}"):
         raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
-
-
-def require_admin_access(
-    request: Request,
-) -> AuthContext:
-    """Require an authenticated staff user or a valid operator API key.
-
-    Ticket triage endpoints should not be public. During OIDC rollout we
-    still allow the existing operator key as a break-glass path, but only
-    when it is explicitly configured.
-
-    A request with no login is a 401 whether or not that key is set: a staff
-    sign-in opens these endpoints either way. Without the key it used to be a
-    503 "configure OIDC staff auth or INDEX_API_KEY", which on the Space (OIDC
-    configured, no key) told a prober the endpoint was down (2026-11-12).
-    """
-    if _has_valid_ops_key(request):
-        return AuthContext()
-
-    ctx = current_user(request, request.headers.get("Authorization"))
-    if not ctx.is_authenticated:
-        raise HTTPException(status_code=401, detail="authentication required")
-    if ctx.user and ctx.user.is_staff:
-        return ctx
-    raise HTTPException(status_code=403, detail="staff role required")
 
 
 def _require_staff_writer(ctx: AuthContext) -> None:
@@ -3192,113 +2326,6 @@ def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, An
         logger.exception("audit append failed for %s", event_type)
 
 
-_INDEX_REBUILD_LOCK = threading.Lock()
-
-
-@contextlib.contextmanager
-def _exclusive_index_rebuild():
-    """One rebuild at a time, in this process and across workers sharing the status dir.
-
-    Two overlapping calls — or a retry after a proxy timeout, likely when a full
-    rebuild takes minutes — both built the same candidate collection, and the
-    second deleted the first's half-built candidate under it. A second call is
-    now refused with 409 while one runs. The file lock covers the workers of one
-    host; replicas on other hosts still need the lifecycle run as a single job.
-    """
-    if not _INDEX_REBUILD_LOCK.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="An index rebuild is already running")
-    handle = None
-    try:
-        try:
-            import fcntl
-
-            from .freshness import LIFECYCLE_STATUS_PATH
-
-            path = LIFECYCLE_STATUS_PATH.with_name("index_rebuild.lock")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            handle = path.open("a")
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise HTTPException(status_code=409, detail="An index rebuild is already running") from None
-        except OSError:
-            logger.warning("Index rebuild lock file unavailable; serialising within this process only", exc_info=True)
-        yield
-    finally:
-        if handle is not None:
-            handle.close()
-        _INDEX_REBUILD_LOCK.release()
-
-
-@app.post("/v1/index", tags=["knowledge"])
-def trigger_indexing(
-    request: Request,
-    model: ChatModel = Depends(get_model),
-) -> dict:
-    """Trigger document re-indexing into the Qdrant vector store.
-
-    Requires ``Authorization: Bearer <INDEX_API_KEY>`` when configured. Runs
-    the staged index lifecycle (``app.vectorstore.index_lifecycle``): the whole corpus —
-    FAQ, teacher QA, PDF and crawl chunks — into a candidate collection, a
-    canary retrieval gate, then one atomic alias swap; then re-initialises the
-    hybrid retriever (G286).
-
-    It used to rebuild the live collection in place from FAQ and teacher-QA
-    rows only, with ``recreate=True``. One call deleted the PDF and crawl
-    corpus — most of the index — left every search failing while it rebuilt,
-    and wrote no freshness status, so cached answers outlived the rebuild. A
-    legacy physical collection (not an alias) is refused with 409 rather than
-    deleted; the message names the alias to migrate to.
-    """
-    _require_ops_key(request)
-
-    from .ingestion.faq_corpus import CorpusValidationError
-    from .freshness import write_lifecycle_status
-    from .vectorstore.index_lifecycle import IndexLifecycleError, rebuild_if_needed
-
-    def _record_failure(exc: Exception) -> None:
-        with contextlib.suppress(Exception):
-            write_lifecycle_status(ok=False, error=str(exc))
-
-    with _exclusive_index_rebuild():
-        try:
-            stats = rebuild_if_needed(force=True)
-        except IndexLifecycleError as exc:
-            _record_failure(exc)
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except CorpusValidationError as exc:
-            _record_failure(exc)
-            raise HTTPException(status_code=422, detail=f"Vector corpus validation failed: {exc}") from exc
-        except Exception as exc:
-            _record_failure(exc)
-            # The alias may already point at the new collection: bookkeeping
-            # after promotion re-raises. Re-bind, so this process does not go
-            # on querying new vectors with the old BM25 state and cache stamp.
-            model._retriever_ready = model._retriever.initialize()
-            logger.exception("Index rebuild failed")
-            raise HTTPException(status_code=500, detail="Index rebuild failed; see the lifecycle status") from exc
-
-    # Re-initialise the retriever so it picks up the new collection
-    model._retriever_ready = model._retriever.initialize()
-    # Retire cached answers across Redis / in-memory caches and MT cache immediately
-    from .rag.cache import reset_index_stamp
-    from . import mt as _mt
-
-    reset_index_stamp()
-    cache_obj = getattr(model, "_cache", None)
-    if cache_obj is not None and hasattr(cache_obj, "clear"):
-        with contextlib.suppress(Exception):
-            cache_obj.clear()
-    with contextlib.suppress(Exception):
-        _mt.cache.clear()
-    # Same resolver as /ready and the chat path: a reindex that leaves the
-    # retriever sparse-only must not report "hybrid" either.
-    stats["retrieval_mode"] = active_retrieval_mode(
-        model._retriever, ready=model._retriever_ready
-    )
-
-    return stats
-
-
 # ---------------------------------------------------------------------------
 # Cloudflare relay — lets another deployment (e.g. the HF Space, when its own
 # egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
@@ -3391,7 +2418,7 @@ def _feedback_rater(ctx: AuthContext) -> str:
 
 
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def submit_feedback(
     request: Request,
     body: FeedbackRequest,
@@ -3434,7 +2461,7 @@ def submit_feedback(
 
 
 @app.post("/v1/escalate", response_model=EscalationResponse, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def request_human_officer(
     request: Request,
     body: EscalationRequest,
@@ -3581,7 +2608,7 @@ _TICKET_ID_PATH_PATTERN = r"^[a-f0-9-]{8,64}$"
 
 
 @app.get("/v1/escalate/{ticket_id}", response_model=EscalationDetailResponse, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def get_escalation_status(
     request: Request,
     ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
@@ -3669,7 +2696,7 @@ def get_escalation_status(
 
 
 @app.post("/v1/escalate/{ticket_id}/reply", response_model=dict, tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def reply_to_escalation(
     request: Request,
     body: TaxpayerReplyRequest,
@@ -3737,7 +2764,7 @@ def _taxpayer_thread_message(row: dict) -> dict:
 
 
 @app.get("/v1/escalate/{ticket_id}/messages", response_model=OfficerChatThreadResponse, tags=["chat"])
-@limiter.limit(_CHAT_POLL_RATE_LIMIT)
+@limiter.limit(CHAT_POLL_RATE_LIMIT)
 def escalation_messages(
     request: Request,
     ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
@@ -3776,7 +2803,7 @@ def escalation_messages(
 
 
 @app.post("/v1/escalate/{ticket_id}/csat", tags=["chat"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def rate_officer_chat(
     request: Request,
     body: ChatRatingRequest,
@@ -3808,7 +2835,7 @@ def rate_officer_chat(
 
 
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def update_feedback_comment(
     request: Request,
     message_id: str,
@@ -3919,7 +2946,7 @@ def analytics_dashboard(
 
 
 @app.get("/v1/analytics/comparison", tags=["analytics"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def analytics_comparison(
     request: Request,
     days: int = 30,
@@ -3949,36 +2976,6 @@ def analytics_comparison(
         }
 
     return {"dimension": dimension, "period_days": days, "segments": []}
-
-
-def _has_valid_metrics_token(request: Request) -> bool:
-    """True when the request presents ``METRICS_TOKEN`` (the scrape credential).
-
-    A dedicated, read-only secret: Prometheus needs to read ``/metrics`` and
-    nothing else, so it should not hold a staff login or the break-glass
-    ``INDEX_API_KEY``. Compared in constant time and never logged.
-    """
-    token = os.getenv("METRICS_TOKEN", "")
-    if not token:
-        return False
-    return hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}")
-
-
-def require_metrics_reader(request: Request) -> AuthContext:
-    """``/metrics`` access: the scrape token, else the usual staff/operator check."""
-    if _has_valid_metrics_token(request):
-        return AuthContext()
-    return require_admin_access(request)
-
-
-@app.get("/metrics", tags=["system"])
-@limiter.limit("30/minute")
-def prometheus_metrics(
-    request: Request,
-    _ctx: AuthContext = Depends(require_metrics_reader),
-) -> PlainTextResponse:
-    """Prometheus metrics, aggregated across every API worker process."""
-    return PlainTextResponse(content=metrics.to_prometheus(), media_type=METRICS_CONTENT_TYPE)
 
 
 # ---------------------------------------------------------------------------
@@ -4055,7 +3052,7 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     Grafana can chart ``ura_eval_metric{name=...}`` alongside
     request metrics.
     """
-    _require_ops_key(request)
+    require_ops_key(request)
     if sample_size < 1 or sample_size > 500:
         raise HTTPException(status_code=400, detail="sample_size must be 1..500")
     if days < 1 or days > 365:
@@ -4387,7 +3384,7 @@ def _session_subject(identifier: str) -> str:
 
 
 @app.post("/v1/admin/users/{user_id}/revoke", tags=["admin"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def revoke_user_sessions_endpoint(
     request: Request,
     user_id: str,
@@ -6115,7 +5112,7 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
 
 
 @app.post("/v1/me/logout", tags=["me"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 def me_logout(request: Request, ctx: AuthContext = Depends(require_user)) -> dict:
     """Sign out everywhere: every token issued to you before now stops working (G304, ADR-0053).
 
@@ -6360,7 +5357,7 @@ def export_artifacts(request: Request) -> dict:
     Requires the same ``Authorization: Bearer <INDEX_API_KEY>`` header
     as ``/v1/index`` and ``/v1/evaluate``.
     """
-    _require_ops_key(request)
+    require_ops_key(request)
 
     from .artifact_export import export_all
 
@@ -6436,6 +5433,9 @@ from .api.quality import router as quality_router
 app.include_router(offline_router)
 app.include_router(connectors_router)
 app.include_router(quality_router)
+app.include_router(health_api.router)
+app.include_router(rag_api.router)
+app.include_router(documents_api.router)
 
 
 # ---------------------------------------------------------------------------
@@ -6444,7 +5444,7 @@ app.include_router(quality_router)
 
 
 @app.post("/v1/voice/vision/chat", response_model=VoiceVisionChatResponse, tags=["voice"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(RATE_LIMIT)
 async def voice_vision_chat(
     request: Request,
     model: ChatModel = Depends(get_model),

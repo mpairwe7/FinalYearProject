@@ -8,7 +8,8 @@ reference `rag-project` layout (`api/`, `middleware/`, `rag/`, `ingestion/`,
 names and a two-step delivery. This record covers step 1, which moves modules.
 Step 2 carves the chat, documents and health routes, the error handlers and the
 rate limiter out of `main.py` into `api/` and `middleware/`, and the answer
-prompts out of `rag/generator.py` into `rag/prompt_builder.py`.
+prompts out of `rag/generator.py` into `rag/prompt_builder.py`. Amended
+2026-11-15 when step 2 landed (the step 2 section below).
 
 ## Context and Problem Statement
 
@@ -58,6 +59,31 @@ The safety layer (`guardrails`, `premise_guard`), translation (`mt`), the agent
 graph (`agents/`), tools, speech, the receptionist and ticketing stay where they
 were. They are not RAG modules, and moving them would only add churn.
 
+### Step 2: routes, middleware and prompts
+
+`App/backend/scripts/carve_out_modules.py` performs step 2, one spec per source
+module: `--spec main` carves `main.py`, `--spec prompts` carves
+`rag/generator.py`. Each output commit is the script's output, unedited.
+
+| Module | What it took |
+| --- | --- |
+| `api/rag.py` | `/v1/chat`, `/v1/chat/stream`, `/v1/chat/title`, `/v2/chat/stream`, `/tags`, `/faq/{tag}` |
+| `api/documents.py` | `/v1/documents/analyze`, its report and status, and `/v1/index` with the rebuild lock |
+| `api/health.py` | `/health`, `/ready`, `/v1/index/freshness`, `/metrics` and the metrics-reader check |
+| `api/deps.py` | `get_model`, `get_speech_model`, `experiment_log_fields`, the ops key and `require_admin_access`, shared by the routers and `main.py` |
+| `middleware/rate_limiter.py` | the slowapi `limiter` and the per-route ceilings (`RATE_LIMIT`, `DOCUMENT_RATE_LIMIT`, ...) |
+| `middleware/error_handler.py` | the handler that gives every 401 a `WWW-Authenticate: Bearer` challenge |
+| `config/settings.py` | the API's title, version and description |
+| `rag/prompt_builder.py` | `SYSTEM_PROMPT`, `CLOUD_SYSTEM_PROMPT`, the answer contracts, few-shot prompts, `passage_header`, `spotlight_passage`, `fence_system_aside` |
+
+`main.py` stays the composition root: it builds the app and its middleware
+stack, runs the lifespan, keeps the routes no step moved, and includes the three
+routers. A router imports what it shares from `deps.py`, never from `main.py`, so
+there is no import cycle. Names imported across modules lost their leading
+underscore. Message assembly (`_build_messages`, `_build_tool_messages`) stays in
+`generator.py`, because it budgets tokens against the loaded model; only the
+prompt text and passage formatting moved.
+
 Parts of the reference layout were not adopted:
 
 - `logs/app.log` and `logs/error.log`. The service writes one JSON line per record
@@ -82,7 +108,13 @@ Parts of the reference layout were not adopted:
   that filtered on `app.service` must now filter on `app.rag.pipeline`.
 - Patch points moved with their modules. Stub `answer_in_english` on
   `app.rag.english_rendering`; the cloud prompt is
-  `app.rag.generator.CLOUD_SYSTEM_PROMPT`.
+  `app.rag.prompt_builder.CLOUD_SYSTEM_PROMPT`. A test that patches something
+  through `app.main` that a router now reads must patch the router's module
+  instead; `carve_out_modules.py --verify` lists every such patch.
+- The carved handlers log as `app.api.rag`, `app.api.documents` and
+  `app.api.health` instead of `app.main`.
+- The routers are registered after the routes left in `main.py`. Every request
+  still reaches the handler it reached before (the confirmation below checks it).
 - A branch cut before this change that adds an import of an old path fails at
   import time. Merge `dev`, then run the script with `--verify`: it lists every
   import or patch-target string that no longer resolves, and exits non-zero only
@@ -123,3 +155,17 @@ Parts of the reference layout were not adopted:
   `F401,F811,F821` report has the same 126 findings before and after.
 - Both CI test steps (`pytest tests/` from the root, then `pytest tests/` in
   `App/backend`) pass.
+
+For step 2:
+
+- The OpenAPI schema, route table, middleware stack and exception handlers dumped
+  from `app.main` are byte-identical before and after. For every route a sample
+  request was matched the way Starlette matches it, and each of the 143 lands on
+  the same handler.
+- `restructure_rag_layout.py --verify` still reports only the nine findings of
+  the parent commit, so every import inside the carved handlers resolves.
+- `test_agentic_rag_context_sandbox_2026_11.py` finds exactly the eleven
+  allowed importers of the orchestrator: the seven transports plus the four
+  carved `api/` modules.
+- Run on the parent of the main carve-out, `carve_out_modules.py --spec main`
+  reproduces that commit byte for byte.

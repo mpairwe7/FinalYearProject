@@ -29,7 +29,8 @@ _DAYS = Query(30, ge=1, le=90, description="Period in days")
 
 def _audit_reader(request: Request) -> AuthContext:
     """Administrators and auditors; officers and taxpayers are refused."""
-    from ..main import _require_audit_reader, require_admin_access
+    from ..main import _require_audit_reader
+    from .deps import require_admin_access
 
     ctx = require_admin_access(request)
     _require_audit_reader(ctx)

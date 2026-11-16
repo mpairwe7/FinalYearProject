@@ -47,6 +47,7 @@ from typing import Any, Callable, Final
 from ..db import database as db
 from .. import documents as documents_module
 from . import generator as generator_module
+from . import prompt_builder
 from .. import mt
 from .. import officer_hours
 from ..agents import AgentRoute, supervisor
@@ -878,19 +879,19 @@ def _build_fallback_prompt(
 
     The same scrub and spotlight fence as the local prompt (ADR-0027). A
     raw ``Context:`` paste let a passage close the data region and write a
-    second question. The system prompt is :data:`generator.CLOUD_SYSTEM_PROMPT`,
+    second question. The system prompt is :data:`prompt_builder.CLOUD_SYSTEM_PROMPT`,
     which carries the governed rules a one-paragraph prompt lacked (G475), and
     the last turns are replayed so a follow-up keeps its subject (G476).
     """
     from ..guardrails import fence_spotlight_body
 
     blocks = [
-        generator_module._spotlight_passage(i, p, max_chars=800)[0]
+        prompt_builder.spotlight_passage(i, p, max_chars=800)[0]
         for i, p in enumerate(passages[:6], 1)
     ]
-    system = generator_module.CLOUD_SYSTEM_PROMPT.rstrip()
+    system = prompt_builder.CLOUD_SYSTEM_PROMPT.rstrip()
     if tone_hint:
-        system += f"\n\n## This turn\n{generator_module._fence_system_aside(tone_hint.strip())}"
+        system += f"\n\n## This turn\n{prompt_builder.fence_system_aside(tone_hint.strip())}"
     if locale and locale != "en":
         system += f"\n\nRespond in the user's language (locale={locale})."
     ctx = "\n\n".join(blocks) if blocks else "(no passages)"
