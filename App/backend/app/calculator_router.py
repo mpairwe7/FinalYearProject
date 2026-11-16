@@ -1596,16 +1596,102 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
-    r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
-    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi|e?bicweka\s+bingahi|omushoro\b.*\bshangahi|wel\s+mucoro\b.*\badi|mucoro\b.*\btye\s+adi)\b"
-    r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
-    r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
+    r"\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi|e?bicweka\s+bingahi)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
     r"|\b(?:voluntary\s+disclosure|agency\s+notice|bank\s+account|freeze|travel\s+out|tax\s+debtor|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|carrier\s+bags?|microns|primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|exploration\s+losses?|contract\s+blocks?|ring[-\s]?fenc\w*|bonded\s+warehouse)\b"
     r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba|basonyiyibwa|gwa\s+mmeka|abaliko\s+obulemu|walemavu|ulemavu|lunaku\s+ki|ku\s+lunaku\s+ki|zisasula\s+zitya|zisasulwa\s+zitya|gusasulwa\s+gutya|zinalipwaje|zinalipwa\s+vipi|e?ssaawa\s+mmeka|masaa\s+mangapi|prn|unawalazimu|kiwango\s+ki|ku\s+kiwango\s+ki)\b",
     re.IGNORECASE,
 )
+
+#: The branches of the rate-question test that scan: a start word, then text without a "?"
+#: (or, for ``.*``, without a newline), then a keyword. As regex alternatives they rescanned
+#: the rest of the text from every repeated start word; ``_asks_about_rates`` checks them from
+#: precomputed positions instead.
+_RATE_START_RE = re.compile(
+    r"\b(?:what|how\s+many|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|"
+    r"o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b",
+    re.IGNORECASE,
+)
+_RATE_KEYWORD_RE = re.compile(
+    r"\b(?:percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|"
+    r"fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|"
+    r"asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b",
+    re.IGNORECASE,
+)
+_HOW_IS_WORD_RE = re.compile(r"\bhow\s+is\b", re.IGNORECASE)
+_CALCULATED_RE = re.compile(r"\b(?:calculated|computed)\b", re.IGNORECASE)
+_TAX_CUT_RE = re.compile(r"\bhow\s+much\s+(?:tax|cut)\b", re.IGNORECASE)
+_TAX_CUT_KEYWORD_RE = re.compile(r"\b(?:on|for|pay|charged|deducted|take)\b", re.IGNORECASE)
+_ALLOWED_RE = re.compile(r"\b(?:can|is|are|may)\b", re.IGNORECASE)
+_ALLOWED_KEYWORD_RE = re.compile(
+    r"\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b", re.IGNORECASE
+)
+_SAME_LINE_PAIRS = tuple(
+    (re.compile(first, re.IGNORECASE), re.compile(second, re.IGNORECASE))
+    for first, second in (
+        (r"\bo?muwendo\b", r"\bguli\s+gutya\b"),
+        (r"\bomushoro\b", r"\bshangahi\b"),
+        (r"\bwel\s+mucoro\b", r"\badi\b"),
+        (r"\bmucoro\b", r"\btye\s+adi\b"),
+    )
+)
+
+
+def _keyword_before_stop(ends: list[int], keywords: list[int], stops: list[int]) -> bool:
+    """Whether a keyword starts after one of *ends* with no stop character between."""
+    for end in ends:
+        k = bisect.bisect_left(keywords, end)
+        if k == len(keywords):
+            continue
+        s = bisect.bisect_left(stops, end)
+        if s == len(stops) or keywords[k] < stops[s]:
+            return True
+    return False
+
+
+def _same_line(text: str, newlines: list[int], first: re.Pattern[str], second: re.Pattern[str]) -> bool:
+    """``re.search(first + ".*" + second, text)``: *second* after *first*, with no newline between."""
+    earliest_end_on_line: dict[int, int] = {}
+    for m in first.finditer(text):
+        line = bisect.bisect_left(newlines, m.end())
+        earliest_end_on_line.setdefault(line, m.end())
+    if not earliest_end_on_line:
+        return False
+    for m in second.finditer(text):
+        end = earliest_end_on_line.get(bisect.bisect_left(newlines, m.start()))
+        if end is not None and end <= m.start():
+            return True
+    return False
+
+
+def _asks_about_rates(text: str) -> bool:
+    """The rate-question test that was one ``_RATE_ASK_RE``, in linear time."""
+    if _RATE_ASK_RE.search(text) or _asks_how_calculated(text):
+        return True
+    newlines = [i for i, ch in enumerate(text) if ch == "\n"]
+    questions = [i for i, ch in enumerate(text) if ch == "?"]
+    if any(_same_line(text, newlines, first, second) for first, second in _SAME_LINE_PAIRS):
+        return True
+    # "how is ... calculated" is a start word too: it ends at a "calculated" or "computed"
+    # on the line of an earlier "how is".
+    how_is_end_on_line: dict[int, int] = {}
+    for m in _HOW_IS_WORD_RE.finditer(text):
+        how_is_end_on_line.setdefault(bisect.bisect_left(newlines, m.end()), m.end())
+    starts = [m.end() for m in _RATE_START_RE.finditer(text)]
+    for m in _CALCULATED_RE.finditer(text):
+        end = how_is_end_on_line.get(bisect.bisect_left(newlines, m.start()))
+        if end is not None and end <= m.start():
+            starts.append(m.end())
+    keywords = [m.start() for m in _RATE_KEYWORD_RE.finditer(text)]
+    if _keyword_before_stop(sorted(starts), keywords, questions):
+        return True
+    for start_re, keyword_re in ((_TAX_CUT_RE, _TAX_CUT_KEYWORD_RE), (_ALLOWED_RE, _ALLOWED_KEYWORD_RE)):
+        ends = [m.end() for m in start_re.finditer(text)]
+        if ends and _keyword_before_stop(ends, [m.start() for m in keyword_re.finditer(text)], questions):
+            return True
+    return False
+
 
 _HOW_IS_RE = re.compile(r"\bhow\s+is", re.IGNORECASE)
 _HOW_KEYWORD_RE = re.compile(r"(?:calculated|computed|taxed)\b", re.IGNORECASE)
@@ -2211,7 +2297,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE
     )
-    if not (_RATE_ASK_RE.search(text) or _asks_how_calculated(text) or short_ask):
+    if not (_asks_about_rates(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
         # so it fails the gate above while still being a rate-table question.
         if _PAYE_THRESHOLD_ASK_RE.search(text):

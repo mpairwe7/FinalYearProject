@@ -796,6 +796,8 @@ def _prefix_first_number(text: str, prefix: str) -> str:
             # One character past the reach decides the closing \b.
             if (match := _NUMBER_AT_RE.match(text[at : reach + 1])) is not None:
                 return text[:at] + prefix + match.group() + text[at + match.end() :]
+            # A later start in this run ends at the same reach and fails the same \b.
+            break
     return text
 
 

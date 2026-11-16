@@ -45,9 +45,12 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
   slice from each start to one character past the furthest a match can reach:
   `entailment._amount_figures` and `mt._prefix_first_number`. `pattern.match(text, pos)` is not
   enough, because CodeQL models it as a search from any position.
-- **A branch that only answers yes or no can leave the regex.** "how is ... calculated" in
-  `_RATE_ASK_RE` became `calculator_router._asks_how_calculated`: the keyword must sit on the line
-  where the words after "how is" start, found from precomputed keyword and newline positions.
+- **A branch that only answers yes or no can leave the regex.** Five branches of `_RATE_ASK_RE`
+  were "start word, then text without a `?` (or a newline), then a keyword", and rescanned the rest
+  of the text from every repeated start word. CodeQL flagged only one of them, but the code review
+  measured 8.7 s on 28,677 characters of repeated "how is". `calculator_router._asks_about_rates`
+  now checks them from precomputed start, keyword, `?` and newline positions, and keeps the other
+  branches as a regex with no scan.
 - **Logs:** user values reach a log line through `config.flags._log_safe`, as elsewhere.
 
 Each replacement returns the same output as the regex it replaces. That was checked on

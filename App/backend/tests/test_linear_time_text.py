@@ -11,7 +11,7 @@ import re
 import time
 
 import pytest
-from app import guardrails, mt
+from app import calculator_router, guardrails, mt
 from app.case_facts import extract_all_money
 from app.linear_text import strip_blocks, strip_spans
 from app.rag import entailment, pipeline
@@ -184,6 +184,9 @@ def test_first_number_prefix_matches_the_regex(text):
         (lambda s: mt._prefix_first_number(s, "UGX "), "a " + "0" * N + "x"),
         (pipeline._strip_page_footers, "0" * N + "x"),
         (extract_all_money, "1 usd = " + "\t" * N + "x"),
+        (lambda s: mt._prefix_first_number(s, "UGX "), "\u0661" * N + "x"),
+        (calculator_router._asks_about_rates, "PAYE " + "how is " * (N // 7)),
+        (calculator_router._asks_about_rates, "PAYE " + "is " * (N // 3)),
         (
             lambda s: extract_conversation_entities([{"user_message": s}]),
             "TIN" + " is" * (N // 3) + "!",
