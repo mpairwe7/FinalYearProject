@@ -60,6 +60,7 @@ from urllib.parse import urlparse
 
 from .db import database as db
 from .guardrails import AI_ORGANISATION_SUFFIX, redact_pii_text, scan_retrieved_text
+from .linear_text import strip_spans
 from .tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
 from .web_search_providers import (
@@ -1058,7 +1059,7 @@ def scrub_query_pii_for_web(text: str) -> str:
     scrubbed = re.sub(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b", " ", scrubbed)
     scrubbed = re.sub(r"https?://\S+", " ", scrubbed)
     # Remove "[REDACTED_...]" placeholders inserted by redact_pii_text
-    scrubbed = re.sub(r"\[REDACTED[^\]]*\]", " ", scrubbed, flags=re.IGNORECASE)
+    scrubbed = strip_spans(scrubbed, "[REDACTED", "]", " ", ignore_case=True)
     # Strip conversational self-identifications ("my name is John Doe", "at Mukwano Enterprises Ltd")
     scrubbed = re.sub(
         r"\b(?:my\s+name\s+is|i\s+am\s+called|working\s+at|company\s+called)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b",

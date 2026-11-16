@@ -24,6 +24,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .linear_text import strip_blocks, strip_spans
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -1598,18 +1600,28 @@ _LINK_REMOVED = "[link removed]"
 _EXTERNAL_LINK_REMOVED = "[external link removed]"
 _LINK_DEFINITION_REMOVED = "[untrusted link definition removed]"
 _URL_TRAILING_PUNCT_RE = re.compile(r"[.,;:!?)\]*'\"]+$")
-_MD_IMAGE_RE = re.compile(
-    r"!\[(?:[^\[\]\n]|\[[^\[\]\n]*\]){0,500}\]\([ \t]*<?([^()\s<>]*(?:\([^()\s<>]*\)[^()\s<>]*)*)>?"
-    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'))?[ \t]*\)"
+#: The destination is optional, so the whitespace before it and the whitespace before the title
+#: would be adjacent when it is empty. Each run belongs to one branch, so neither can trade with
+#: the other: with a destination, the leading run is the branch's; without one, the tail's.
+_LINK_DESTINATION = (
+    r"(?:[ \t]*(?:<(?P<target>[^()\s<>]*(?:\([^()\s<>]*\)[^()\s<>]*)*)>?|(?P<target_bare>(?:[^()\s<>]+(?:\([^()\s<>]*\)[^()\s<>]*)*|(?:\([^()\s<>]*\)[^()\s<>]*)+))>?|>))?"
+    r"(?:[ \t]+(?:(?:\"[^\"\n]*\"|'[^'\n]*')[ \t]*)?)?\)"
 )
+_MD_IMAGE_RE = re.compile(r"!\[(?:[^\[\]\n]|\[[^\[\]\n]*\]){0,500}\]\(" + _LINK_DESTINATION)
 #: A reference definition whose destination is a URL. "[1]: Income Tax Act"
 #: is a footnote, not a link, and is left alone.
 _MD_LINK_DEFINITION_RE = re.compile(
-    r"(?im)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?((?:https?:)?//[^\s>]+|www\.[^\s>]+)>?.*$"
+    r"(?im)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?((?:https?:)?//[^\s>]+|www\.[^\s>]+)(?:>[^\n]*|[^\S\n][^\n]*)?"
 )
+
+
+def _link_target(match: re.Match[str]) -> str:
+    """The destination of a markdown link or image matched with ``_LINK_DESTINATION``."""
+    return match.group("target") or match.group("target_bare") or ""
+
+
 _LINK_TOKEN_RE = re.compile(
-    r"(?P<md>\[(?P<label>(?:[^\[\]\n]|\[[^\[\]\n]*\]){1,500})\]\([ \t]*<?"
-    r"(?P<target>[^()\s<>]*(?:\([^()\s<>]*\)[^()\s<>]*)*)>?(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'))?[ \t]*\))"
+    r"(?P<md>\[(?P<label>(?:[^\[\]\n]|\[[^\[\]\n]*\]){1,500})\]\(" + _LINK_DESTINATION + ")"
     r"|(?P<auto><(?:https?://|www\.)[^\s<>]+>)"
     r"|(?P<bare>\b(?:https?://|www\.)[^\s<>\"'`]+)"
     r"|(?P<domain>(?<![@\w.\-/])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
@@ -1721,7 +1733,7 @@ def neutralize_untrusted_links(text: str) -> tuple[str, int]:
 
     def _image(match: re.Match[str]) -> str:
         nonlocal removed
-        if is_trusted_link_target(match.group(1)):
+        if is_trusted_link_target(_link_target(match)):
             return match.group(0)
         removed += 1
         return _LINK_REMOVED
@@ -1737,7 +1749,7 @@ def neutralize_untrusted_links(text: str) -> tuple[str, int]:
     def _token(match: re.Match[str]) -> str:
         nonlocal removed
         if match.group("md") is not None:
-            target = match.group("target")
+            target = _link_target(match)
             label = _LINK_TOKEN_RE.sub(_token, match.group("label"))
             if _is_unsafe_link_target(target):
                 removed += 1
@@ -1822,6 +1834,91 @@ def _redact_leaked_lines(text: str) -> str:
     return redacted
 
 
+
+_REASONING_OPEN_RE = re.compile(r"<(?:think|thought|reasoning|scratchpad)", re.IGNORECASE)
+_REASONING_CLOSE_RE = re.compile(r"</(?:think|thought|reasoning|scratchpad)\s*>", re.IGNORECASE)
+_SCRIPT_OPEN_RE = re.compile(r"<script", re.IGNORECASE)
+_SCRIPT_CLOSE_RE = re.compile(r"</script\s*>", re.IGNORECASE)
+_LANGUAGE_TAG_RE = re.compile(r"\[(?:Luganda|Swahili|English|Runyankole|Acholi)", re.IGNORECASE)
+_LANGUAGE_TAG_STOP_RE = re.compile(r"[\]\n]")
+_DIGIT_RUN_RE = re.compile(r"\d+")
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+def _strip_language_tags(text: str) -> str:
+    """``re.sub(r"\\[+(?:Luganda|...)[^\\]\\n]*\\]*", "", text, flags=re.I)`` in one pass."""
+    out: list[str] = []
+    kept = 0
+    n = len(text)
+    while (m := _LANGUAGE_TAG_RE.search(text, kept)) is not None:
+        start = m.start()
+        while start > kept and text[start - 1] == "[":
+            start -= 1
+        stop = _LANGUAGE_TAG_STOP_RE.search(text, m.end())
+        end = stop.start() if stop is not None else n
+        while end < n and text[end] == "]":
+            end += 1
+        out.append(text[kept:start])
+        kept = end
+    out.append(text[kept:])
+    return "".join(out)
+
+
+def _join_digit_bracket_glitches(text: str) -> str:
+    """``re.sub(r"(\\d+)\\s*\\[+(?!\\d+\\])[^0-9\\n\\]]+\\s*(\\d+)", r"\\1\\2", text)`` in one pass.
+
+    "12 [ab 3" becomes "123"; a citation such as "12 [3]" is left alone.
+    """
+    out: list[str] = []
+    kept = 0
+    n = len(text)
+    for run in _DIGIT_RUN_RE.finditer(text):
+        if run.start() < kept:
+            continue
+        p = run.end()
+        while p < n and text[p].isspace():
+            p += 1
+        q = p
+        while q < n and text[q] == "[":
+            q += 1
+        brackets = q - p
+        if brackets == 0:
+            continue
+        d = q
+        while d < n and text[d].isdecimal():
+            d += 1
+        citation_next = d > q and d < n and text[d] == "]"
+        j = q
+        while j < n and text[j] not in _ASCII_DIGITS and text[j] not in "\n]":
+            j += 1
+        # With the whole "[" run taken, the lookahead and one junk character must hold;
+        # one "[" fewer always passes the lookahead and lends the junk a "[".
+        if brackets >= 2:
+            lowest = q
+        elif not citation_next and j > q:
+            lowest = q + 1
+        else:
+            continue
+        # The greedy junk gives characters back until whitespace then a digit follows.
+        u = j
+        while u < n and text[u].isspace():
+            u += 1
+        t = j
+        while not (u < n and text[u].isdecimal()):
+            t -= 1
+            if t < lowest:
+                break
+            if not text[t].isspace():
+                u = t
+        else:
+            e = u
+            while e < n and text[e].isdecimal():
+                e += 1
+            out += (text[kept : run.start()], run.group(), text[u:e])
+            kept = e
+    out.append(text[kept:])
+    return "".join(out)
+
 class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
@@ -1862,17 +1959,12 @@ class OutputGuard:
     def sanitize(text: str) -> str:
         """Strip potentially dangerous output content (LLM05)."""
         # Remove explicit hidden reasoning and scratchpad blocks (closed or unclosed)
-        text = re.sub(
-            r"<(?:think|thought|reasoning|scratchpad)[^>]*>.*?(?:</(?:think|thought|reasoning|scratchpad)\s*>|$)",
-            "",
-            text,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
+        text = strip_blocks(text, _REASONING_OPEN_RE, _REASONING_CLOSE_RE, or_to_end=True)
         text = re.sub(r"```(?:thought|thinking).*?```", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove script tags
-        text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = strip_blocks(text, _SCRIPT_OPEN_RE, _SCRIPT_CLOSE_RE)
         # Remove HTML tags
-        text = re.sub(r"<[^>]+>", "", text)
+        text = strip_spans(text, "<", ">", min_inner=1)
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
         text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)
@@ -1961,9 +2053,9 @@ class OutputGuard:
 
         # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
         # Negative lookahead (?!\d+\]) protects statutory citations like [1] or [2]
-        text = re.sub(r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)", r"\1\2", text)
+        text = _join_digit_bracket_glitches(text)
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
-        text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
+        text = _strip_language_tags(text)
 
         # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) and standalone line asterisks to clean Markdown lists
         text = re.sub(r"^[ \t]*[►▪▫•–—][ \t]*", "- ", text, flags=re.MULTILINE)

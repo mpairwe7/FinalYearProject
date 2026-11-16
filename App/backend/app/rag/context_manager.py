@@ -186,7 +186,7 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         re.I,
     )
     ref_re = re.compile(
-        r"\b(?:TIN|PRN|ARN|REF|ASSESSMENT)(?:[-\s#:]|(?:is|no\.?|number)\s*)+([A-Z0-9]{5,18})\b",
+        r"\b(?:TIN|PRN|ARN|REF|ASSESSMENT)(?:[-\s#:]|is|no\.?|number)+([A-Z0-9]{5,18})\b",
         re.I,
     )
     loc_re = re.compile(

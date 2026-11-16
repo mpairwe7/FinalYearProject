@@ -151,7 +151,8 @@ from ..calculator_router import (
 )
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
-from ..config.flags import flags
+from ..config.flags import _log_safe, flags
+from ..linear_text import strip_spans
 from ..guard_friction import note_refusal as note_guard_refusal
 from ..guard_friction import paused as paused_turn
 from ..guard_friction import principal_key
@@ -4291,7 +4292,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
         try:
             out = fn()
         except Exception:  # noqa: BLE001 — localization is best-effort
-            logger.debug("Reply localization via %s failed (%s)", name, locale, exc_info=True)
+            logger.debug("Reply localization via %s failed (%s)", name, _log_safe(locale), exc_info=True)
             continue
         if out and out.strip():
             return out
@@ -4548,7 +4549,7 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     if cached is not None:
         return cached
 
-    safe_locale = re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10]
+    safe_locale = _log_safe(re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10])
 
     def _attempt(source_text: str, figure_map: dict[str, str]) -> tuple[str | None, str]:
         """One MT round trip and every guard, returning the text and a reason."""
@@ -5154,6 +5155,47 @@ def _table_answer_judge(english_reply: str, reason: str) -> dict[str, Any]:
         "reasons": [reason, UNCONFIRMED_FIGURE_REASON] if unconfirmed else [reason],
         "confidence_band": "medium" if unconfirmed else "high",
     }
+
+_PAGE_FOOTER_TITLE = "DOMESTIC TAX LAWS OF UGANDA"
+
+
+def _strip_page_footers(text: str) -> str:
+    """``re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\\s+)?\\d+\\s*\\|\\s*P\\s*a\\s*g\\s*e", "", text)``.
+
+    The PDF footer "12 | Page", read from each "|" so no digit run is rescanned.
+    """
+    out: list[str] = []
+    kept = pos = 0
+    n = len(text)
+    while (bar := text.find("|", pos)) >= 0:
+        pos = bar + 1
+        end = bar + 1
+        for letter in "Page":
+            while end < n and text[end].isspace():
+                end += 1
+            if end >= n or text[end] != letter:
+                break
+            end += 1
+        else:
+            digits_end = bar
+            while digits_end > kept and text[digits_end - 1].isspace():
+                digits_end -= 1
+            start = digits_end
+            while start > kept and text[start - 1].isdecimal():
+                start -= 1
+            if start == digits_end:
+                continue
+            gap = start
+            while gap > kept and text[gap - 1].isspace():
+                gap -= 1
+            title = gap - len(_PAGE_FOOTER_TITLE)
+            if gap < start and title >= kept and text.startswith(_PAGE_FOOTER_TITLE, title):
+                start = title
+            out.append(text[kept:start])
+            kept = pos = end
+    out.append(text[kept:])
+    return "".join(out)
+
 
 class ChatModel:
     """Unified service that backs all API endpoints.
@@ -6093,8 +6135,8 @@ class ChatModel:
             "",
             cleaned,
         )
-        cleaned = re.sub(r"\[User-attached document:[^\]]+\]", "", cleaned)
-        cleaned = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", cleaned)
+        cleaned = strip_spans(cleaned, "[User-attached document:", "]", min_inner=1)
+        cleaned = _strip_page_footers(cleaned)
         cleaned = re.sub(r"^summary\s*\n+", "", cleaned, flags=re.IGNORECASE)
         leakage = self._output_guard.check_prompt_leakage(cleaned)
         return self._output_guard.normalize_structure(leakage.sanitized_text).strip()
@@ -8763,8 +8805,8 @@ class ChatModel:
             # promising a ticket that does not exist.
             logger.exception(
                 "ESCALATION LOST: ticket persistence failed for conversation %s (reason=%s)",
-                conversation_id or "?",
-                reason[:80],
+                _log_safe(conversation_id or "?"),
+                _log_safe(reason[:80]),
             )
             if handoff is not None:
                 handoff["ticket_persisted"] = False
