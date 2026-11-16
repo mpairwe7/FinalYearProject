@@ -163,6 +163,21 @@ class ChatTurnRecorderTest(unittest.TestCase):
         key = 'chat_turns_total{channel="sse",outcome="error"}'
         self.assertEqual(after.get(key, 0) - before.get(key, 0), 1)
 
+    def test_outcomes_are_counted_by_reply_language(self) -> None:
+        before = analytics.metrics.snapshot()["counters"]
+        record_chat_turn({"retrieval_mode": "abstained", "locale": "lg"}, elapsed_ms=5, channel="rest")
+        record_chat_turn({"retrieval_mode": "hybrid", "locale": "ach"}, elapsed_ms=5, channel="call")
+        record_chat_turn({"retrieval_mode": "hybrid", "locale": "fr"}, elapsed_ms=5, channel="rest")
+        record_chat_turn({}, elapsed_ms=5, channel="sse", error=True)
+        after = analytics.metrics.snapshot()["counters"]
+        for key, added in {
+            'locale_turns_total{locale="lg",outcome="abstained"}': 1,
+            'locale_turns_total{locale="ach",outcome="answered"}': 1,
+            'locale_turns_total{locale="other",outcome="answered"}': 1,
+            'locale_turns_total{locale="other",outcome="error"}': 1,
+        }.items():
+            self.assertEqual(after.get(key, 0) - before.get(key, 0), added, key)
+
     def test_escalation_is_counted_whatever_the_outcome(self) -> None:
         """An abstained turn that opens a ticket is an escalation (it was before the facade)."""
         key = 'escalation_required_total{channel="rest"}'

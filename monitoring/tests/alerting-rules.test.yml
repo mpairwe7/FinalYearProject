@@ -525,3 +525,61 @@ tests:
       - eval_time: 10m
         alertname: UraCallProcessDown
         exp_alerts: []
+
+  # Luganda abstains 40% against English's 10%: the parity alert names Luganda.
+  # Swahili never abstains, so its ratio is 0, not missing, and it stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'ura_locale_turns_total{locale="en",outcome="answered"}'
+        values: '0+9x200'
+      - series: 'ura_locale_turns_total{locale="en",outcome="abstained"}'
+        values: '0+1x200'
+      - series: 'ura_locale_turns_total{locale="lg",outcome="answered"}'
+        values: '0+6x200'
+      - series: 'ura_locale_turns_total{locale="lg",outcome="abstained"}'
+        values: '0+4x200'
+      - series: 'ura_locale_turns_total{locale="sw",outcome="answered"}'
+        values: '0+1x200'
+    promql_expr_test:
+      - expr: round(ura:locale_turns:abstention_ratio_1h * 100)
+        eval_time: 90m
+        exp_samples:
+          - labels: '{locale="en"}'
+            value: 10
+          - labels: '{locale="lg"}'
+            value: 40
+          - labels: '{locale="sw"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: UraLanguageAbstentionGap
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: UraLanguageAbstentionGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+              locale: lg
+            exp_annotations:
+              summary: "Abstention in lg is more than 15 points above English"
+              description: "Taxpayers who write in lg get no answer far more often than those who write in English, on at least 20 turns an hour. Look for a retrieval or translation gap in that language."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#language-parity"
+
+  # One input token a minute and one turn every 400 minutes: 400 input and 100 output tokens per turn.
+  - interval: 1m
+    input_series:
+      - series: 'ura_llm_tokens_total{provider="sunbird",model="sunflower-9b",operation="chat",type="input"}'
+        values: '0+1x2000'
+      - series: 'ura_llm_tokens_total{provider="sunbird",model="sunflower-9b",operation="chat",type="output"}'
+        values: '0+0.25x2000'
+      - series: 'ura_chat_turns_total{channel="rest",outcome="answered"}'
+        values: '0+0.0025x2000'
+    promql_expr_test:
+      - expr: round(ura:llm_tokens:per_turn_1d)
+        eval_time: 1500m
+        exp_samples:
+          - labels: '{provider="sunbird",model="sunflower-9b",type="input"}'
+            value: 400
+          - labels: '{provider="sunbird",model="sunflower-9b",type="output"}'
+            value: 100

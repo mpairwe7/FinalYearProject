@@ -650,6 +650,13 @@ def record_chat_turn(
     outcome = "error" if error else turn_outcome(result)
     mode = str(result.get("retrieval_mode") or "unknown")
     metrics.inc("chat_turns_total", labels={"channel": channel, "outcome": outcome})
+    # Outcome by reply language: the parity check that abstention and escalation
+    # do not fall harder on taxpayers who write in Luganda, Swahili, Runyankole or Acholi.
+    locale = str(result.get("locale") or "")
+    metrics.inc(
+        "locale_turns_total",
+        labels={"locale": locale if locale in _DECISION_LOCALES else "other", "outcome": outcome},
+    )
     metrics.inc("retrieval_mode_total", labels={"mode": mode})
     if elapsed_ms > 0:
         metrics.observe("chat_response_time_ms", elapsed_ms, labels={"channel": channel, "mode": mode})

@@ -115,6 +115,7 @@ worker's numbers.
 | `ura_chat_turns_total` | counter | `channel`, `outcome` | One per chat turn on **every** transport. `channel`: `rest`, `sse`, `ws`, `voice`. `outcome`: `answered`, `abstained`, `clarification`, `escalated`, `blocked`, `out_of_scope`, `error` |
 | `ura_chat_response_time_ms` | histogram | `channel`, `mode` | Whole-turn latency; `mode` is the retrieval mode |
 | `ura_retrieval_mode_total` | counter | `mode` | Retrieval mode per turn |
+| `ura_locale_turns_total` | counter | `locale`, `outcome` | One per chat turn, by reply language. `locale`: `en`, `lg`, `sw`, `nyn`, `ach`, else `other`. `outcome` as `ura_chat_turns_total`. The language parity check reads it ([Language parity](#language-parity)) |
 | `ura_language_decisions_total` | counter | `channel`, `locale`, `source` | Why each turn was answered in its language (G123). `locale`: `en`, `lg`, `sw`, else `other`. `source`: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile`, `default`, else `other`. A growing `switched` or `default` share for Luganda or Swahili is the first sign the decision is drifting |
 | `ura_faithfulness_score` | histogram | — | Grounding score per scored turn |
 | `ura_escalation_required_total` | counter | `channel` | Turns handed to a person |
@@ -419,6 +420,27 @@ flag variant). Stale means the scheduled run is failing:
 `ura:chat_turns:containment_ratio_1h`. Rising abstention is a knowledge gap,
 not an outage: route the abstained questions to the corpus backlog
 ([corpus coverage](runbooks/corpus-coverage.md)).
+
+### Language parity
+
+`UraLanguageAbstentionGap` fires when abstention in Luganda, Swahili,
+Runyankole or Acholi has stood more than 15 points above English for two hours,
+on at least 20 turns an hour in that language. The dashboard row **Language
+parity and cost** shows abstention and escalation per reply language
+(`ura:locale_turns:*`).
+
+1. Compare the abstained questions in that language with their English
+   equivalents. A question English answers and the other language does not
+   points to retrieval of translated queries or to a translation tier.
+2. Check `ura_reply_localization_*{locale}` and the model fallbacks panel for a
+   degraded translation tier.
+3. Run the [multilingual retrieval benchmark](runbooks/multilingual-retrieval-benchmark.md)
+   for that locale.
+
+The same row shows model tokens per turn (`ura:llm_tokens:per_turn_1d`).
+`python3 governance/monitoring/cost_per_decision.py` prices it with
+`governance/monitoring/cost_per_decision.csv` and prints the cost of one
+decision in US dollars.
 
 ### Failed retrievals
 
