@@ -18,14 +18,14 @@ foreign-processor due diligence as controller obligations in its
 
 | Control | Evidence and implementation state |
 | --- | --- |
-| DPIA | Decision-ready assessment and sign-off block: [DPIA_306.md](dpia.md). **DPO/legal signature remains required.** |
+| DPIA | Decision-ready assessment and sign-off block: [dpia.md](dpia.md). **DPO/legal signature remains required.** |
 | ROPA | Processing inventory below, including purpose, basis to be confirmed by DPO, access, recipient, and retention. |
 | Automated deletion | `app.retention.run_retention_cleanup` runs at startup and every `RETENTION_CLEANUP_INTERVAL_SECONDS` (default 1 hour). It deletes expired core records, transient uploads, memory, and voice audit data. |
 | Subject rights | Authenticated `/v1/me/export` returns core identity/consents, conversation/ticket, analytics/session/feedback, semantic facts, episodic memory, working memory, and unexpired upload data. `/v1/me` removes those stores; `/v1/me/consents/withdraw` immediately removes analytics when analytics consent is withdrawn. |
 | Consent | Durable sessions and analytics events require an authenticated subject and active `analytics` receipt. An answer rating (👍/👎) is accepted from anyone: it is linked to its subject only with that receipt, and is otherwise stored with no subject identifier and no analytics session id — the answer is rated, the person is not recorded — so it cannot be exported or erased per subject. Analytics withdrawal deletes all linked records. Semantic, episodic, and working-memory writes and reads require active `personalization` consent; withdrawal purges all three tiers. |
 | Redaction | Ticket creation, staff notes, officer replies, transcript/handoff fields, client analytics payloads, and application logs are redacted or logged as metadata only. Raw prompt storage is blocked in production. |
-| Cross-border | Production detects configured Sunbird, Cloudflare/Gemini/Workers AI, and non-local vLLM processors. It fails closed without approved transfer evidence. See [DPIA_306.md](dpia.md). |
-| PDPO registration | The required determination, registration reference, or documented `not_required` decision is tracked in [PDPO_REGISTRATION_306.md](../../evidence/approvals/pdpo_registration.md) and required as a production attestation. |
+| Cross-border | Production detects configured Sunbird, Cloudflare/Gemini/Workers AI, and non-local vLLM processors. It fails closed without approved transfer evidence. See [dpia.md](dpia.md). |
+| PDPO registration | The required determination, registration reference, or documented `not_required` decision is tracked in [pdpo_registration.md](../../evidence/approvals/pdpo_registration.md) and required as a production attestation. |
 
 ## Record of processing activities (ROPA)
 

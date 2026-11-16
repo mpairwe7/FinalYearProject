@@ -1,8 +1,9 @@
-"""governance/compliance_check.py: a control's ``verified_by`` must name a runnable test."""
+"""governance/: a control's ``verified_by`` names a runnable test, and every registry link resolves."""
 
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,23 @@ def test_the_manifest_evidence_all_exists():
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    refs = module._verified_by_refs(PROJECT_ROOT / "governance" / "systems" / "ura-ai-chatbot" / "manifest.yaml")
+    refs = module._verified_by_refs(
+        PROJECT_ROOT / "governance" / "systems" / "ura-ai-chatbot" / "manifest.yaml"
+    )
     assert refs, "the manifest names no verified_by evidence"
     problems = [(control, ref, module._missing_evidence(ref)) for control, ref in refs]
     assert [p for p in problems if p[2]] == []
+
+
+def test_every_registry_link_resolves():
+    """The registry READMEs point at code and records elsewhere; a move must not strand them."""
+    link = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)")
+    pages = sorted((PROJECT_ROOT / "governance").rglob("*.md"))
+    assert PROJECT_ROOT / "governance" / "REGISTRY_README.md" in pages
+    broken = [
+        (str(page.relative_to(PROJECT_ROOT)), target)
+        for page in pages
+        for target in link.findall(page.read_text(encoding="utf-8"))
+        if not re.match(r"[a-z][a-z0-9+.-]*:", target, re.I) and not (page.parent / target).exists()
+    ]
+    assert broken == []

@@ -759,9 +759,10 @@ FinalYearProject/
 │   ├── TTT/                # Translation corpus
 │   └── lgaudio/            # Audio files
 │
-├── governance/              # Compliance & Risk
+├── governance/              # AI governance registry (start at REGISTRY_README.md)
 │   ├── compliance_check.py # CI gate (NIST/ISO/OWASP/EU AI Act)
-│   └── ai_risk_manifest.yaml
+│   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
+│   └── policies/ evidence/ controls/ monitoring/ audit/ vendors/
 │
 ├── ml/                      # Production quality gates + corpus tooling
 │   ├── configs/

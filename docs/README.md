@@ -97,9 +97,10 @@ FinalYearProject/
 │   ├── pdfs/             # PDF documents
 │   ├── TTT/              # Translation corpus
 │   └── lgaudio/          # Audio files
-├── governance/            # Compliance & risk management
-│   ├── compliance_check.py
-│   └── ai_risk_manifest.yaml
+├── governance/            # AI governance registry (start at REGISTRY_README.md)
+│   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
+│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
+│   └── compliance_check.py
 ├── ml/                    # Production quality gates + corpus tooling
 │   ├── configs/          # RAG quality gate thresholds
 │   ├── pipelines/        # RAG eval, corpus coverage, quality gates, feedback export

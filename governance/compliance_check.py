@@ -17,6 +17,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Files that MUST exist for the governance framework to be considered complete.
 REQUIRED_FILES = [
     "governance/systems/ura-ai-chatbot/manifest.yaml",
+    "governance/REGISTRY_README.md",
+    "governance/OWNERS.md",
     "SECURITY.md",
     "App/backend/app/guardrails.py",
     "App/backend/app/tracing.py",

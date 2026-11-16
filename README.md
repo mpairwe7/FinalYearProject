@@ -91,8 +91,10 @@ FinalYearProject/
 │   └── eval/             # RAG evaluation sets
 │       ├── rag_eval.jsonl      # English eval (30 samples, incl. reg-* regression ids)
 │       └── rag_eval_lg.jsonl   # Luganda eval (12 samples)
-├── governance/            # AI governance framework
-│   ├── ai_risk_manifest.yaml   # NIST AI RMF + ISO 42001 + OWASP + EU AI Act
+├── governance/            # AI governance registry (start at REGISTRY_README.md)
+│   ├── systems/ura-ai-chatbot/ # manifest.yaml (NIST AI RMF + ISO 42001 + OWASP + EU AI Act), model card, DPIA
+│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
+│   ├── OWNERS.md               # Who answers for what
 │   └── compliance_check.py     # CI gate for governance artifacts
 ├── ml/                    # Production quality gates + corpus tooling
 │   ├── configs/

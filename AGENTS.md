@@ -18,7 +18,7 @@ This file is the repo-wide router. Package rules live next to the code.
 | `ml/` | Offline training, corpus pipelines, local ASR/MT/TTS wrappers | `ml/AGENTS.md` |
 | `infra/` | Compose overlays and example HPA (not applied) | `infra/AGENTS.md` |
 | `monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `monitoring/AGENTS.md` |
-| `governance/` | Risk manifest + compliance gate | `governance/AGENTS.md` |
+| `governance/` | AI governance registry (systems, policies, evidence, controls, monitoring, audit, vendors) + compliance gate | `governance/AGENTS.md` |
 | `threat-model/` | STRIDE / OWASP / MITRE ATLAS threat model as code | `threat-model/AGENTS.md` |
 | `docs/` | Architecture, gaps, model card | `docs/AGENTS.md` |
 | `tests/` | Pytest (agents + API e2e) | `tests/AGENTS.md` |
