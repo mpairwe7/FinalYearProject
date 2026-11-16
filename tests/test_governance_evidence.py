@@ -55,13 +55,13 @@ def test_the_manifest_evidence_all_exists():
 
 def test_every_registry_link_resolves():
     """The registry READMEs point at code and records elsewhere; a move must not strand them."""
-    link = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)")
+    link = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)|^\s*\[[^\]]+\]:\s*<?([^\s#>]+)", re.M)
     pages = sorted((PROJECT_ROOT / "governance").rglob("*.md"))
     assert PROJECT_ROOT / "governance" / "REGISTRY_README.md" in pages
     broken = [
         (str(page.relative_to(PROJECT_ROOT)), target)
         for page in pages
-        for target in link.findall(page.read_text(encoding="utf-8"))
+        for target in (a or b for a, b in link.findall(page.read_text(encoding="utf-8")))
         if not re.match(r"[a-z][a-z0-9+.-]*:", target, re.I) and not (page.parent / target).exists()
     ]
     assert broken == []
