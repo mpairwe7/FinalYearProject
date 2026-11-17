@@ -16,7 +16,8 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 
 | Module | Role |
 | --- | --- |
-| `agents/` | Supervisor, golden-set routing, LangGraph |
+| `agents/` | One file per agent role (ADR-0061): `supervisor.py` (routing, with the locale `patterns/`), `tiebreak.py`, `critic.py` (the evaluator-optimizer that checks an answer before the taxpayer reads it), `loop_control.py`; `eval_routing.py` and `eval_multihop.py` measure them |
+| `workflows/` | `graph/` (the LangGraph-style turn graph: `main_graph.py`, `runtime.py` with the sealed approvals, `state.py`, `compactor.py`) and the YAML guided journeys (`registry.py`, `loader.py`, `slots.py`, `journey_copilot.py`, `flows/`) (ADR-0061) |
 | `api/` | The HTTP routers: `rag.py` (chat over REST, SSE and WebSocket, titles, FAQ), `documents.py` (upload analysis, re-index), `health.py` (`/health`, `/ready`, `/metrics`), `connectors.py`, `offline.py`, `quality.py`; `deps.py` (the shared `get_model` and operator checks) and `models.py` (Pydantic request/response models). `main.py` is the composition root that includes them |
 | `rag/` | The RAG flow (ADR-0056): `pipeline.py` (the `ChatModel` orchestrator), `retriever.py`, `generator.py` (answer generation and message assembly), `prompt_builder.py` (message assembly and passage fencing; the prompt text is in `prompts/`), `query.py`, grounding checks, turn context |
 | `prompts/` | Every system prompt, one module per area: `answer.py`, `query.py`, `receptionist.py`, `title.py`, `agents.py`, `vision.py`. A module imports its prompt from here under the name it had (ADR-0060) |
