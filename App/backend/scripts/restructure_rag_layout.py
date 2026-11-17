@@ -23,6 +23,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 APP = REPO / "App/backend/app"
 SELF = Path(__file__).resolve()
+# Files the rewrite never touches. A later layout script that reuses this one adds itself.
+SKIP: set[Path] = {SELF}
 # Files that name an old module on purpose; --verify does not report them.
 OLD_NAMES_ON_PURPOSE = {
     REPO / "docs/adr/0056-rag-package-layout.md": "the record of the move",
@@ -212,8 +214,9 @@ class Rules:
         text = self._path_re.sub(lambda m: self.paths[m.group(1)], text)
         text = self._dotted_prefixed_re.sub(lambda m: "App.backend." + self.dotted[m.group(1)], text)
         text = self._dotted_re.sub(lambda m: self.dotted[m.group(1)], text)
-        text = self._word_re.sub(lambda m: WORD_RENAMES[m.group(1)], text)
-        return self._bare_re.sub(lambda m: self.bare[m.group(1)], text)
+        if WORD_RENAMES:
+            text = self._word_re.sub(lambda m: WORD_RENAMES[m.group(1)], text)
+        return self._bare_re.sub(lambda m: self.bare[m.group(1)], text) if self.bare else text
 
 
 def splice(text: str, edits: list[tuple[int, int, int, int, str]]) -> str:
@@ -374,12 +377,15 @@ def is_text(path: Path) -> bool:
         return False
     if "node_modules" in path.parts or path.suffix == ".json" and path.stat().st_size > 1_000_000:
         return False
-    return path.is_file() and path != SELF
+    return path.is_file() and path not in SKIP
 
 
 def run(apply: bool) -> int:
     files = tracked_files()
     moves = file_moves()
+    if not moves:
+        print("0 files move: the layout is already applied")
+        return 0
     rules = Rules(moves, files)
     rewriter = ImportRewriter(rules, moves)
     changed = 0
