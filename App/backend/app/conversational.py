@@ -477,7 +477,7 @@ def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
         return "en"
     if norm_loc in ("lg", "sw", "nyn", "ach"):
         try:
-            from .language_state import resolve_turn_locale
+            from .memory.language_state import resolve_turn_locale
 
             decision = resolve_turn_locale(text, history=[{"locale": norm_loc}])
             if decision.locale in ("en", "lg", "sw", "nyn", "ach"):

@@ -75,7 +75,7 @@ class TurnCancelTokenTests(unittest.TestCase):
         self.assertEqual(seen, [True])
 
     def test_a_cancelled_turn_does_not_start_its_next_stage(self):
-        from app.tracing import trace_stage
+        from app.observability.tracing import trace_stage
 
         ran: list[str] = []
         with trace_stage("hybrid_search"):
@@ -656,7 +656,7 @@ class StagedRun:
         self.running = 0
 
     def __call__(self, **kwargs):
-        from app.tracing import trace_stage
+        from app.observability.tracing import trace_stage
 
         key = "registration" if "TIN" in kwargs["message"].upper() else "rates"
         with self.lock:

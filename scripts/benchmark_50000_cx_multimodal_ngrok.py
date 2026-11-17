@@ -50,7 +50,7 @@ from app.escalation_policy import (  # noqa: E402
     assess_escalation,
     evaluate_cxp_schedule,
 )
-from app.language_state import resolve_turn_locale  # noqa: E402
+from app.memory.language_state import resolve_turn_locale  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402
 from app.officer_handoff import prune_required_details  # noqa: E402

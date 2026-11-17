@@ -86,7 +86,7 @@ This release closes critical customer experience (CX) and operational gaps ident
 * **OWASP LLM06 Excessive Agency Mitigation (`App/backend/app/mcp/policy.py`)**:
   - Enforced monetary transaction ceilings (`MAX_TRANSACTION_CEILING_UGX` default 50M UGX), requiring supervisor/admin sign-off for proposals exceeding threshold.
   - Implemented hourly critical action velocity limiters (`MCP_MAX_CRITICAL_ACTIONS_PER_HOUR` default 10/hour per user) using a thread-safe sliding window tracker.
-* **OpenTelemetry 1.30+ W3C Distributed Tracing (`App/backend/app/tracing.py`)**:
+* **OpenTelemetry 1.30+ W3C Distributed Tracing (`App/backend/app/observability/tracing.py`)**:
   - Implemented `generate_w3c_traceparent()` and `inject_trace_context()` to propagate standard W3C `traceparent` headers into outbound connector requests.
   - Added `trace_tool_call()` adhering to `gen_ai.system`, `gen_ai.tool.name`, and `gen_ai.tool.call.id` semconv.
 * **Anthropic MCP Resources Primitive & Universal Saga Compensation (`plugins/base.py`)**:

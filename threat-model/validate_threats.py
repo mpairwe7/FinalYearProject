@@ -758,7 +758,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Conversation logging with timestamps, OpenTelemetry tracing",
         "evidence": [
             "App/backend/app/db/database.py",
-            "App/backend/app/tracing.py",
+            "App/backend/app/observability/tracing.py",
         ],
         "status": "mitigated",
     },

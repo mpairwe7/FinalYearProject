@@ -84,7 +84,7 @@ const PROFILE_LANGUAGES = [
  * — and only when personalization consent is granted (it returns early on
  * `snapshot.consent_granted`). `primary_language` answers a new conversation
  * whose first message gives no language of its own ("TIN?") in Luganda or
- * Swahili (`app.language_state`). `industry` is stored and returned in the
+ * Swahili (`app.memory.language_state`). `industry` is stored and returned in the
  * data export, but nothing reads it into an answer today.
  */
 const DESCRIPTION =

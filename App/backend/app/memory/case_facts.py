@@ -27,10 +27,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from .calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
-from .rag.context_manager import extract_conversation_entities
-from .guardrails import redact_pii_text
-from .number_words import (
+from ..calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
+from ..rag.context_manager import extract_conversation_entities
+from ..guardrails import redact_pii_text
+from ..number_words import (
     _ACH_TENS,
     _ACH_UNITS,
     _LG_AGREEING,
@@ -316,7 +316,7 @@ _VERNACULAR_SCALE_PREFIX_RE = re.compile(
 
 def _normalize_vernacular_amount_words(text: str) -> str:
     """Convert Luganda/Swahili/Runyankole/Acholi number words after scale nouns into digits for ``extract_amounts``."""
-    from .number_words import normalize_vernacular_amount_words
+    from ..number_words import normalize_vernacular_amount_words
 
     return normalize_vernacular_amount_words(text)
 
@@ -882,7 +882,7 @@ def _scoped_case_key(
     if not conversation_id:
         return ""
     try:
-        from .db.database import conversation_state_key
+        from ..db.database import conversation_state_key
 
         scoped = conversation_state_key(
             conversation_id,

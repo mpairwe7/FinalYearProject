@@ -27,7 +27,7 @@ REQUIRED_FILES = [
     "governance/monitoring/cost_per_decision.csv",
     "SECURITY.md",
     "App/backend/app/guardrails.py",
-    "App/backend/app/tracing.py",
+    "App/backend/app/observability/tracing.py",
     "App/backend/app/rag/retriever.py",
     "ml/pipelines/evaluate_rag.py",
     "ml/pipelines/quality_gates.py",
@@ -71,8 +71,8 @@ REQUIRED_FILES = [
     ".github/workflows/monitoring-config.yml",
     "App/backend/app/audit/turns.py",
     "App/backend/app/audit/tsa.py",
-    "App/backend/app/security_events.py",
-    "App/backend/app/client_telemetry.py",
+    "App/backend/app/observability/security_events.py",
+    "App/backend/app/observability/client_telemetry.py",
     "App/backend/app/ai_disclosure.py",
     "ml/configs/quality_baseline.json",
     # Monorepo standardization & hierarchical agent governance (G208)
@@ -99,7 +99,7 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
         "should_escalate",
         "STORE_RAW_PROMPTS",
     ],
-    "App/backend/app/tracing.py": [
+    "App/backend/app/observability/tracing.py": [
         "init_tracing",
         "trace_rag_pipeline",
         "llm_call",

@@ -832,7 +832,7 @@ class ExplanationVsCalculationRoutingTests(unittest.TestCase):
 
     def test_wizard_prefills_from_case_facts_and_surfaces_assumptions(self) -> None:
         from app.calculator_router import prefill_plan_from_case_facts
-        from app.case_facts import extract_case_facts
+        from app.memory.case_facts import extract_case_facts
 
         # Case 1: 240 days in Uganda + UGX 5m salary -> resident + no missing slots
         facts_res = extract_case_facts(

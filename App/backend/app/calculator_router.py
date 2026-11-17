@@ -625,7 +625,7 @@ def clear_calculation(conversation_id: str) -> None:
     with _calc_lock:
         _calc_memory.pop(conversation_id, None)
     try:
-        from .case_facts import clear_case_facts
+        from .memory.case_facts import clear_case_facts
 
         clear_case_facts(conversation_id)
     except Exception:

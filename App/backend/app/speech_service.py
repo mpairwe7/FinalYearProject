@@ -1059,7 +1059,7 @@ class SpeechModel:
         result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
         if result.text and result.text.strip():
             try:
-                from .language_state import normalize_locale_tag
+                from .memory.language_state import normalize_locale_tag
                 from .receptionist.language import lexical_hits
 
                 norm_lang = normalize_locale_tag(result.language or language or "") or (language or "en")

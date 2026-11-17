@@ -248,7 +248,7 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
                 raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
         else:
             # Logged as an authn_login_fail security event by the request
-            # middleware (app.security_events), with this reason attached.
+            # middleware (app.observability.security_events), with this reason attached.
             request.state.security_reason = f"invalid token: {e}"[:160]
             raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
 

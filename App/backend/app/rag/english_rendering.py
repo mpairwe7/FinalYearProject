@@ -22,7 +22,7 @@ _PARAGRAPH_BREAK_RE = re.compile(r"(\n[ \t]*\n+)")
 def answer_in_english(reply: str) -> str:
     """*reply* in English when the turn was decided English but it is not.
 
-    The answer language is decided in code (``app.language_state``); the model
+    The answer language is decided in code (``app.memory.language_state``); the model
     is only asked to follow it. When the prompt carried another language — the
     taxpayer's earlier Luganda turns, before they were replayed in English
     (G119) — Sunflower followed those instead, live on 2026-10-06. This is the

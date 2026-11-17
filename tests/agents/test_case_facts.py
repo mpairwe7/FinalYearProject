@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from app.case_facts import (
+from app.memory.case_facts import (
     CaseFacts,
     Money,
     clear_case_facts,

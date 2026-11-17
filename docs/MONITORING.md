@@ -44,7 +44,7 @@ Grafana's first-login password, which it makes you change.
  │ (prometheus_client,  │  (all workers aggregated)          │  rules,    │   └──────────────┘
  │  PROMETHEUS_MULTI-   │                                    │  SLO burn  │◄── blackbox, redis-, node-,
  │  PROC_DIR)           │                                    └─────┬──────┘    dcgm-exporter, vLLM
- │ app.tracing (OTel)   ├── OTLP gRPC ──► OTel Collector ──► Jaeger │ (traces, tail-sampled)
+ │ app.observability.tracing (OTel)   ├── OTLP gRPC ──► OTel Collector ──► Jaeger │ (traces, tail-sampled)
  │ app.middleware.logger   ├── OTLP logs ──►       │       ──► Loki    │ (logs, 93 days)
  │ stdout JSON lines    │                       └──── :8889 ──► Prometheus (gen_ai.* metrics)
  └──────────────────────┘                                          ▼
@@ -54,8 +54,8 @@ Grafana's first-login password, which it makes you change.
 | Signal | Producer | Transport | Store / UI |
 | --- | --- | --- | --- |
 | Metrics | `App/backend/app/analytics.py` (prometheus_client) | Prometheus scrape of `/metrics` with `METRICS_TOKEN` | Prometheus, Grafana |
-| GenAI metrics | `App/backend/app/tracing.py` | OTLP → Collector → `:8889` | Prometheus |
-| Traces | `tracing.py` + FastAPI/httpx instrumentation | OTLP → Collector (tail sampling) | Jaeger |
+| GenAI metrics | `App/backend/app/observability/tracing.py` | OTLP → Collector → `:8889` | Prometheus |
+| Traces | `observability/tracing.py` + FastAPI/httpx instrumentation | OTLP → Collector (tail sampling) | Jaeger |
 | Logs | `middleware/logger.py` (root handler) | stdout JSON **and** OTLP → Collector | platform log pane; Loki |
 | Real users | `App/frontend/src/lib/web-vitals.ts`, `client-errors.ts` | `POST /v1/telemetry/{vitals,errors}` | Prometheus |
 | Synthetic | blackbox exporter | HTTP probes of `/health`, `/ready`, the frontend | Prometheus |
@@ -246,7 +246,7 @@ python -m pytest tests/test_monitoring_config.py -q
 
 ## 5. Tracing
 
-Off unless `OTEL_ENABLED=true`. `app/tracing.py` sets up the SDK with
+Off unless `OTEL_ENABLED=true`. `app/observability/tracing.py` sets up the SDK with
 `pipeline.name`, `pipeline.version`, `deployment.environment.name` and a
 per-worker `pipeline.instance.id`, instruments FastAPI (server span per
 request; inbound W3C `traceparent` honoured) and httpx (client spans;
@@ -310,7 +310,7 @@ library's records share one format. JSON lines (production, compose) carry:
 ### Security events
 
 401, 403 and 429 responses are logged as OWASP Logging Vocabulary events by
-`app/security_events.py` and counted in `ura_security_events_total{event}`:
+`app/observability/security_events.py` and counted in `ura_security_events_total{event}`:
 `authn_login_fail` (with the token rejection reason), `authz_fail`,
 `excess_rate_limit_exceeded`. Records name the route, status and authenticated
 actor; never the token or client IP.
@@ -591,10 +591,10 @@ its API was answering without the local LLM.
 | File | Purpose |
 | --- | --- |
 | `App/backend/app/analytics.py` | Metrics facade, request middleware, chat-turn recorder |
-| `App/backend/app/tracing.py` | OTel setup, GenAI spans/metrics, turn token usage |
+| `App/backend/app/observability/tracing.py` | OTel setup, GenAI spans/metrics, turn token usage |
 | `App/backend/app/middleware/logger.py` | Root JSON logging, request id, redaction |
-| `App/backend/app/security_events.py` | OWASP-vocabulary security events |
-| `App/backend/app/client_telemetry.py` | RUM endpoints' models and recording |
+| `App/backend/app/observability/security_events.py` | OWASP-vocabulary security events |
+| `App/backend/app/observability/client_telemetry.py` | RUM endpoints' models and recording |
 | `App/backend/app/audit/turns.py`, `audit/tsa.py` | Audit rows per turn; RFC 3161 seals |
 | `monitoring/prometheus.yml`, `recording-rules.yml`, `alerting-rules.yml` | Scrape, SLIs, alerts |
 | `monitoring/alertmanager.yml`, `blackbox.yml`, `otel-collector.yaml`, `loki.yaml` | Routing, probes, OTLP pipeline, log store |

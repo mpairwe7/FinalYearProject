@@ -9,7 +9,7 @@ import pytest
 
 from app.db import database as db
 from app import web_research as wr
-from app.case_facts import extract_case_facts
+from app.memory.case_facts import extract_case_facts
 
 
 @pytest.fixture(autouse=True)

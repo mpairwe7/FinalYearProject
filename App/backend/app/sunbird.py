@@ -417,7 +417,7 @@ def chat_completion(
     model call, with the provider's token usage. Raises on any failure,
     including an empty reply, so the caller's circuit breaker sees it.
     """
-    from .tracing import llm_call
+    from .observability.tracing import llm_call
 
     with llm_call("chat", SUNBIRD_LLM_MODEL, "sunbird") as call:
         resp = _post(

@@ -61,7 +61,7 @@ from app.escalation_policy import (  # noqa: E402
     evaluate_cxp_schedule,
 )
 from app.guardrails import OutputGuard  # noqa: E402
-from app.language_state import resolve_turn_locale  # noqa: E402
+from app.memory.language_state import resolve_turn_locale  # noqa: E402
 from app.mcp.tool_rag import ToolRAGSelector  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402

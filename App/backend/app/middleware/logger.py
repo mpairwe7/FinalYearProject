@@ -33,7 +33,7 @@ import traceback
 from typing import Any
 
 from ..guardrails import redact_pii_text
-from ..tracing import get_current_span_id, get_current_trace_id
+from ..observability.tracing import get_current_span_id, get_current_trace_id
 
 #: The current request's validated ``X-Request-ID``; set by the request
 #: middleware, read by :class:`RequestContextFilter`.

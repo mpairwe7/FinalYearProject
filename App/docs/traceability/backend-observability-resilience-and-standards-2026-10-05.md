@@ -31,7 +31,7 @@ This release addresses foundational backend gaps identified during the October 2
 ### 2.2 OpenTelemetry W3C Distributed Tracing (Gap 2.1)
 * **Problem**: Inbound HTTP requests carrying `traceparent` headers from client applications were not parsed at API ingress, causing backend spans to generate disconnected root trace IDs.
 * **Resolution**:
-  - Implemented `extract_trace_context()` in `App/backend/app/tracing.py` using `TraceContextTextMapPropagator`.
+  - Implemented `extract_trace_context()` in `App/backend/app/observability/tracing.py` using `TraceContextTextMapPropagator`.
   - Updated `security_headers` middleware in `App/backend/app/main.py` to extract incoming trace context, attach it to OpenTelemetry execution context, and emit an outbound `traceparent` response header.
   - Added `traceparent` and `tracestate` to `CORSMiddleware` `allow_headers`.
 

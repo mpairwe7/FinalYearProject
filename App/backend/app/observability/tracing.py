@@ -50,7 +50,7 @@ import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from .resilience import raise_if_turn_cancelled
+from ..resilience import raise_if_turn_cancelled
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
@@ -156,7 +156,7 @@ def _init_log_export(resource: Any) -> None:
     set_logger_provider(provider)
     handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
     # The redaction filter guards OTLP the same way it guards stdout.
-    from .middleware.logger import PIISanitizingFilter, RequestContextFilter
+    from ..middleware.logger import PIISanitizingFilter, RequestContextFilter
 
     handler.addFilter(RequestContextFilter())
     handler.addFilter(PIISanitizingFilter())
@@ -514,7 +514,7 @@ def _finish_llm_call(
     span: Any,
 ) -> None:
     try:
-        from .analytics import metrics
+        from ..analytics import metrics
 
         labels = {"provider": provider, "model": model, "operation": operation}
         status = "error" if error_type and error_type != "cancelled" else (error_type or "ok")
@@ -655,7 +655,7 @@ def trace_tool_call(
             with _usage_lock:
                 tool_calls_box[0] += 1
         try:
-            from .analytics import metrics
+            from ..analytics import metrics
 
             metrics.inc("tool_calls_total", labels={"tool": tool_name, "status": status})
             metrics.observe(
@@ -686,7 +686,7 @@ def record_evaluation(name: str, score: float | None, label: str = "", explanati
     if score is None:
         return
     try:
-        from .analytics import metrics
+        from ..analytics import metrics
 
         metrics.observe(
             "genai_evaluation_score",
@@ -715,7 +715,7 @@ def record_evaluation(name: str, score: float | None, label: str = "", explanati
 
 def record_retrieval_metrics(num_results: int, latency_ms: float) -> None:
     """Retrieval latency and hit count on ``/metrics``."""
-    from .analytics import metrics
+    from ..analytics import metrics
 
     metrics.observe("retrieval_duration_ms", latency_ms)
     metrics.observe("retrieval_results", float(num_results))

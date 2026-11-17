@@ -87,7 +87,7 @@ def record_mcp_security_event(
 def record_security_event(event: str, *, reason: str = "", **fields: Any) -> None:
     """Log and count one security event."""
     global _reserved
-    from .analytics import metrics
+    from ..analytics import metrics
 
     if not _reserved:
         metrics.reserve("security_events_total", "event", SECURITY_EVENT_NAMES)

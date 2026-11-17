@@ -191,7 +191,7 @@ def note_refusal(principal: str, guard: GuardResult) -> None:
     if not _friction_enabled() or not strike_tracker.record_strike(principal):
         return
     try:
-        from .security_events import record_security_event
+        from .observability.security_events import record_security_event
 
         record_security_event(
             "guardrail_strike_cooldown", reason="repeated_guard_blocks", principal=principal

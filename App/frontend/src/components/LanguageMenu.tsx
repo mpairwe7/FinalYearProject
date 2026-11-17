@@ -16,7 +16,7 @@ import { useTranslation } from "../lib/i18n";
  * returns focus to the trigger.
  *
  * With `onAutoDetect`, the first option is "Auto-detect": the answer follows
- * the language the taxpayer types (backend `app.language_state`), and `locale`
+ * the language the taxpayer types (backend `app.memory.language_state`), and `locale`
  * is then only the language the assistant last answered in. Picking a
  * language makes it the taxpayer's choice until they pick Auto-detect again.
  */

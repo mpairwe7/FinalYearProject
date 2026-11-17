@@ -102,7 +102,7 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
 
     A turn's stored ``locale`` (the language it was answered in) is kept when
     present: the answer language of the next turn is continued from it rather
-    than re-detected from text (:mod:`app.language_state`).
+    than re-detected from text (:mod:`app.memory.language_state`).
     """
     if not history:
         return []

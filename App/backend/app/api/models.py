@@ -81,7 +81,7 @@ class ChatRequest(BaseModel):
         description=(
             "True when the taxpayer chose `locale` themselves; false when it is only "
             "the client's default or an earlier detection. Omitted: a requested lg/sw "
-            "counts as a choice and en as a default (see app.language_state)."
+            "counts as a choice and en as a default (see app.memory.language_state)."
         ),
     )
 

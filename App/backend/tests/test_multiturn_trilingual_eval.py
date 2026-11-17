@@ -2,7 +2,7 @@
 
 Each scenario is a conversation in English, Luganda and Swahili, replayed the
 way the server keeps one. Every turn is decided by the real language state
-(:func:`app.language_state.resolve_turn_locale`) against the stored history,
+(:func:`app.memory.language_state.resolve_turn_locale`) against the stored history,
 then stored with its answer language and, for a Luganda or Swahili turn, its
 English form. The checks are:
 
@@ -27,7 +27,7 @@ from typing import Any
 
 from app.rag.context_manager import english_view, normalize_history_turns
 from app.guardrails import REPLAY_WITHHELD, scan_replayed_text
-from app.language_state import LanguageDecision, resolve_turn_locale
+from app.memory.language_state import LanguageDecision, resolve_turn_locale
 from app.memory.extractor import FactExtractor
 
 SCENARIOS = Path(__file__).resolve().parents[3] / "evals" / "multiturn_trilingual" / "scenarios.jsonl"

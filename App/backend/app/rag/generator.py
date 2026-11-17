@@ -73,7 +73,7 @@ from ..guardrails import (
     scan_external_tool_text,
 )
 from ..resilience import raise_if_turn_cancelled
-from ..tracing import llm_call
+from ..observability.tracing import llm_call
 from .prompt_builder import (
     COMPLEX_ANSWER_CONTRACT,
     STRUCTURED_JSON_SUFFIX,

@@ -1,4 +1,4 @@
-"""The answer language as conversation state (app.language_state).
+"""The answer language as conversation state (app.memory.language_state).
 
 Phrases are the load suite's own Luganda and Swahili questions
 (tests/load/ngrok_multilang_suite.py), not invented ones. Every case passes
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.language_state import (
+from app.memory.language_state import (
     EXPLICIT_SOURCES,
     established_locale,
     normalize_locale_tag,

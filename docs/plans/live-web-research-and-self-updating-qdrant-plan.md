@@ -129,7 +129,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
 ```text
 Incoming Chat Turn (REST `/v1/chat` or SSE `/v1/chat/stream`)
    │
-   ├──► 1. Extract `CaseFacts` (`case_facts.py`) & run `HybridRetriever.search_planned()` (Qdrant)
+   ├──► 1. Extract `CaseFacts` (`memory/case_facts.py`) & run `HybridRetriever.search_planned()` (Qdrant)
    │
    ├──► 2. Check 8 Web-Research Triggers (`web_research.py` — `FLAG_LIVE_WEB_RESEARCH`):
    │       │
