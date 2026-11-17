@@ -152,7 +152,7 @@ def classify_hybrid_speech_mode(
         )
 
     try:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "voice_hybrid_route_total",

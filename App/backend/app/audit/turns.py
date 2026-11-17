@@ -294,7 +294,7 @@ def build_turn_payload(
     usage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``generate`` payload: digests and decision context, never raw text."""
-    from ..analytics import turn_outcome
+    from ..observability.analytics import turn_outcome
 
     reply = str(result.get("reply", "") or "")
     sources = [str(source)[:200] for source in list(result.get("sources") or [])[:_MAX_LISTED]]
@@ -425,7 +425,7 @@ def append_turn(
         )
         return True
     except Exception:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc("audit_append_failed_total", labels={"event_type": "generate"})
         logger.warning("Audit append failed for a %s turn", channel, exc_info=True)

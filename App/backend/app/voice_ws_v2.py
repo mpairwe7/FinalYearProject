@@ -25,7 +25,7 @@ import uuid
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import ws_concurrency
-from .analytics import MetricSpec, record_mapped
+from .observability.analytics import MetricSpec, record_mapped
 from .auth import revocation
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .config.flags import flags
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-# Call-site key -> (kind, metric name, buckets); recorded through app.analytics.
+# Call-site key -> (kind, metric name, buckets); recorded through app.observability.analytics.
 _V2_METRICS: dict[str, MetricSpec] = {
     "_v2_connections_total": ("counter", "voice_v2_connections_total", None),
     "_v2_active": ("gauge", "voice_v2_active_connections", None),

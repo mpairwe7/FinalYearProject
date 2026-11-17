@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from ..analytics import metrics
+from ..observability.analytics import metrics
 from ..auth import AuthContext, current_user
 from ..config.flags import flags
 from .models import (

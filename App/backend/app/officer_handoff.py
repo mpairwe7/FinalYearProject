@@ -240,7 +240,7 @@ def enrich_handoff(
         if assessment is not None:
             handoff["escalation"] = assessment.to_dict()
             handoff["priority"] = higher_priority(str(handoff.get("priority") or "normal"), effective)
-            from .analytics import metrics  # noqa: PLC0415
+            from .observability.analytics import metrics  # noqa: PLC0415
 
             metrics.inc(
                 "cx_escalation_tier_total",

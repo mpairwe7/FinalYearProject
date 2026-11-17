@@ -13,7 +13,8 @@ from typing import Any
 
 import pytest
 
-from app import analytics, crawl_gate, freshness
+from app.observability import analytics
+from app import crawl_gate, freshness
 from app.api import health
 from app.crawl_gate import check_slo, evaluate, figures, vet_new_pdfs, write_candidate
 

@@ -17,7 +17,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
 
 from app.observability import tracing  # noqa: E402
-from app.analytics import metrics  # noqa: E402
+from app.observability.analytics import metrics  # noqa: E402
 
 USAGE_PAYLOAD = {
     "model": "Sunbird/Sunflower-Qwen3.5-9B",
@@ -214,21 +214,21 @@ class LanguageDecisionMetricTest(unittest.TestCase):
         return f'language_decisions_total{{channel="sse",locale="{locale}",source="{source}"}}'
 
     def test_each_decision_is_counted_once(self) -> None:
-        from app.analytics import record_chat_turn
+        from app.observability.analytics import record_chat_turn
 
         before = _counter(self._key("lg", "continuity"))
         record_chat_turn({"locale": "lg", "locale_source": "continuity"}, elapsed_ms=10.0, channel="sse")
         self.assertEqual(_counter(self._key("lg", "continuity")), before + 1)
 
     def test_unknown_values_fold_into_other(self) -> None:
-        from app.analytics import record_language_decision
+        from app.observability.analytics import record_language_decision
 
         before = _counter(self._key("other", "other"))
         record_language_decision({"locale": "fr", "locale_source": "guessed"}, channel="sse")
         self.assertEqual(_counter(self._key("other", "other")), before + 1)
 
     def test_a_turn_without_a_decision_is_not_counted(self) -> None:
-        from app.analytics import record_language_decision
+        from app.observability.analytics import record_language_decision
 
         before = sum(v for k, v in metrics.snapshot()["counters"].items() if k.startswith("language_decisions_total"))
         record_language_decision({"locale": "en"}, channel="sse")

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import generator as generator_module
-from ..analytics import metrics
+from ..observability.analytics import metrics
 from .turn_context import TURN_GENERATION
 
 

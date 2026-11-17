@@ -1,4 +1,4 @@
-"""The Prometheus metrics facade (app.analytics).
+"""The Prometheus metrics facade (app.observability.analytics).
 
 Pins the failures the in-process store had (docs/GAPS_AND_AGENTIC_ROADMAP.md
 G99): counters that differed per uvicorn worker, "histogram" buckets that
@@ -21,8 +21,8 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import analytics  # noqa: E402
-from app.analytics import (  # noqa: E402
+from app.observability import analytics  # noqa: E402
+from app.observability.analytics import (  # noqa: E402
     AnalyticsMiddleware,
     MetricsStore,
     bucket_quantile,
@@ -219,7 +219,7 @@ class MultiProcessAggregationTest(unittest.TestCase):
             worker = textwrap.dedent(
                 """
                 import sys
-                from app.analytics import metrics
+                from app.observability.analytics import metrics
                 for _ in range(int(sys.argv[1])):
                     metrics.inc("http_requests_total", labels={"method": "GET", "path": "/x", "status": "200"})
                     metrics.observe("chat_response_time_ms", 250.0, labels={"channel": "sse", "mode": "hybrid"})
@@ -227,7 +227,7 @@ class MultiProcessAggregationTest(unittest.TestCase):
             )
             for count in ("3", "5"):
                 subprocess.run([sys.executable, "-c", worker, count], env=env, check=True, timeout=120)
-            reader = "from app.analytics import metrics; print(metrics.to_prometheus())"
+            reader = "from app.observability.analytics import metrics; print(metrics.to_prometheus())"
             out = subprocess.run(
                 [sys.executable, "-c", reader], env=env, check=True, timeout=120, capture_output=True, text=True
             ).stdout

@@ -160,7 +160,7 @@ ignore = [
 # Backend CLI entry-points (audit verifier, etc.)
 "App/backend/app/audit/verifier.py" = ["T201"]
 # Best-effort exception handlers are intentional in resilience code
-"App/backend/app/analytics.py" = ["S110"]
+"App/backend/app/observability/analytics.py" = ["S110"]
 "App/backend/app/rag/cache.py" = ["S110"]
 "App/backend/app/audit/ledger.py" = ["S110", "SIM105"]
 "App/backend/app/speech_service.py" = ["S110"]

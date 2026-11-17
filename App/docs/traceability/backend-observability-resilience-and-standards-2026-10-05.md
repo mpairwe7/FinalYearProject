@@ -9,7 +9,7 @@
 ## 1. Executive Summary & Purpose
 
 This release addresses foundational backend gaps identified during the October 2026 architectural audit of the URA Taxpayer Assistant:
-1. **Prometheus Metrics Alignment**: Fixed metric namespace desynchronization and histogram bucketing between `analytics.py` and `monitoring/alerting-rules.yml` / Grafana dashboards.
+1. **Prometheus Metrics Alignment**: Fixed metric namespace desynchronization and histogram bucketing between `observability/analytics.py` and `monitoring/alerting-rules.yml` / Grafana dashboards.
 2. **Distributed Tracing (OpenTelemetry)**: Added W3C `traceparent` extraction at API ingress and outbound header injection, ensuring end-to-end trace correlation across Next.js frontend and backend spans.
 3. **Structured JSON Logging & PII Scrubbing**: Replaced plain-text formatting with `StructuredJsonFormatter` adhering to the OpenTelemetry Log Data Model and wired `PIISanitizingFilter` to scrub taxpayer PII from all log outputs.
 4. **Streaming Analytics Observability**: Instrumented SSE and voice chat lifecycles to observe retrieval modes, faithfulness scores, and escalation events on streaming responses.
@@ -24,7 +24,7 @@ This release addresses foundational backend gaps identified during the October 2
 ### 2.1 Prometheus Metrics & Alerting Alignment (Gap 1.1 & 1.2)
 * **Problem**: `MetricsStore` emitted bare metric names (`http_requests_total`, `chat_response_time_ms`) formatted as summaries. `monitoring/alerting-rules.yml` and Grafana queried `ura_` prefixed metrics and evaluated `histogram_quantile()` on `ura_chat_response_time_ms_bucket`. Because summaries do not export `_bucket` series, latency and availability alerts could never trigger.
 * **Resolution**:
-  - `MetricsStore.to_prometheus()` in `App/backend/app/analytics.py` now automatically dual-emits both the base name and the `ura_` prefixed alias.
+  - `MetricsStore.to_prometheus()` in `App/backend/app/observability/analytics.py` now automatically dual-emits both the base name and the `ura_` prefixed alias.
   - Implemented standard Prometheus histogram duration buckets (`_LATENCY_MS_BUCKETS` and `_LATENCY_S_BUCKETS`) for all latency/duration metrics, emitting `_bucket{le="..."}`, `_count`, and `_sum`.
   - Added direct gauge emission for evaluation scores (`faithfulness_score` and `ura_faithfulness_score`).
 

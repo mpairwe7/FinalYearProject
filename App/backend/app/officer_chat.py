@@ -505,7 +505,7 @@ def delegate_ticket_to_ai(
         is_delegation=True,
     )
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc(
             "workforce_delegation_total",
@@ -547,7 +547,7 @@ def capture_officer_preference_pair(
     raw_locale = str(ticket.get("locale") or "en").strip().lower() or "en"
     metric_locale = _bounded_locale(raw_locale)
     with contextlib.suppress(Exception):
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.observe(
             "officer_copilot_edit_distance_ratio",

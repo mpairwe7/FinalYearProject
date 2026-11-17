@@ -33,7 +33,7 @@ import uuid
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import ws_concurrency
-from .analytics import MetricSpec, record_mapped
+from .observability.analytics import MetricSpec, record_mapped
 from .auth import revocation
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .config.flags import flags
@@ -43,12 +43,12 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Prometheus metrics (recorded through app.analytics)
+# Prometheus metrics (recorded through app.observability.analytics)
 # ---------------------------------------------------------------------------
 
 _SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-# Call-site key -> (kind, metric name, buckets); recorded through app.analytics
+# Call-site key -> (kind, metric name, buckets); recorded through app.observability.analytics
 # so they reach /metrics with every other worker's samples.
 _METRICS: dict[str, MetricSpec] = {
     "_ws_connections_total": ("counter", "voice_ws_connections_total", None),

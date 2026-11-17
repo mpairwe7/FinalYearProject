@@ -61,7 +61,7 @@ qdrant-client>=1.19.1,<1.20
 cryptography>=44.0.0
 lingua-language-detector>=2.0.0
 
-# Prometheus metrics, aggregated across uvicorn workers (app/analytics.py)
+# Prometheus metrics, aggregated across uvicorn workers (app/observability/analytics.py)
 prometheus-client>=0.26.0
 
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib

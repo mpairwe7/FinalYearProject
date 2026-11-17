@@ -20,7 +20,7 @@ from unittest.mock import patch
 import httpx
 from app import process_role
 from app.api import health as health_routes
-from app.analytics import MetricsStore, metrics
+from app.observability.analytics import MetricsStore, metrics
 from starlette.routing import Route, WebSocketRoute
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect

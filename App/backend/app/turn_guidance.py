@@ -163,7 +163,7 @@ def _offer_person(
         # put first (a paused guided flow leads with the officer, Phase 39).
         actions.append(HANDOFF_ACTION)
     try:
-        from .analytics import metrics  # noqa: PLC0415
+        from .observability.analytics import metrics  # noqa: PLC0415
 
         metrics.inc(
             "cx_escalation_tier_total",

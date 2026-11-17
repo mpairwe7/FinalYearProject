@@ -463,7 +463,7 @@ class ResolutionLedger:
                 return None
             if current_channel and case.source_channel and current_channel != case.source_channel:
                 try:
-                    from ..analytics import metrics
+                    from ..observability.analytics import metrics
 
                     metrics.inc(
                         "relationship_resumption_total",
@@ -688,7 +688,7 @@ class ResolutionLedger:
                 checkpoint_ok = bool(self.checkpoint(user_id, case, tenant_id=tenant))
                 if checkpoint_ok:
                     try:
-                        from ..analytics import metrics
+                        from ..observability.analytics import metrics
 
                         metrics.inc(
                             "relationship_resumption_total",
@@ -737,7 +737,7 @@ class ResolutionLedger:
         ok = self.checkpoint(user_id, case, tenant_id=tenant_id)
         if ok:
             try:
-                from ..analytics import metrics
+                from ..observability.analytics import metrics
 
                 metrics.inc(
                     "relationship_resumption_total",
@@ -814,7 +814,7 @@ class ResolutionLedger:
             selected = cases[0]
         if current_channel and selected.source_channel and current_channel != selected.source_channel:
             try:
-                from ..analytics import metrics
+                from ..observability.analytics import metrics
 
                 metrics.inc(
                     "relationship_resumption_total",
@@ -889,7 +889,7 @@ class ResolutionLedger:
         if not self.checkpoint(user_id, case, tenant_id=tenant_id, asr_confidence=asr_confidence):
             return None
         try:
-            from ..analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.inc(
                 "cx_case_events_total",

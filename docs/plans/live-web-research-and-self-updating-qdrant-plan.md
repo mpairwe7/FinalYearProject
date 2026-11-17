@@ -35,7 +35,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
   ```
 - Any new feature flag must land in **all three** files: `App/backend/app/config/flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
 - Any new FastAPI route must land in `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
-- Metrics go through `App/backend/app/analytics.py` (`metrics.inc(...)` / `metrics.observe(...)`) only, with bounded label values.
+- Metrics go through `App/backend/app/observability/analytics.py` (`metrics.inc(...)` / `metrics.observe(...)`) only, with bounded label values.
 
 ### 0.2 Data Sovereignty & Outbound Web Rules (`SOVEREIGN_MODE=true`)
 

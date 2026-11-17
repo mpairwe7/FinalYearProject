@@ -230,7 +230,7 @@ def assess(
             from ..config.flags import flags
 
             if flags.is_enabled("eq_adaptive_retrieval") or flags.is_enabled("eq_multimodal_fusion"):
-                from ..analytics import metrics
+                from ..observability.analytics import metrics
 
                 metrics.inc(
                     "eq_interventions_total",
@@ -423,7 +423,7 @@ def fuse_multimodal_affect(
             from ..config.flags import flags
 
             if flags.is_enabled("eq_multimodal_fusion", subject=user_id) or flags.is_enabled("eq_adaptive_retrieval", subject=user_id):
-                from ..analytics import metrics
+                from ..observability.analytics import metrics
 
                 metrics.inc(
                     "eq_interventions_total",

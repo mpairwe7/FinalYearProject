@@ -169,7 +169,7 @@ def _load_bou_fx_file() -> dict[str, Any]:
 
 def _count_quote(outcome: str) -> None:
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc("fx_quotes_total", labels={"outcome": outcome})
     except Exception:  # noqa: BLE001 - telemetry must never fail a conversion

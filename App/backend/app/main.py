@@ -45,7 +45,7 @@ from pydantic import BaseModel, Field, field_validator
 from .db import database as db
 from . import documents
 from . import officer_hours
-from .analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
+from .observability.analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .observability.security_events import record_http_security_event
 from .text_signals import ESCALATION_NOT_QUEUED_REPLY
 from .observability.tracing import current_traceresponse

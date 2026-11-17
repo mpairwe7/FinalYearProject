@@ -348,7 +348,7 @@ class StaleCallTests(unittest.TestCase):
 
 def counter(name: str, **labels: str) -> float:
     """The current value of one exported counter series (0 when it does not exist yet)."""
-    from app.analytics import metrics
+    from app.observability.analytics import metrics
 
     pairs = ",".join(f'{key}="{value}"' for key, value in sorted(labels.items()))
     key = f"{name}{{{pairs}}}" if pairs else name
@@ -607,7 +607,7 @@ class CallTelemetryTests(unittest.IsolatedAsyncioTestCase):
     def test_every_series_an_alert_reads_exists_before_the_first_failure(self):
         # increase() sees nothing in a series that first appears at 1: the
         # first failure after a restart would not count toward its alert.
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
         from app.receptionist import telemetry
 
         telemetry.declare()
@@ -966,7 +966,7 @@ class StartReviewTests(unittest.TestCase):
         sweep.assert_called_once()
 
     def test_the_refusal_counters_exist_even_when_the_start_fails(self):
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         with (
             patch.object(receptionist, "is_available", return_value=False),
@@ -1233,7 +1233,7 @@ class AvailabilityGaugeTests(unittest.TestCase):
         self.addCleanup(receptionist.reset)
 
     def gauge(self) -> float:
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         text = metrics.to_prometheus()
         line = next(l for l in text.splitlines() if l.startswith("ura_receptionist_available"))
@@ -1299,7 +1299,7 @@ class ThirdReviewStartTests(unittest.TestCase):
         self.addCleanup(receptionist.reset)
 
     def test_the_availability_gauge_keeps_the_worst_worker(self):
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         family = metrics._family("gauge_min", "receptionist_available", (), None)
 

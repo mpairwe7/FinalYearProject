@@ -450,7 +450,7 @@ Traced spans (GenAI semantic conventions, Development status — see
 
 ### Prometheus metrics
 
-`/metrics` aggregates every uvicorn worker (`App/backend/app/analytics.py`,
+`/metrics` aggregates every uvicorn worker (`App/backend/app/observability/analytics.py`,
 `PROMETHEUS_MULTIPROC_DIR`) and needs a credential: set `METRICS_TOKEN` and
 have Prometheus send it as a bearer token.
 

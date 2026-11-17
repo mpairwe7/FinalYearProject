@@ -470,7 +470,7 @@ def record_eval_report(report: EvalReport) -> None:
     A run with no samples sets ``ura_eval_samples`` to 0 and leaves the last
     verdicts in place rather than reporting a pass.
     """
-    from .analytics import metrics
+    from .observability.analytics import metrics
 
     metrics.set_gauge("eval_samples", report.sample_size)
     metrics.set_gauge("eval_last_run_timestamp_seconds", report.started_at)

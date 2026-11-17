@@ -405,7 +405,7 @@ class SealTimestampTest(unittest.TestCase):
         self.assertIn("malformed", broken.reason)
 
     def test_unreachable_tsa_still_seals_and_is_counted(self) -> None:
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
         from app.audit import get_ledger
 
         tenant = f"tsa-{uuid.uuid4().hex[:8]}"

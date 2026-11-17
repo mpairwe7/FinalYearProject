@@ -2638,7 +2638,7 @@ HIGH_VALUE_LIABILITY_THRESHOLD_UGX = 50_000_000
 def _record_copilot_card_metric(card: Mapping[str, Any], tier: str) -> None:
     """Emit bounded Prometheus counter for generated Portal Co-Pilot cards."""
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc(
             "portal_copilot_cards_total",
@@ -2653,7 +2653,7 @@ def _record_copilot_decision_metric(
 ) -> None:
     """Emit bounded Prometheus counter and latency histogram for Portal Co-Pilot HITL decisions."""
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc(
             "portal_copilot_decisions_total",

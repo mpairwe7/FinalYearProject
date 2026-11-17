@@ -346,7 +346,7 @@ chat's owner (`receptionist/carryover.py`).
 - Metrics: `gen_ai.client.token.usage` counter, `gen_ai.retrieval.duration` histogram
 - PII safety: logs query length, not content
 
-**Prometheus** (`analytics.py`):
+**Prometheus** (`observability/analytics.py`):
 - `GET /metrics` endpoint for scraping
 - Request counters, latency histograms, error counters, escalation counters
 
@@ -476,7 +476,7 @@ App/backend/app/
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── observability/tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
-├── analytics.py         # Prometheus-compatible metrics middleware
+├── observability/analytics.py         # Prometheus-compatible metrics middleware
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)

@@ -1340,7 +1340,7 @@ def build_verified_facts(
             if label not in run.not_computed:
                 run.not_computed.append(label)
         try:
-            from .analytics import metrics
+            from .observability.analytics import metrics
 
             metrics.inc("plan_steps_total", labels={"outcome": outcome})
         except Exception:  # noqa: BLE001 - telemetry must never fail a turn

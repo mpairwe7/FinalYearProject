@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 
-from ..analytics import METRICS_CONTENT_TYPE, metrics
+from ..observability.analytics import METRICS_CONTENT_TYPE, metrics
 from ..auth import AuthContext
 from ..config.settings import API_VERSION
 from ..middleware.rate_limiter import limiter

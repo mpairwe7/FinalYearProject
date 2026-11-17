@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("qdrant_client")
 
-from app.analytics import MetricsStore
+from app.observability.analytics import MetricsStore
 from app.freshness import FreshnessReport, compare_index_hash
 from app.vectorstore.index_lifecycle import (
     IndexLifecycleError,

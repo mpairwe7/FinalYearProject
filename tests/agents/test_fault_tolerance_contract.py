@@ -25,7 +25,7 @@ import pytest
 from app.rag import generator
 from app.rag import pipeline as pipeline_module
 from app.agents.loop_control import ToolCallBudget
-from app.analytics import metrics
+from app.observability.analytics import metrics
 from app.config.flags import flags
 from app.providers import breakers
 from app.providers.routing import ModelTier

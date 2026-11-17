@@ -15,5 +15,5 @@ Owns observability configuration, recording/alerting rules, and service-level ob
 
 ## Invariants
 
-- Every metric series named in `recording-rules.yml`, `alerting-rules.yml`, or Grafana dashboards must be emitted by `App/backend/app/analytics.py` (`tests/test_monitoring_config.py` enforces this in CI).
+- Every metric series named in `recording-rules.yml`, `alerting-rules.yml`, or Grafana dashboards must be emitted by `App/backend/app/observability/analytics.py` (`tests/test_monitoring_config.py` enforces this in CI).
 - Burn-rate windows in `alerting-rules.yml` must match `slo/ura-chatbot.openslo.yaml`.

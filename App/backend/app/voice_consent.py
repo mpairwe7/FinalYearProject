@@ -264,7 +264,7 @@ def log_voice_event(
                 user_id=user_id,
             )
         except Exception:
-            from .analytics import metrics
+            from .observability.analytics import metrics
 
             metrics.inc("audit_append_failed_total", labels={"event_type": f"voice_{event_type}"})
             logger.warning("AuditLedger chain failed for voice event %s", event_type, exc_info=True)

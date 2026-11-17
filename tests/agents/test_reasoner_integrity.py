@@ -28,7 +28,7 @@ from app.agents.graphs.state import AgentGraphState
 from app.agents.state import AgentRoute, RouteDecision
 from app.agents import tiebreak
 from app.agents.tiebreak import _READ_ONLY_TOOLS, cache_clear, refine
-from app.analytics import metrics
+from app.observability.analytics import metrics
 from app.config.flags import flags
 from app.guardrails import FigureReleaseGate, OutputGuard
 from app.providers.routing import ModelTier

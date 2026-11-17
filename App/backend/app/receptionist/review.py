@@ -173,7 +173,7 @@ def ask(room: CallRoom, moment: str) -> None:
 
 def _count(source: str, label: str) -> None:
     try:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc("service_rating_total", labels={"source": source, "sentiment": label})
     except Exception:

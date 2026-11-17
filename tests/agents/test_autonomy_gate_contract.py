@@ -174,7 +174,7 @@ class TestABlockIsNotConditionalOnItsRecord:
         assert result["ok"] is True
 
     def test_the_fault_is_counted(self, gates, probe_name, monkeypatch) -> None:
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         _tool(probe_name, risk="high", read_only=False)
 

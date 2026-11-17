@@ -264,7 +264,7 @@ def test_an_instruction_after_long_benign_text_is_caught() -> None:
 
 def test_metric_labels_use_the_host_group_and_the_log_keeps_the_host(monkeypatch: pytest.MonkeyPatch,
                                                                     caplog: pytest.LogCaptureFixture) -> None:
-    from app.analytics import metrics
+    from app.observability.analytics import metrics
 
     labels: list[dict] = []
     monkeypatch.setattr(metrics, "inc", lambda name, value=1, labels_=None, **kw: labels.append(kw.get("labels") or labels_))

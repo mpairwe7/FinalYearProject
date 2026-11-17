@@ -477,10 +477,10 @@ class TestDatabaseLayer:
 
 
 class TestMetricsStore:
-    """The metrics facade over prometheus_client (App/backend/app/analytics.py)."""
+    """The metrics facade over prometheus_client (App/backend/app/observability/analytics.py)."""
 
     def test_counter_increment(self):
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         store.inc("test_counter_total")
@@ -491,7 +491,7 @@ class TestMetricsStore:
 
     def test_histogram_observation(self):
         """count / sum / avg are exact; percentiles come from the buckets."""
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         for v in [10.0, 20.0, 30.0, 40.0, 50.0]:
@@ -504,7 +504,7 @@ class TestMetricsStore:
 
     def test_histogram_counts_every_observation(self):
         """No sliding window: the 6000th observation is still counted."""
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         for i in range(6000):
@@ -515,7 +515,7 @@ class TestMetricsStore:
 
     def test_prometheus_export(self):
         """Test Prometheus text format export."""
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         store.inc("http_requests_total", labels={"method": "GET", "path": "/health", "status": "200"})
@@ -526,7 +526,7 @@ class TestMetricsStore:
 
     def test_prometheus_no_duplicate_type_declarations(self):
         """TYPE is declared once per family, and there is no bare-name twin."""
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         store.inc("req_total", labels={"method": "GET"})
@@ -538,7 +538,7 @@ class TestMetricsStore:
 
     def test_labeled_metrics(self):
         """Test metrics with labels."""
-        from App.backend.app.analytics import MetricsStore
+        from App.backend.app.observability.analytics import MetricsStore
 
         store = MetricsStore()
         store.inc("req_total", labels={"method": "GET"})

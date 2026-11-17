@@ -499,7 +499,7 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
     def test_the_sixteenth_control_message_in_ten_seconds_is_dropped(self):
         """G304 (ADR-0047): each control message became a pipeline frame (a ``text_turn``
         a model turn) however many the caller sent. A stopped clock: no budget refills."""
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         series = 'receptionist_frames_dropped_total{reason="rate",side="caller"}'
         before = float(metrics.snapshot()["counters"].get(series, 0))

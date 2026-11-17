@@ -640,7 +640,7 @@ def test_anonymous_principals_are_scoped_to_their_tenant() -> None:
 
 def test_alerted_security_events_stay_distinct_at_the_series_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """At the minimum series cap a guardrail event must not fold into __other__ and mute its alert."""
-    import app.analytics as analytics
+    import app.observability.analytics as analytics
     from app.observability.security_events import SECURITY_EVENT_NAMES, record_security_event
 
     monkeypatch.setattr(analytics, "_MAX_SERIES_PER_METRIC", 10)

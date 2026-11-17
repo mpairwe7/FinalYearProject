@@ -15,7 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.websockets import WebSocket
 
 from .. import documents, officer_hours
-from ..analytics import metrics, record_chat_turn
+from ..observability.analytics import metrics, record_chat_turn
 from ..auth import AuthContext, optional_user
 from ..db import database as db
 from ..middleware.rate_limiter import RATE_LIMIT, limiter

@@ -593,7 +593,7 @@ class ToolRegistry:
     @staticmethod
     def _gate_fault(stage: str) -> None:
         try:
-            from ..analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.inc("autonomy_gate_faults_total", labels={"stage": stage})
         except Exception:

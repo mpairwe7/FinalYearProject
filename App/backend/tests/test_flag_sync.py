@@ -24,7 +24,7 @@ from unittest import mock
 import pytest
 from app.db import database as db
 from app import main as main_mod
-from app.analytics import metrics
+from app.observability.analytics import metrics
 from app.auth import make_dev_token
 from app.config.flags import FeatureFlags, flags
 from fastapi.testclient import TestClient

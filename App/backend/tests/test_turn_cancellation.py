@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.db import database as db
-from app.analytics import metrics
+from app.observability.analytics import metrics
 from app.resilience import (
     TURN_CANCEL_STAGES,
     CancelScope,

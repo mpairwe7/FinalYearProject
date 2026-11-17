@@ -1771,7 +1771,7 @@ def test_phase39_eq_conversational_and_structuring_tools_5_locale_uniformity():
 
 
 def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
-    from app.analytics import _DECISION_LOCALES
+    from app.observability.analytics import _DECISION_LOCALES
     from app.calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
     from app.discrepancy_detector import format_discrepancy_acknowledgement
     from app.memory.resolution_ledger import ResolutionCase, build_resumption_prompt
