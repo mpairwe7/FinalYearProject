@@ -701,7 +701,7 @@ FinalYearProject/
 │   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
 │   │   │   ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   │   ├── observability/tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
-│   │   │   ├── analytics.py # Prometheus-compatible metrics + middleware
+│   │   │   ├── observability/analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
 │   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
 │   │   │   ├── voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)

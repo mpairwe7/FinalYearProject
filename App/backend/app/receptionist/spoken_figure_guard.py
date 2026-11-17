@@ -260,7 +260,7 @@ def verify_spoken_figures(
     status = "verified" if ok else "fallback_text_only"
 
     try:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "spoken_figure_verification_total",

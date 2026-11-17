@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .._root import APP_DATA_ROOT as _APP_DATA_ROOT
-from ..analytics import metrics
+from ..observability.analytics import metrics
 
 # Point ids live in their own module (the dense leg's CI cache keys on it);
 # re-exported here for every caller that imports them from the retriever.

@@ -217,7 +217,7 @@ class TestEveryTurnIsAudited:
         assert payload["disposition"] == "completed"
 
     def test_a_cancelled_turn_has_its_own_outcome(self, stream) -> None:
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         stream(["The ", "rate ", "is ", "18%. "], pause=0.05)
         polls = {"n": 0}

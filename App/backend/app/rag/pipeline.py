@@ -52,7 +52,7 @@ from .. import mt
 from .. import officer_hours
 from ..agents import AgentRoute, supervisor
 from ..agents.evaluator import RevisionBudget, evaluate
-from ..analytics import metrics
+from ..observability.analytics import metrics
 from ..connector_intent import ConnectorIntent, detect_connector_intent
 from ..connector_outcome import classify_all as classify_connector_outcomes
 from ..connector_outcome import compose as compose_connector_reply
@@ -2662,7 +2662,7 @@ def _finish_streamed_turn(
     it ended. Only a completed turn writes to memory or a case, and only a
     completed turn is attested, because the others did not finish the pipeline.
     """
-    from ..analytics import record_chat_turn
+    from ..observability.analytics import record_chat_turn
     from ..turn_pipeline import attest_turn
 
     result = log_payload.get("result") or {}
@@ -8345,7 +8345,7 @@ class ChatModel:
         problem — and so is a person.
         """
         try:
-            from ..analytics import metrics  # noqa: PLC0415
+            from ..observability.analytics import metrics  # noqa: PLC0415
 
             metrics.inc("wellbeing_checkin_total", labels={"locale": locale or "en"})
         except Exception:  # noqa: BLE001 - a counter never changes the turn
@@ -8570,7 +8570,7 @@ class ChatModel:
             help_line = "Tell me what isn't working, or an officer can help."
             actions = [_WORKFLOW_CONTINUE_ACTION, HANDOFF_ACTION, _WORKFLOW_CANCEL_ACTION]
         try:
-            from ..analytics import metrics  # noqa: PLC0415
+            from ..observability.analytics import metrics  # noqa: PLC0415
 
             metrics.inc(
                 "workflow_offramp_total",

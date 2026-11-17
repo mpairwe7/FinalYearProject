@@ -40,7 +40,7 @@ Grafana's first-login password, which it makes you change.
 ```
  uvicorn workers (N)                          monitoring profile
  ┌──────────────────────┐   scrape + Bearer METRICS_TOKEN   ┌────────────┐   ┌──────────────┐
- │ app.analytics facade ├──────────── /metrics ────────────►│ Prometheus ├──►│ Alertmanager ├──► webhook
+ │ app.observability.analytics facade ├──────────── /metrics ────────────►│ Prometheus ├──►│ Alertmanager ├──► webhook
  │ (prometheus_client,  │  (all workers aggregated)          │  rules,    │   └──────────────┘
  │  PROMETHEUS_MULTI-   │                                    │  SLO burn  │◄── blackbox, redis-, node-,
  │  PROC_DIR)           │                                    └─────┬──────┘    dcgm-exporter, vLLM
@@ -53,7 +53,7 @@ Grafana's first-login password, which it makes you change.
 
 | Signal | Producer | Transport | Store / UI |
 | --- | --- | --- | --- |
-| Metrics | `App/backend/app/analytics.py` (prometheus_client) | Prometheus scrape of `/metrics` with `METRICS_TOKEN` | Prometheus, Grafana |
+| Metrics | `App/backend/app/observability/analytics.py` (prometheus_client) | Prometheus scrape of `/metrics` with `METRICS_TOKEN` | Prometheus, Grafana |
 | GenAI metrics | `App/backend/app/observability/tracing.py` | OTLP → Collector → `:8889` | Prometheus |
 | Traces | `observability/tracing.py` + FastAPI/httpx instrumentation | OTLP → Collector (tail sampling) | Jaeger |
 | Logs | `middleware/logger.py` (root handler) | stdout JSON **and** OTLP → Collector | platform log pane; Loki |
@@ -83,7 +83,7 @@ readable with `METRICS_TOKEN` by any external Prometheus.
 
 ## 3. Metrics
 
-All API metrics go through the facade in `app/analytics.py`:
+All API metrics go through the facade in `app/observability/analytics.py`:
 `metrics.inc(name, labels=…)`, `metrics.observe(name, value, labels=…)`,
 `metrics.set_gauge(…)`, `metrics.add_gauge(…)`. Rules the facade enforces:
 
@@ -590,7 +590,7 @@ its API was answering without the local LLM.
 
 | File | Purpose |
 | --- | --- |
-| `App/backend/app/analytics.py` | Metrics facade, request middleware, chat-turn recorder |
+| `App/backend/app/observability/analytics.py` | Metrics facade, request middleware, chat-turn recorder |
 | `App/backend/app/observability/tracing.py` | OTel setup, GenAI spans/metrics, turn token usage |
 | `App/backend/app/middleware/logger.py` | Root JSON logging, request id, redaction |
 | `App/backend/app/observability/security_events.py` | OWASP-vocabulary security events |

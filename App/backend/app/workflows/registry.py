@@ -656,7 +656,7 @@ class WorkflowRegistry:
                 step_idx, total_s, _ = compute_workflow_progress(wf, session, step.id)
                 s_title = step.title or default_step_title(step.id)
                 try:
-                    from ..analytics import metrics
+                    from ..observability.analytics import metrics
 
                     metrics.inc(
                         "workflow_tangent_resumed_total",

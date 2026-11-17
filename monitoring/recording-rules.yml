@@ -30,7 +30,7 @@ groups:
     interval: 30s
     rules:
       # Share of chat turns slower than the 3 s objective. The 3000 ms bucket
-      # is one of the API's histogram boundaries (app/analytics.py).
+      # is one of the API's histogram boundaries (app/observability/analytics.py).
       - record: ura:chat_turns_slow:ratio_rate5m
         expr: 1 - sum(rate(ura_chat_response_time_ms_bucket{le="3000.0"}[5m])) / sum(rate(ura_chat_response_time_ms_count[5m]))
       - record: ura:chat_turns_slow:ratio_rate30m

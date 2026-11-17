@@ -426,7 +426,7 @@ class MemoryService:
             pending_background_tasks=list(pending_background_tasks or []),
         )
         try:
-            from ..analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.observe(
                 "handoff_envelope_completeness_ratio",

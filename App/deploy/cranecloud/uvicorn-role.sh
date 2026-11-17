@@ -73,7 +73,7 @@ fi
 export URA_PROCESS_ROLE="$ROLE"
 
 # Each worker writes its samples to this directory and /metrics adds them up
-# (app/analytics.py), so files left by a previous run would be counted twice.
+# (app/observability/analytics.py), so files left by a previous run would be counted twice.
 # They are cleared once per container start, not once per program start: the
 # other role's workers write here too, and supervisord restarting this program
 # inside a running container must not wipe the samples they have taken since.

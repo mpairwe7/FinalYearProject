@@ -85,7 +85,7 @@ cryptography>=47.0.0
 # SSE streaming
 sse-starlette>=3.4.1
 
-# Prometheus metrics, aggregated across uvicorn workers (app/analytics.py)
+# Prometheus metrics, aggregated across uvicorn workers (app/observability/analytics.py)
 prometheus-client>=0.26.0
 
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib

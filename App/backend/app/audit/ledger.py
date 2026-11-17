@@ -148,7 +148,7 @@ def _timestamp_seal(anchor: dict[str, Any]) -> str:
     tsa_url = os.getenv("AUDIT_TSA_URL", "").strip()
     if not tsa_url:
         return ""
-    from ..analytics import metrics
+    from ..observability.analytics import metrics
     from .tsa import request_timestamp, seal_statement
 
     statement = seal_statement(

@@ -85,7 +85,7 @@ FinalYearProject/
 │   │       ├── tools/         # 72 MCP tools across 18 namespaces (incl. mda_interdependence.py)
 │   │       ├── workflows/     # 21 YAML-driven guided journeys (Prerequisite DAG, A2UI, Step-Up Auth)
 │   │       ├── observability/tracing.py     # OpenTelemetry GenAI tracing (per-stage spans)
-│   │       └── analytics.py   # Prometheus-compatible metrics middleware
+│   │       └── observability/analytics.py   # Prometheus-compatible metrics middleware
 │   └── frontend/         # Next.js 16 + React 19 + Zustand 5 frontend
 │       ├── lib/
 │       │   ├── core/      # Config, networking (Dio), theme, storage

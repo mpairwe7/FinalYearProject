@@ -17,7 +17,7 @@ from typing import Any, Final
 
 from ..db import database as db
 from .. import officer_hours
-from ..analytics import record_chat_turn
+from ..observability.analytics import record_chat_turn
 from ..config.flags import flags
 from ..resilience import TurnCancelled, raise_if_turn_cancelled, set_turn_cancel
 from ..speech_normalization import clean_text_for_speech
@@ -1466,7 +1466,7 @@ class UraReceptionistBrain(LLMService):
             await self._say_and_record(phrase("confirm_not_done", language), kind="answer")
             return
         try:
-            from ..analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.inc(
                 "autonomous_resolution_total",
@@ -2288,7 +2288,7 @@ class UraReceptionistBrain(LLMService):
 
         # 2026 CX Outcome Telemetry & Continuous Relationship Checkpoint
         try:
-            from ..analytics import metrics
+            from ..observability.analytics import metrics
             from .carryover import checkpoint_call_resolution
 
             flow_label = str(result.get("retrieval_mode") or "rag")

@@ -40,7 +40,7 @@ from typing import Any
 
 import numpy as np
 
-from ..analytics import metrics
+from ..observability.analytics import metrics
 
 logger = logging.getLogger(__name__)
 

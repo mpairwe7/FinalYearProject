@@ -11,7 +11,7 @@ Model failures on a call are already counted by ``chat_turns_total`` with
 
 from __future__ import annotations
 
-from ..analytics import metrics
+from ..observability.analytics import metrics
 from ..resilience import declare_turn_cancel_metrics
 
 #: Why a call ended. ``process_lost`` is written by the startup sweep, the

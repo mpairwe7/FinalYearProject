@@ -114,7 +114,7 @@ def test_latency_bucket_used_by_the_slo_exists():
     import sys
 
     sys.path.insert(0, str(ROOT / "App" / "backend"))
-    from app.analytics import _MS_BUCKETS
+    from app.observability.analytics import _MS_BUCKETS
 
     assert 3000 in _MS_BUCKETS
     assert 'le="3000.0"' in (MONITORING / "recording-rules.yml").read_text()

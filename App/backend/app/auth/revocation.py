@@ -147,7 +147,7 @@ def sync(*, strict: bool = False) -> None:
     raises as well, so the caller decides whether to start without them.
     """
     from ..db import database as db
-    from ..analytics import metrics
+    from ..observability.analytics import metrics
 
     try:
         stored = db.load_session_revocations()

@@ -147,7 +147,7 @@ seaborn>=0.13.0
 # Cross-encoder reranking (included in sentence-transformers)
 # sentence-transformers already listed above
 
-# Prometheus metrics, aggregated across uvicorn workers (app/analytics.py)
+# Prometheus metrics, aggregated across uvicorn workers (app/observability/analytics.py)
 prometheus-client>=0.26.0
 
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib

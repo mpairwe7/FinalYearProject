@@ -82,7 +82,7 @@ from prometheus_client import (  # noqa: E402 - must follow the multiprocess set
 from prometheus_client import multiprocess as _prom_multiprocess  # noqa: E402
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint  # noqa: E402
 
-from .db import database as db  # noqa: E402
+from ..db import database as db  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -489,7 +489,7 @@ def _index_lifecycle_prometheus_metrics() -> list[str]:
     without adding a separate exporter or exposing the Qdrant management API.
     """
     try:
-        from .freshness import load_backup_status, load_crawl_status, load_lifecycle_status, load_status
+        from ..freshness import load_backup_status, load_crawl_status, load_lifecycle_status, load_status
 
         freshness = load_status()
         lifecycle = load_lifecycle_status()
@@ -616,7 +616,7 @@ def record_language_decision(result: Mapping[str, Any], *, channel: str) -> None
     """
     from typing import get_args
 
-    from .memory.language_state import LocaleSource
+    from ..memory.language_state import LocaleSource
 
     source = str(result.get("locale_source") or "")
     if not source:

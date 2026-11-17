@@ -21,7 +21,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .analytics import metrics
+from .observability.analytics import metrics
 
 logger = logging.getLogger(__name__)
 

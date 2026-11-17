@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 from app import process_role
-from app.analytics import MetricsStore, metrics
+from app.observability.analytics import MetricsStore, metrics
 from starlette.testclient import TestClient
 
 GAUGE = "receptionist_call_process_up"

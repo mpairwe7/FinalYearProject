@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.db import database as db  # noqa: E402
 from app.ai_disclosure import DIGITAL_SOURCE_TYPE, is_marked, mark_wav  # noqa: E402
-from app.analytics import metrics  # noqa: E402
+from app.observability.analytics import metrics  # noqa: E402
 from app.observability.client_telemetry import normalise_route  # noqa: E402
 from app.middleware.logger import (  # noqa: E402
     REQUEST_ID,

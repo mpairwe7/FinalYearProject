@@ -22,7 +22,7 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from app.db import database as db  # noqa: E402
 from app.rag import pipeline  # noqa: E402
-from app.analytics import metrics  # noqa: E402
+from app.observability.analytics import metrics  # noqa: E402
 from app.audit import turns  # noqa: E402
 from app.config.flags import flags  # noqa: E402
 

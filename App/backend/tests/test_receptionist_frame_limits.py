@@ -37,7 +37,7 @@ assert len(FRAME) == 640
 
 def counter(name: str, **labels: str) -> float:
     """The current value of one exported counter series (0 when it does not exist yet)."""
-    from app.analytics import metrics
+    from app.observability.analytics import metrics
 
     pairs = ",".join(f'{key}="{value}"' for key, value in sorted(labels.items()))
     key = f"{name}{{{pairs}}}" if pairs else name
@@ -325,7 +325,7 @@ class FrameCounterTests(unittest.TestCase):
     """The counter exists, at zero, for every label before the first drop."""
 
     def test_every_side_and_reason_is_declared_at_zero(self):
-        from app.analytics import metrics
+        from app.observability.analytics import metrics
 
         with patch.object(metrics, "inc", wraps=metrics.inc) as inc:
             telemetry.declare()

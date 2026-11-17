@@ -22,7 +22,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
-from ..analytics import metrics
+from ..observability.analytics import metrics
 
 logger = logging.getLogger(__name__)
 

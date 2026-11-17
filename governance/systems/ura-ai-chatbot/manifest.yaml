@@ -145,7 +145,7 @@ iso_42001:
     evidence: "governance/systems/ura-ai-chatbot/manifest.yaml"
   - clause: "9.1 Monitoring, measurement, analysis and evaluation"
     status: "implemented"
-    evidence: "App/backend/app/analytics.py, App/backend/app/observability/tracing.py"
+    evidence: "App/backend/app/observability/analytics.py, App/backend/app/observability/tracing.py"
   - clause: "10.1 Continual improvement"
     status: "implemented"
     evidence: "App/backend/app/main.py (feedback loop), ml/pipelines/ (retraining)"

@@ -42,7 +42,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from . import confirm_tokens
 from .db import database as db
 from .rag import pipeline as pipeline_module
-from .analytics import MetricSpec, metrics, record_mapped
+from .observability.analytics import MetricSpec, metrics, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .config.flags import flags
 from .voice_ws_v2 import _send_error, _send_json
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-# Call-site key -> (kind, metric name, buckets); recorded through app.analytics.
+# Call-site key -> (kind, metric name, buckets); recorded through app.observability.analytics.
 _METRICS: dict[str, MetricSpec] = {
     "_ws_chat_connections_total": ("counter", "chat_ws_connections_total", None),
     "_ws_chat_active": ("gauge", "chat_ws_active_connections", None),

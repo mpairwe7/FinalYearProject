@@ -173,7 +173,7 @@ class CircuitBreaker:
     def _publish(self, state: CircuitState) -> None:
         """Make a transition visible. Outside the lock; telemetry must not fail a call."""
         try:
-            from .analytics import metrics
+            from .observability.analytics import metrics
 
             metrics.inc("circuit_breaker_transitions_total", labels={"breaker": self.name, "to": state.value})
             metrics.set_gauge("circuit_breaker_state", _STATE_GAUGE[state], labels={"breaker": self.name})
@@ -182,7 +182,7 @@ class CircuitBreaker:
 
     def _count_lost_probe(self) -> None:
         try:
-            from .analytics import metrics
+            from .observability.analytics import metrics
 
             metrics.inc("circuit_breaker_probes_lost_total", labels={"breaker": self.name})
         except Exception:  # noqa: BLE001
@@ -311,7 +311,7 @@ def raise_if_turn_cancelled(stage: str) -> None:
     label = stage if stage in TURN_CANCEL_STAGES else "other"
     logger.info("Turn superseded: its run stops at %s", stage)
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc("turn_cancelled_total", labels={"stage": label})
     except Exception:  # noqa: BLE001 - telemetry must not keep a stale run going
@@ -321,7 +321,7 @@ def raise_if_turn_cancelled(stage: str) -> None:
 
 def declare_turn_cancel_metrics() -> None:
     """Create ``turn_cancelled_total`` at zero for every stage, so ``increase()`` sees the first stop."""
-    from .analytics import metrics
+    from .observability.analytics import metrics
 
     stages = (*TURN_CANCEL_STAGES, "other")
     metrics.reserve("turn_cancelled_total", "stage", stages)

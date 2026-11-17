@@ -51,7 +51,7 @@ def _record_abstention(signal: str, abstained: bool) -> None:
     anyway. ``none`` is the fail-open path; a deployment where it dominates is
     answering without a relevance gate, and nothing else would show it.
     """
-    from .analytics import metrics
+    from .observability.analytics import metrics
 
     metrics.inc(
         "retrieval_abstention_decisions_total",

@@ -524,7 +524,7 @@ def reset_breakers() -> None:
 
 def _count(provider: str, outcome: str) -> None:
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc(
             "web_search_requests_total",

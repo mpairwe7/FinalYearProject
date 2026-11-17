@@ -31,7 +31,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from app.db import database as db
 from app import main as main_mod
-from app.analytics import metrics
+from app.observability.analytics import metrics
 from app.auth import make_dev_token
 from app.receptionist import desk, livekit, ws
 from app.receptionist.hub import hub

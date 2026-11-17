@@ -5,7 +5,7 @@ PORT="${PORT:-8000}"
 WORKERS="${WORKERS:-4}"
 
 # Every uvicorn worker writes its Prometheus samples to this directory and
-# /metrics adds them up (app/analytics.py). Files left by a previous run would
+# /metrics adds them up (app/observability/analytics.py). Files left by a previous run would
 # be counted again, so the directory is emptied before the workers start.
 export PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/ura-prometheus}"
 mkdir -p "${PROMETHEUS_MULTIPROC_DIR}"

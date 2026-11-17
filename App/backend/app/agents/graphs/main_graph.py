@@ -613,7 +613,7 @@ def _bind_from_memory_or_dag(
             if assumed not in state.assumed_inputs:
                 state.assumed_inputs.append(assumed)
             try:
-                from ...analytics import metrics
+                from ...observability.analytics import metrics
 
                 metrics.inc(
                     "slot_repetition_prevented_total",

@@ -27,7 +27,7 @@ _started = False
 
 def _register_scrape_hook() -> None:
     try:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.on_scrape(refresh_gauge)
     except Exception:  # noqa: BLE001 - metrics never decide whether calls start
@@ -112,7 +112,7 @@ def refresh_gauge() -> None:
 
 def _gauge(value: int) -> None:
     try:
-        from ..analytics import metrics
+        from ..observability.analytics import metrics
 
         # The lowest live worker's value: with two workers, one that cannot
         # take calls must not be hidden by the other at the next scrape.

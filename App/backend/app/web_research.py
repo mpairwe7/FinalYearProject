@@ -1663,7 +1663,7 @@ def _live_check_notice(status: str, checked_at: str, unchecked: Iterable[str] = 
 
 def _record_outcome(outcome: WebResearchTurnOutcome, seconds: float) -> None:
     try:
-        from .analytics import metrics
+        from .observability.analytics import metrics
 
         metrics.inc("web_research_turns_total", labels={"status": outcome.status})
         metrics.observe("web_research_duration_seconds", seconds)
