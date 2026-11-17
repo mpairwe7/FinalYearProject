@@ -52,12 +52,18 @@ FinalYearProject/
 ├── App/                   # Application code
 │   ├── backend/          # FastAPI backend
 │   │   └── app/
-│   │       ├── main.py        # FastAPI app + endpoints (sync + SSE streaming)
+│   │       ├── main.py        # FastAPI app: middleware stack, lifespan and the routes outside api/
 │   │       ├── api/
+│   │       │   ├── rag.py         # Chat over REST, SSE and WebSocket; titles; FAQ
+│   │       │   ├── documents.py   # Upload analysis and re-index
+│   │       │   ├── health.py      # /health, /ready, /metrics
+│   │       │   ├── deps.py        # Shared route dependencies (model, operator checks)
 │   │       │   └── models.py      # Pydantic v2 request/response models
+│   │       ├── middleware/        # logger.py (JSON logs), rate_limiter.py, error_handler.py
 │   │       ├── rag/
 │   │       │   ├── pipeline.py     # ChatModel (12-stage RAG + agentic routing + speech)
 │   │       │   ├── generator.py         # Sunbird/Sunflower-Qwen3.5-9B (262K native context) / Qwen3-8B generation, LoRA routing
+│   │       │   ├── prompt_builder.py  # System and cloud prompts, answer contracts, passage headers
 │   │       │   ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
 │   │       │   ├── cache.py       # Semantic cache (cosine similarity)
 │   │       │   ├── corrective_rag.py # Corrective re-retrieval + clarification
@@ -71,6 +77,7 @@ FinalYearProject/
 │   │       ├── db/
 │   │       │   └── database.py    # SQLite WAL analytics/feedback/session/conversation store
 │   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
+│   │       ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │       ├── web_research.py # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │       ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts block

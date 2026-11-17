@@ -183,7 +183,7 @@ User Query
 
 **Fallback**: If `LLM_ENABLED=false` or model fails to load, the best FAQ answer is returned directly.
 
-### Phase 3: SSE Streaming (`main.py` → `/v1/chat/stream`)
+### Phase 3: SSE Streaming (`api/rag.py` → `/v1/chat/stream`)
 
 | Event | Data | Description |
 |-------|------|-------------|
@@ -465,6 +465,7 @@ App/backend/app/
 │
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
+├── linear_text.py       # strip_spans, strip_blocks: one-pass scans for regexes slow on chat text (ADR-0057)
 ├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── web_search_providers.py # Search backends with failover and breakers (ADR-0021)

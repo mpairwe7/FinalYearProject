@@ -243,7 +243,7 @@ owner and refused with `409 Conflict` in production, `G252`). New simulation
 accounts are hashed with `PBKDF2-HMAC-SHA256` (200,000 iterations) and
 provisioned across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and
 `dts_system.db`, and connected profiles are injected into chat turns inside
-sanitized `<linked_accounts>` / `<linked_account_data>` blocks (`service.py`).
+sanitized `<linked_accounts>` / `<linked_account_data>` blocks (`rag/pipeline.py`).
 See `docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
 
 ## Enterprise Security Controls (2026 Standards)
