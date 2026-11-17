@@ -27,8 +27,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `mcp/` | MCP client + tax-calculator server |
 | `guardrails.py` | Input/output OWASP LLM01–09 |
 | `middleware/` | `logger.py` (root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks), `rate_limiter.py` (the shared slowapi `limiter` and per-route ceilings), `error_handler.py` (the 401 challenge on every HTTP error) |
-| `analytics.py` | The one metrics facade (prometheus_client, all workers); `record_chat_turn` |
-| `observability/` | `tracing.py` (OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage), `client_telemetry.py` (Web Vitals and client errors from the browser), `security_events.py` (OWASP Logging Vocabulary events) (ADR-0060) |
+| `observability/` | `analytics.py` (the one metrics facade: prometheus_client, all workers; `record_chat_turn`), `tracing.py` (OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage), `client_telemetry.py` (Web Vitals and client errors from the browser), `security_events.py` (OWASP Logging Vocabulary events) (ADR-0060) |
 | `memory/` | Working, episodic, semantic and procedural memory and the resolution ledger; `case_facts.py` (facts the taxpayer stated in this conversation) and `language_state.py` (the conversation's answer language) (ADR-0060) |
 | `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer while `audit_ledger` is on; a failed append is counted and logged, never retried), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
