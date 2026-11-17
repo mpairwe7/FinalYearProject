@@ -22,7 +22,7 @@ import re
 
 import pytest
 from app.rag import generator, pipeline, prompt_builder
-from app.agents import prompts
+from app.prompts import agents
 
 _CLOUD = prompt_builder.CLOUD_SYSTEM_PROMPT
 
@@ -127,7 +127,7 @@ _FY_LITERAL = re.compile(r"FY\s?20\d\d")
 
 
 def test_no_prompt_fragment_names_a_fiscal_year_literal() -> None:
-    fragments = [prompt_builder.SYSTEM_PROMPT, _CLOUD, prompts._GOVERNANCE_V3_PROMPT, *prompts._SPECIALIST_PROMPTS.values()]
+    fragments = [prompt_builder.SYSTEM_PROMPT, _CLOUD, agents._GOVERNANCE_V3_PROMPT, *agents._SPECIALIST_PROMPTS.values()]
 
     assert [f[:60] for f in fragments if _FY_LITERAL.search(f)] == []
 
@@ -136,17 +136,17 @@ def test_the_governance_fragment_names_the_current_fiscal_year(monkeypatch: pyte
     monkeypatch.setenv("FLAG_RISK_TIERED_AUTONOMY_GATES", "true")
     monkeypatch.setenv("CURRENT_FISCAL_YEAR", "FY2027-28")
 
-    fragment = prompts.governance_prompt()
+    fragment = agents.governance_prompt()
 
     assert "FY2027-28" in fragment
     assert "0.80" not in fragment
     assert "{fiscal_year}" not in fragment
 
 
-@pytest.mark.parametrize("role", sorted(prompts._SPECIALIST_PROMPTS))
+@pytest.mark.parametrize("role", sorted(agents._SPECIALIST_PROMPTS))
 def test_specialist_fragments_state_no_statutory_figure(role: str) -> None:
     """A rate or a statutory window comes from a tool or a passage, never the prompt."""
-    fragment = prompts.specialist_prompt(role)
+    fragment = agents.specialist_prompt(role)
 
     assert not re.search(r"\d+(?:\.\d+)?\s?%", fragment), role
     assert not re.search(r"\b\d+[- ]day\b", fragment), role

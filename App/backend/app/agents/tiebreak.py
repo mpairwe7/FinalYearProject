@@ -47,6 +47,7 @@ from typing import Any
 
 from ..resilience import remaining_turn_seconds
 from .state import AgentRoute, RouteDecision
+from ..prompts.agents import TIEBREAK_PROMPT as _PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -103,18 +104,6 @@ _CLASSIFIER_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_n
 #: joined the queue would only spend its timeout behind calls that are not returning.
 _CLASSIFIER_SLOTS = threading.BoundedSemaphore(4)
 
-_PROMPT = """You classify Uganda Revenue Authority taxpayer questions.
-
-Choose exactly one route:
-- "tools": needs a calculation, a current rate, or today's date.
-- "customs_specialist": import, export, tariff or border clearance.
-- "tax_specialist": domestic tax — income, VAT, PAYE, rental, withholding.
-- "rag": a factual question answered from URA documents.
-- "clarify": too vague or incomplete to answer.
-
-Reply with JSON only: {{"route": "<one of the above>"}}
-
-Question: {query}"""
 
 #: Routing decisions repeat heavily across a taxpayer population, and
 #: this is the one path in the supervisor that costs a model call.

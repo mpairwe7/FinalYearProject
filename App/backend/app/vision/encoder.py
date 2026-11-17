@@ -38,6 +38,7 @@ from .ocr import (
     extract_ugx_amounts,
     strip_hidden_control_and_bidi,
 )
+from ..prompts.vision import VLM_PROMPT as _VLM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -51,21 +52,6 @@ VISION_MAX_PIXELS = int(os.getenv("VISION_MAX_PIXELS", str(1280 * 720)))
 VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "256"))
 _VISION_MAX_IMAGE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(40 * 1024 * 1024)))
 _VISION_MAX_DECODE_PIXELS = int(os.getenv("DOCUMENT_MAX_IMAGE_PIXELS", "20_000_000"))
-
-# URA document analysis prompt — tuned for Ugandan tax documents
-_VLM_PROMPT = (
-    "Analyze this Uganda Revenue Authority document carefully.\n"
-    "Identify:\n"
-    "1) Document type: receipt, TIN certificate, tax assessment notice, "
-    "customs declaration, filing form, EFRIS invoice, or other.\n"
-    "2) Key fields: amounts (in UGX), dates, TIN numbers, taxpayer names, "
-    "tax types, reference numbers.\n"
-    "3) Brief summary of what this document shows.\n\n"
-    "Format your response as:\n"
-    "TYPE: <document type>\n"
-    "FIELDS: <key-value pairs>\n"
-    "SUMMARY: <1-2 sentence summary>"
-)
 
 
 # ---------------------------------------------------------------------------

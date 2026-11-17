@@ -66,7 +66,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from ..agents.loop_control import Admission, BudgetDecision, ToolCallBudget
-from ..agents.prompts import specialist_prompt
+from ..prompts.agents import specialist_prompt
 from ..guardrails import (
     fence_prompt_header_field,
     fence_spotlight_body,
