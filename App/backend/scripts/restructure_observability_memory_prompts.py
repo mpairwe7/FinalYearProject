@@ -19,6 +19,7 @@ import ast
 import re
 import subprocess
 import sys
+import textwrap
 from collections import defaultdict
 from pathlib import Path
 
@@ -111,6 +112,15 @@ def _assignment(tree: ast.Module, name: str) -> ast.stmt | None:
     return None
 
 
+def _import_line(module: str, names: list[str]) -> str:
+    line = f"from {module} import {', '.join(names)}\n"
+    return line if len(line) <= 100 else f"from {module} import (\n" + "".join(f"    {n},\n" for n in names) + ")\n"
+
+
+def _docstring(text: str) -> str:
+    return f'"""{text}"""\n' if len(text) <= 94 else '"""' + "\n".join(textwrap.wrap(text, 96)) + '\n"""\n'
+
+
 def extract_prompts(apply: bool) -> None:
     by_module: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
     for module, const, target, new in PROMPTS:
@@ -134,7 +144,7 @@ def extract_prompts(apply: bool) -> None:
         first = min(s for s, _ in spans)
         anchor = max((n.end_lineno for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom)) and n.end_lineno <= first), default=0)
         depth = module.count("/")
-        statements = "".join(f"from {'.' * (depth + 1)}prompts.{t} import {', '.join(sorted(names))}\n" for t, names in sorted(imports.items()))
+        statements = "".join(_import_line(f"{'.' * (depth + 1)}prompts.{t}", sorted(names)) for t, names in sorted(imports.items()))
         for start, end in sorted(spans, reverse=True):
             del lines[start:end]
         lines.insert(anchor, statements)
@@ -147,7 +157,7 @@ def extract_prompts(apply: bool) -> None:
         print(f"prompts: -> app/prompts/{target}.py ({len(blocks)})")
         if not apply:
             continue
-        head = path.read_text().rstrip() + "\n\n\n" if path.exists() else f'"""{PROMPT_MODULE_DOCS[target]}"""\n\nfrom __future__ import annotations\n\n'
+        head = path.read_text().rstrip() + "\n\n\n" if path.exists() else f"{_docstring(PROMPT_MODULE_DOCS[target])}\nfrom __future__ import annotations\n\n"
         path.write_text(head + "\n\n".join(b.rstrip() + "\n" for b in blocks))
         subprocess.run(["git", "add", str(path)], cwd=codemod.REPO, check=True)
 
