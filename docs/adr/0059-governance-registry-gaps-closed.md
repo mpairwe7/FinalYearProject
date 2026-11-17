@@ -59,8 +59,9 @@ Option 1.
 - Writing the FRIA found an open question. Voice emotion inference
   (`receptionist/prosody.py`, off by default) may be high risk under Annex III
   point 1(c). The DPO/legal owner decides (G664).
-- Sunbird AI publishes no data terms (G665). Google's unpaid tier allows training
-  and human review, so the Gemini key's tier needs confirming.
+- Sunbird AI's online terms let it train on what it receives unless the account
+  opts out, and owe the customer no breach notice (G665). Google's unpaid tier
+  allows training and human review, so the Gemini key's tier needs confirming.
 - Signatures stay empty: the DPIA, the FRIA, the PDPO registration and the risk
   appetite. No negotiated contract exists with any provider.
 - Each future model swap, incident or new provider adds a row, and the

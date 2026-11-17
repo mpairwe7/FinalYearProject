@@ -74,7 +74,8 @@ nist_ai_rmf:
         governance/monitoring/README.md). Offline: scripts/bias_fairness_audit.py (language +
         taxpayer type parity).
       verified_by:
-        - "App/backend/tests/test_metrics_facade.py::test_outcomes_are_counted_by_reply_language"
+        - "App/backend/tests/test_metrics_facade.py::ChatTurnRecorderTest::test_outcomes_are_counted_by_reply_language"
+        - "App/backend/tests/test_metrics_facade.py::ChatTurnRecorderTest::test_a_hand_off_is_counted_by_language_whatever_the_outcome"
         - "tests/test_monitoring_config.py"
       gap: "Taxpayer type (individual or SME) is measured offline only; no formal fairness report"
     - control: "MEASURE 4.1 – Measurement approaches applied regularly"

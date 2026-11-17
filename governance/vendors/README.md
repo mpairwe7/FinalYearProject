@@ -10,10 +10,10 @@ pages.
 | --- | --- | --- |
 | [Cloudflare Workers AI](cloudflare-workers-ai/README.md) | Online terms and Customer DPA v6.4 | "without undue delay" (DPA 3.1(e)) |
 | [Google Gemini API](google-gemini-api/README.md) | Gemini API Additional Terms and processor terms | "promptly and without undue delay" (7.2.1) |
-| [Sunbird AI](sunbird-ai/README.md) | None published | None published (G665) |
+| [Sunbird AI](sunbird-ai/README.md) | Online terms; no data processing agreement | None owed to the customer (G665) |
 
 | Slot | State | Artifact |
 | --- | --- | --- |
-| Contract | Here, partly | Each vendor folder names the online terms that govern use. No negotiated contract or AI-specific clause exists with any provider, and Sunbird publishes no terms at all (G665). |
+| Contract | Here, partly | Each vendor folder names the online terms that govern use. No negotiated contract or AI-specific clause exists with any provider. Sunbird's terms allow training on the content it receives unless the account opts out (G665). |
 | Data flows | Here | Each vendor folder says what data leaves. The cross-border row in [privacy_controls.md](../systems/ura-ai-chatbot/privacy_controls.md) and the [DPIA](../systems/ura-ai-chatbot/dpia.md) cover transfer approval, and [threagile.yaml](../../docs/security/threat-model/threagile.yaml) models the flows. |
-| Breach notification | Here, partly | Cloudflare and Google commit to notify without undue delay, with no fixed hours. Sunbird publishes nothing. The project's own notice to taxpayers is section 1.7 of the [privacy notice](../../docs/capstone/week04-privacy-and-aup.md). |
+| Breach notification | Here, partly | Cloudflare and Google commit to notify without undue delay, with no fixed hours. Sunbird's terms owe the customer no notice. The project's own notice to taxpayers is section 1.7 of the [privacy notice](../../docs/capstone/week04-privacy-and-aup.md). |

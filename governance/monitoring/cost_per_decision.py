@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ def cost_per_decision(
         labels = sample["metric"]
         tokens = float(sample["value"][1])
         model = (labels.get("provider", ""), labels.get("model", ""))
+        if not math.isfinite(tokens):
+            raise ValueError(f"{'/'.join(model)} has a non-finite token rate ({tokens}); there were no turns to divide by")
         price = prices.get(model, {}).get(labels.get("type", ""))
         if price is not None:
             usd += tokens * price
@@ -67,7 +70,10 @@ def main() -> None:
     samples = body["data"]["result"]
     if not samples:
         sys.exit(f"No token data yet: {QUERY} is empty.")
-    usd, unpriced = cost_per_decision(samples, load_prices())
+    try:
+        usd, unpriced = cost_per_decision(samples, load_prices())
+    except ValueError as exc:
+        sys.exit(f"No estimate: {exc}")
     print(f"USD per decision: {usd:.6f}" + (" (lower bound: some models are unpriced)" if unpriced else ""))
     for name in unpriced:
         print(f"unpriced: {name}")

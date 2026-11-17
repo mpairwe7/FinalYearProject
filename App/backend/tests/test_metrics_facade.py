@@ -178,6 +178,13 @@ class ChatTurnRecorderTest(unittest.TestCase):
         }.items():
             self.assertEqual(after.get(key, 0) - before.get(key, 0), added, key)
 
+    def test_a_hand_off_is_counted_by_language_whatever_the_outcome(self) -> None:
+        key = 'locale_escalations_total{locale="lg"}'
+        before = analytics.metrics.snapshot()["counters"].get(key, 0)
+        record_chat_turn({"retrieval_mode": "abstained", "locale": "lg", "escalation_required": True}, elapsed_ms=5, channel="rest")
+        record_chat_turn({"retrieval_mode": "abstained", "locale": "lg"}, elapsed_ms=5, channel="rest")
+        self.assertEqual(analytics.metrics.snapshot()["counters"].get(key, 0) - before, 1)
+
     def test_escalation_is_counted_whatever_the_outcome(self) -> None:
         """An abstained turn that opens a ticket is an escalation (it was before the facade)."""
         key = 'escalation_required_total{channel="rest"}'

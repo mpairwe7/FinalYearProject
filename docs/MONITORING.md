@@ -116,6 +116,7 @@ worker's numbers.
 | `ura_chat_response_time_ms` | histogram | `channel`, `mode` | Whole-turn latency; `mode` is the retrieval mode |
 | `ura_retrieval_mode_total` | counter | `mode` | Retrieval mode per turn |
 | `ura_locale_turns_total` | counter | `locale`, `outcome` | One per chat turn, by reply language. `locale`: `en`, `lg`, `sw`, `nyn`, `ach`, else `other`. `outcome` as `ura_chat_turns_total`. The language parity check reads it ([Language parity](#language-parity)) |
+| `ura_locale_escalations_total` | counter | `locale` | Turns handed to a person, by reply language, counted where `ura_escalation_required_total` is, so an abstained turn that opens a ticket counts |
 | `ura_language_decisions_total` | counter | `channel`, `locale`, `source` | Why each turn was answered in its language (G123). `locale`: `en`, `lg`, `sw`, else `other`. `source`: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile`, `default`, else `other`. A growing `switched` or `default` share for Luganda or Swahili is the first sign the decision is drifting |
 | `ura_faithfulness_score` | histogram | — | Grounding score per scored turn |
 | `ura_escalation_required_total` | counter | `channel` | Turns handed to a person |

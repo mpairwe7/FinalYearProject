@@ -73,9 +73,10 @@ groups:
         expr: >
           (sum by (locale) (rate(ura_locale_turns_total{outcome="abstained"}[1h])) or ura:locale_turns:rate1h * 0)
           / ura:locale_turns:rate1h
+      # Hand-offs, not the escalated outcome: an abstained turn that opens a ticket counts.
       - record: ura:locale_turns:escalation_ratio_1h
         expr: >
-          (sum by (locale) (rate(ura_locale_turns_total{outcome="escalated"}[1h])) or ura:locale_turns:rate1h * 0)
+          (sum by (locale) (rate(ura_locale_escalations_total[1h])) or ura:locale_turns:rate1h * 0)
           / ura:locale_turns:rate1h
       # Share of checked replies the figure lock would strip. The evidence for
       # enforcing it beyond the reasoning tier (G360). The reject series does not

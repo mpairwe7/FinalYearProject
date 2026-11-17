@@ -29,6 +29,9 @@ def test_a_declared_test_is_evidence(compliance, tmp_path):
     assert compliance._missing_evidence("test_x.py::test_method") == ""
     assert compliance._missing_evidence("test_x.py::test_async") == ""
     assert compliance._missing_evidence("test_x.py") == ""
+    assert compliance._missing_evidence("test_x.py::T::test_method") == ""
+    assert compliance._missing_evidence("test_x.py::T::test_async") == "test not found"
+    assert compliance._missing_evidence("test_x.py::U::test_method") == "test not found"
 
 
 def test_a_test_named_only_in_text_is_not(compliance, tmp_path):

@@ -540,7 +540,18 @@ tests:
         values: '0+4x200'
       - series: 'ura_locale_turns_total{locale="sw",outcome="answered"}'
         values: '0+1x200'
+      - series: 'ura_locale_escalations_total{locale="lg"}'
+        values: '0+4x200'
     promql_expr_test:
+      - expr: round(ura:locale_turns:escalation_ratio_1h * 100)
+        eval_time: 90m
+        exp_samples:
+          - labels: '{locale="en"}'
+            value: 0
+          - labels: '{locale="lg"}'
+            value: 40
+          - labels: '{locale="sw"}'
+            value: 0
       - expr: round(ura:locale_turns:abstention_ratio_1h * 100)
         eval_time: 90m
         exp_samples:

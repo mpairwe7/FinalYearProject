@@ -69,7 +69,10 @@ Rights are cited from the Constitution of Uganda, 1995. Harm IDs are from the
 - The escalation policy offers a person and sets how fast one should answer
   ([escalation_policy.py](../../../App/backend/app/escalation_policy.py)).
 - Tool actions with effects wait for the taxpayer's approval (ADR-0022).
-- An admin can switch the call receptionist off for every process (ADR-0044).
+- An admin can switch the call receptionist off from the ops console. The change
+  reaches every process that shares the database, which on the HF Space is the
+  chat and the call process. A replica with its own database needs
+  `FLAG_VOICE_RECEPTIONIST` set on it (ADR-0044).
 - Every answered turn is written to a tamper-evident audit ledger
   ([audit](../../audit/README.md)).
 

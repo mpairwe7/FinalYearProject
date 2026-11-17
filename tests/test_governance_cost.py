@@ -38,6 +38,13 @@ def test_a_turn_is_priced_per_token_and_unpriced_models_are_named(cost):
     assert unpriced == ["sunbird/sunflower-9b"]
 
 
+@pytest.mark.parametrize("model", ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "sunflower-9b"])
+def test_a_day_without_turns_is_no_estimate(cost, model):
+    provider = "sunbird" if model == "sunflower-9b" else "cloudflare.workers_ai"
+    with pytest.raises(ValueError, match="non-finite"):
+        cost.cost_per_decision([_sample(provider, model, "input", float("nan"))], cost.load_prices())
+
+
 def test_every_price_is_sourced_and_names_a_model_the_api_calls():
     backend = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "App" / "backend" / "app").rglob("*.py"))
     rows = list(csv.DictReader(SHEET.open(encoding="utf-8")))
