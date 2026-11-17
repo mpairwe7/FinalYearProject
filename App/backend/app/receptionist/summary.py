@@ -11,15 +11,10 @@ from ..db import database as db
 from ..guardrails import redact_pii_text
 from .language import LANGUAGE_NAMES, lexical_hits
 from .store import get_call, list_turns, update_call
+from ..prompts.receptionist import SUMMARY_SYSTEM
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_SYSTEM = (
-    "You are a structured call summarization engine for Uganda Revenue Authority (URA). "
-    "Analyze the transcript and output strictly valid JSON without conversational commentary. "
-    "The transcript may be in English, Luganda, Swahili, Runyankole, or Acholi; write every field in English — "
-    "the officers reading it work in English."
-)
 
 _SUMMARY_PROMPT_TEMPLATE = """Analyze the following phone conversation transcript between a Taxpayer and URA:
 

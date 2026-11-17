@@ -391,6 +391,7 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
 # Constants
 # ---------------------------------------------------------------------------
 from .._root import PROJECT_ROOT as _PROJECT_ROOT
+from ..prompts.answer import FAQ_JUDGE_PROMPT as _JUDGE_PROMPT
 
 _DEFAULT_DATA_DIR = str(_PROJECT_ROOT / "Data" / "dataset")
 _DATA_DIR = Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)).resolve()
@@ -825,8 +826,6 @@ def _circuit_for(endpoint: Any) -> CircuitBreaker:
     return _REASONER_CIRCUIT if _is_non_t1_endpoint(endpoint) else _LLM_CIRCUIT
 
 
-
-
 def _tier_name(tier: Any) -> str:
     return str(getattr(tier, "value", tier) or "")
 
@@ -1208,10 +1207,6 @@ def _prefer_cloud_primary(locale: str) -> bool:
     return _cloud_llm_ready()
 
 
-
-
-
-
 #: Replies that say nothing about the present, so owe no sentence about checking it.
 _NO_LIVE_DISCLOSURE_MODES = frozenset({"blocked", "clarification", "escalated"})
 
@@ -1233,7 +1228,6 @@ _TURN_STAGES: contextvars.ContextVar[dict[str, float] | None] = contextvars.Cont
 _TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
     "_turn_plans", default=None
 )
-
 
 
 #: Owed to the taxpayer when a turn could not do all it should have (OWASP ASI09:
@@ -1277,8 +1271,6 @@ def _new_generation_record() -> dict[str, Any]:
     return {"backend": "", "model": "", "tier": "", "fallbacks": [], "degraded": []}
 
 
-
-
 def claim_check_unavailable() -> dict[str, Any]:
     """A claim check that threw is a failed check, not a passed one (G370).
 
@@ -1298,8 +1290,6 @@ def claim_check_unavailable() -> dict[str, Any]:
         "uncited_claims": [],
         "contradicted_claims": [],
     }
-
-
 
 
 def _turn_degradations() -> list[str]:
@@ -4018,8 +4008,6 @@ def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dic
     return faq_index, tag_labels
 
 
-
-
 _FAQ_PHRASE_SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(?:free\s+zones?|freeports?)\b", re.IGNORECASE), "epz"),
     (re.compile(r"\b(?:business\s+books|books\s+of\s+accounts?)\b", re.IGNORECASE), "tax records"),
@@ -4054,7 +4042,6 @@ _ACRONYM_AFTER_RE = re.compile(
     r"\b((?:[A-Za-z][\w'-]*\s+){1,7}?[A-Za-z][\w'-]*)\s*\(([A-Z][A-Z0-9]{1,7})\)"
 )
 _ACRONYM_BEFORE_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,7})\s*\(([^)]{2,80})\)")
-
 
 
 def _acronym_matches(acronym: str, phrase: str) -> bool:
@@ -4297,10 +4284,6 @@ def _translate_reply(text: str, locale: str) -> str | None:
         if out and out.strip():
             return out
     return None
-
-
-
-
 
 
 def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
@@ -4791,19 +4774,6 @@ FAQ_JUDGE_CANDIDATES = int(os.getenv("FAQ_JUDGE_CANDIDATES", "6"))
 #: The judge asks Sunflower through Sunbird's chat endpoint (ADR-0037); Gemini no longer judges.
 FAQ_JUDGE_TIMEOUT = float(os.getenv("FAQ_JUDGE_TIMEOUT", "20"))
 
-_JUDGE_PROMPT = """You are ranking candidate FAQ entries for a Uganda Revenue Authority assistant.
-
-Question: {question}
-
-Candidates:
-{candidates}
-
-Reply with ONLY a JSON object: {{"pick": <candidate number>, "confident": true|false}}
-Pick the candidate that ANSWERS the question — what the user is trying to do,
-not merely shared words. A "how do I" question wants the procedure, not the
-definition.
-If no candidate answers it, reply {{"pick": 0, "confident": false}}."""
-
 
 def _judge_rescue(
     query: str,
@@ -5033,8 +5003,6 @@ def _faq_hits_to_retrieval_hits(
     return hits
 
 
-
-
 def _mark_faq_priority(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Tag hits injected by `_priority_faq_hits` so later gates can recognise them.
 
@@ -5047,8 +5015,6 @@ def _mark_faq_priority(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for hit in hits:
         hit["faq_priority"] = True
     return hits
-
-
 
 
 def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
@@ -5074,8 +5040,6 @@ def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
             seen.add(source)
             names.append(source)
     return names
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -5423,7 +5387,7 @@ class ChatModel:
         detail_level = str(profile.get("detail_level", "")).strip().lower()
         if detail_level:
             lines.append(f"- Preferred explanation depth: {detail_level}")
-            from ..agents.prompts import detail_level_prompt
+            from ..prompts.agents import detail_level_prompt
 
             extra = detail_level_prompt(detail_level)
             if extra:

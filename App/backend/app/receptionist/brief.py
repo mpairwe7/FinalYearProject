@@ -39,6 +39,11 @@ from .config import get_brief_every_turns
 from .hub import hub
 from .language import LANGUAGE_NAMES
 from .store import get_call, list_turns, register_turn_observer, unregister_turn_observer, update_call
+from ..prompts.receptionist import (
+    BRIEF_FULL_PROMPT as _FULL_PROMPT,
+    BRIEF_INCREMENTAL_PROMPT as _INCREMENTAL_PROMPT,
+    BRIEF_SYSTEM,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,15 +57,6 @@ _MODEL_FIELDS = (
     "sentiment", "topic", "priority", "suggested_opener",
 )
 
-BRIEF_SYSTEM = (
-    "You brief an officer of the Uganda Revenue Authority (URA) who is about to take over a phone "
-    "call from an AI receptionist. The officer must understand the caller in ten seconds. "
-    "The transcript may be in English, Luganda, Swahili, Runyankole, or Acholi; write every field in English. "
-    "Each transcript line starts with its turn number; every claim you make must list the turn "
-    "numbers it rests on in turn_seqs. Never write out an identifier (TIN, phone number, account "
-    "number, name): say what kind of detail was given, and give its value as 'given (redacted)'. "
-    "Output strictly valid JSON and nothing else."
-)
 
 _SCHEMA = """{
   "why_officer": {"text": "why a person is needed, one sentence", "turn_seqs": [12]},
@@ -73,28 +69,6 @@ _SCHEMA = """{
   "priority": "low | normal | high | urgent",
   "suggested_opener": "one sentence the officer can say first"
 }"""
-
-_FULL_PROMPT = """Transcript of the call so far:
-{transcript}
-
-The call is in {language}.{transfer}
-
-Return ONLY a JSON object matching this schema:
-{schema}
-"""
-
-_INCREMENTAL_PROMPT = """Your brief so far, covering the call up to turn {covered}:
-{previous}
-
-New turns since then:
-{transcript}
-
-The call is in {language}.{transfer}
-
-Update the brief with what the new turns change and return ONLY the complete updated JSON object,
-matching this schema:
-{schema}
-"""
 
 
 # ---------------------------------------------------------------------------

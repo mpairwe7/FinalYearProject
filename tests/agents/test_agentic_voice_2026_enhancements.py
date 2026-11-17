@@ -694,7 +694,7 @@ def test_phase33_acoustic_risk_escalation_and_offline_action_outbox_sync(tmp_db)
 def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_db, monkeypatch):
     import os
 
-    from app.agents.prompts import governance_prompt
+    from app.prompts.agents import governance_prompt
     from app.audit.governance_v3 import (
         append_action_audit_v3,
         classify_action_risk,

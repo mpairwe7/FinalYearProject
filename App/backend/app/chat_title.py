@@ -22,6 +22,7 @@ import re
 from .rag import generator
 from .guard_friction import note_refusal, paused
 from .guardrails import InputGuard, contains_pii, redact_pii_text
+from .prompts.title import CHAT_TITLE_SYSTEM as _SYSTEM_PROMPT
 
 MAX_WORDS = 6
 # Translations run longer than English; a localized title gets a little room.
@@ -29,18 +30,6 @@ MAX_WORDS_LOCALIZED = 8
 MAX_CHARS = 60
 _EXCERPT_CHARS = 600
 
-_SYSTEM_PROMPT = (
-    "You name conversations between a taxpayer and the Uganda Revenue Authority (URA) "
-    "assistant, the way a chat app names them in its sidebar. Reply with a title of 2 to 6 "
-    "words that says what the conversation is about. Use sentence case. No quotes, no "
-    "emojis, no full stop. Never include names, TINs, ID numbers, phone numbers, amounts "
-    "or dates. Write the title in English. Reply with the title only.\n"
-    "Examples:\n"
-    "Please verify my TIN, I need tax clearance -> TIN verification for tax clearance\n"
-    "We are hiring a foreign technical specialist, which taxes apply? -> "
-    "Taxes on hiring a foreign specialist\n"
-    "when do i pay paye -> PAYE payment deadline"
-)
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _PREFIX_RE = re.compile(r"^(?:chat\s+)?(?:title|topic|name)\s*[:\-–—]\s*", re.IGNORECASE)

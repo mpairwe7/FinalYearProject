@@ -18,7 +18,8 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | --- | --- |
 | `agents/` | Supervisor, golden-set routing, LangGraph |
 | `api/` | The HTTP routers: `rag.py` (chat over REST, SSE and WebSocket, titles, FAQ), `documents.py` (upload analysis, re-index), `health.py` (`/health`, `/ready`, `/metrics`), `connectors.py`, `offline.py`, `quality.py`; `deps.py` (the shared `get_model` and operator checks) and `models.py` (Pydantic request/response models). `main.py` is the composition root that includes them |
-| `rag/` | The RAG flow (ADR-0056): `pipeline.py` (the `ChatModel` orchestrator), `retriever.py`, `generator.py` (answer generation and message assembly), `prompt_builder.py` (the system prompts and passage fencing), `query.py`, grounding checks, turn context |
+| `rag/` | The RAG flow (ADR-0056): `pipeline.py` (the `ChatModel` orchestrator), `retriever.py`, `generator.py` (answer generation and message assembly), `prompt_builder.py` (message assembly and passage fencing; the prompt text is in `prompts/`), `query.py`, grounding checks, turn context |
+| `prompts/` | Every system prompt, one module per area: `answer.py`, `query.py`, `receptionist.py`, `title.py`, `agents.py`, `vision.py`. A module imports its prompt from here under the name it had (ADR-0060) |
 | `ingestion/` | Corpus builders (`pdf_corpus`, `faq_corpus`, `crawl_corpus`), document parsing (`docling_intelligence`, `document_normalization`) and `indexer.py` |
 | `embeddings/` | `embedder.py`: CPU embeddings for the local dense leg (ADR-0034) |
 | `vectorstore/` | `vector_db.py` (the pgvector leg), Qdrant `index_lifecycle`, `corpus_sync`, `qdrant_backup`, `point_ids` |

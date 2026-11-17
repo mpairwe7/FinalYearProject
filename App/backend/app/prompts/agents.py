@@ -165,3 +165,17 @@ def governance_prompt(*, subject: str | None = None) -> str:
 
         return _GOVERNANCE_V3_PROMPT.format(fiscal_year=current_fiscal_year())
     return ""
+
+
+TIEBREAK_PROMPT = """You classify Uganda Revenue Authority taxpayer questions.
+
+Choose exactly one route:
+- "tools": needs a calculation, a current rate, or today's date.
+- "customs_specialist": import, export, tariff or border clearance.
+- "tax_specialist": domestic tax — income, VAT, PAYE, rental, withholding.
+- "rag": a factual question answered from URA documents.
+- "clarify": too vague or incomplete to answer.
+
+Reply with JSON only: {{"route": "<one of the above>"}}
+
+Question: {query}"""
