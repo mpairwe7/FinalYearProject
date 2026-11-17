@@ -41,7 +41,7 @@ Option 1.
   abstains more than 15 points above English for two hours, on at least 20 turns
   an hour. A new counter keeps the existing `ura_chat_turns_total` series and
   queries unchanged.
-- **Cost per decision.** `ura:llm_tokens:per_turn_1d` divides model tokens by
+- **Cost per decision.** `ura:llm_tokens_per_turn:rate1d` divides model tokens by
   chat turns over a day. `governance/monitoring/cost_per_decision.py` prices it
   from `cost_per_decision.csv`, whose prices quote the providers' pages with a
   date. A model with no published price makes the figure a lower bound and is

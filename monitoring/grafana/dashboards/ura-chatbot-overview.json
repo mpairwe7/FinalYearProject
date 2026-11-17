@@ -970,7 +970,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ura:llm_tokens:per_turn_1d",
+          "expr": "ura:llm_tokens_per_turn:rate1d",
           "legendFormat": "{{provider}} {{model}} {{type}}",
           "refId": "A"
         }

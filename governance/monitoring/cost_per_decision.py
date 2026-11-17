@@ -1,6 +1,6 @@
 """Cost of one decision (one chat turn) in US dollars.
 
-Prometheus records model tokens per turn as ``ura:llm_tokens:per_turn_1d``.
+Prometheus records model tokens per turn as ``ura:llm_tokens_per_turn:rate1d``.
 This prices each provider and model from ``cost_per_decision.csv``. A model
 with tokens but no published price is listed as unpriced, and the total is
 then a lower bound.
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 PRICES = Path(__file__).with_name("cost_per_decision.csv")
-QUERY = "ura:llm_tokens:per_turn_1d"
+QUERY = "ura:llm_tokens_per_turn:rate1d"
 
 
 def load_prices(path: Path = PRICES) -> dict[tuple[str, str], dict[str, float]]:

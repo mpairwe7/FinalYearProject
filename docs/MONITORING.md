@@ -437,7 +437,7 @@ parity and cost** shows abstention and escalation per reply language
 3. Run the [multilingual retrieval benchmark](runbooks/multilingual-retrieval-benchmark.md)
    for that locale.
 
-The same row shows model tokens per turn (`ura:llm_tokens:per_turn_1d`).
+The same row shows model tokens per turn (`ura:llm_tokens_per_turn:rate1d`).
 `python3 governance/monitoring/cost_per_decision.py` prices it with
 `governance/monitoring/cost_per_decision.csv` and prints the cost of one
 decision in US dollars.

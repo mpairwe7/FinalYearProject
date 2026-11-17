@@ -576,7 +576,7 @@ tests:
       - series: 'ura_chat_turns_total{channel="rest",outcome="answered"}'
         values: '0+0.0025x2000'
     promql_expr_test:
-      - expr: round(ura:llm_tokens:per_turn_1d)
+      - expr: round(ura:llm_tokens_per_turn:rate1d)
         eval_time: 1500m
         exp_samples:
           - labels: '{provider="sunbird",model="sunflower-9b",type="input"}'
