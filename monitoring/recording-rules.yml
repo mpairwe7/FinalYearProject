@@ -65,6 +65,19 @@ groups:
         expr: sum(rate(ura_chat_turns_total{outcome="abstained"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
       - record: ura:chat_turns:escalation_ratio_1h
         expr: sum(rate(ura_chat_turns_total{outcome="escalated"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
+      # Language parity: the same ratios per reply language, with the traffic
+      # behind each. A locale with no abstained series reads 0, not no data.
+      - record: ura:locale_turns:rate1h
+        expr: sum by (locale) (rate(ura_locale_turns_total{outcome!~"error|cancelled"}[1h]))
+      - record: ura:locale_turns:abstention_ratio_1h
+        expr: >
+          (sum by (locale) (rate(ura_locale_turns_total{outcome="abstained"}[1h])) or ura:locale_turns:rate1h * 0)
+          / ura:locale_turns:rate1h
+      # Hand-offs, not the escalated outcome: an abstained turn that opens a ticket counts.
+      - record: ura:locale_turns:escalation_ratio_1h
+        expr: >
+          (sum by (locale) (rate(ura_locale_escalations_total[1h])) or ura:locale_turns:rate1h * 0)
+          / ura:locale_turns:rate1h
       # Share of checked replies the figure lock would strip. The evidence for
       # enforcing it beyond the reasoning tier (G360). The reject series does not
       # exist until the first reject, and a clean record must read as 0, not as no data.
@@ -80,3 +93,8 @@ groups:
         expr: sum by (provider) (rate(ura_llm_requests_total{status="error"}[10m])) / sum by (provider) (rate(ura_llm_requests_total[10m]))
       - record: ura:llm_tokens:rate5m
         expr: sum by (provider, model, type) (rate(ura_llm_tokens_total[5m]))
+      # Cost per decision: model tokens per chat turn over a day. Every turn counts,
+      # errors and cancellations too, because each one was paid for.
+      # governance/monitoring/cost_per_decision.py prices it from cost_per_decision.csv.
+      - record: ura:llm_tokens_per_turn:rate1d
+        expr: sum by (provider, model, type) (rate(ura_llm_tokens_total[1d])) / scalar(sum(rate(ura_chat_turns_total[1d])))

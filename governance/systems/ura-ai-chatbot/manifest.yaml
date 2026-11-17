@@ -68,8 +68,16 @@ nist_ai_rmf:
       evidence: "requirements.txt (pinned), .github/workflows/security-trivy.yml (Trivy), .github/workflows/ci-ml-pipeline.yml"
     - control: "MEASURE 2.6 – Computational bias assessment"
       status: "partial"
-      evidence: "scripts/bias_fairness_audit.py (language + taxpayer type parity)"
-      gap: "Formal fairness report needed for demographic groups"
+      evidence: >
+        Live: ura_locale_turns_total counts each turn's outcome by reply language and
+        UraLanguageAbstentionGap alerts on a gap against English (monitoring/alerting-rules.yml,
+        governance/monitoring/README.md). Offline: scripts/bias_fairness_audit.py (language +
+        taxpayer type parity).
+      verified_by:
+        - "App/backend/tests/test_metrics_facade.py::ChatTurnRecorderTest::test_outcomes_are_counted_by_reply_language"
+        - "App/backend/tests/test_metrics_facade.py::ChatTurnRecorderTest::test_a_hand_off_is_counted_by_language_whatever_the_outcome"
+        - "tests/test_monitoring_config.py"
+      gap: "Taxpayer type (individual or SME) is measured offline only; no formal fairness report"
     - control: "MEASURE 4.1 – Measurement approaches applied regularly"
       status: "implemented"
       evidence: >
@@ -325,6 +333,18 @@ eu_ai_act:
         local TTS) and any non-WAV cloud TTS output (Sunbird, Workers AI) leave unmarked.
         No imperceptible audio watermark (the Code of Practice's second layer). Applies as a
         benchmark: the deployment is in Uganda.
+  prohibited_practices:
+    - requirement: "Art. 5 — No prohibited AI practice"
+      status: "implemented"
+      evidence: "governance/policies/prohibited_uses.md (engineering assessment; the DPO/legal owner confirms it)"
+  fundamental_rights:
+    - requirement: "Art. 27 — Fundamental rights impact assessment"
+      status: "partial"
+      evidence: "governance/systems/ura-ai-chatbot/fria.md (draft)"
+      gap: >
+        Unsigned. Voice emotion inference (receptionist/prosody.py; flags emotion_aware_prosody
+        and eq_multimodal_fusion, both off by default) may be an emotion recognition system,
+        high risk under Annex III point 1(c). The DPO/legal owner decides the classification (G664).
   human_oversight:
     - requirement: "Human review channel available"
       status: "implemented"

@@ -145,6 +145,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - Faithfulness scoring with escalation when confidence is low
 - Replaced figures stay out of answers (ADR-0033, G534/G535). A passage stating a value the rate table records as replaced (the USD 500 baggage allowance, the UGX 150m VAT threshold, the UGX 5m EFRIS refund threshold) is left out on every retrieval path. A passage that disagrees with the table in any other way is kept, and the model is told to report both figures. Limitation: the screen fails open. If it raises (the kernel cannot load), the passages pass unscreened and a warning is logged, so a replaced figure can then reach generation or an extractive answer; the corrected corpus is the second line of defence
 - Bias audit script: `scripts/bias_fairness_audit.py`
+- Language parity in live traffic: `ura_locale_turns_total` counts each turn's outcome by reply language, and `UraLanguageAbstentionGap` alerts when Luganda, Swahili, Runyankole or Acholi abstains more than 15 points above English (ADR-0059)
 
 ### Risks
 - Incorrect tax rate information could cause financial harm (H1, High)

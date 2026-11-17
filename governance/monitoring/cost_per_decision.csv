@@ -1,0 +1,8 @@
+provider,model,usd_per_million_input_tokens,usd_per_million_output_tokens,source,as_of,note
+cloudflare.workers_ai,@cf/meta/llama-3.3-70b-instruct-fp8-fast,0.293,2.253,https://developers.cloudflare.com/workers-ai/platform/pricing/,2026-11-12,Second answer tier behind Sunbird (ADR-0036)
+cloudflare.workers_ai,@cf/mistralai/mistral-small-3.1-24b-instruct,0.351,0.555,https://developers.cloudflare.com/workers-ai/platform/pricing/,2026-11-12,Third answer tier
+cloudflare.workers_ai,@cf/meta/llama-4-scout-17b-16e-instruct,0.270,0.850,https://developers.cloudflare.com/workers-ai/platform/pricing/,2026-11-12,Fourth answer tier
+gcp.gemini,gemini-3.5-flash-lite,0.30,2.50,https://aistudio.google.com/docs/pricing,2026-11-17,Paid tier. The page shows no date; as_of is the day it was read
+gcp.gemini,gemini-3.7-flash,,,https://aistudio.google.com/docs/pricing,2026-11-17,The configured GEMINI_MODEL is not on the pricing page
+sunbird,sunflower-9b,,,https://docs.sunbird.ai/support/faq.md,2026-11-17,No published price. Free tier for developers and researchers; commercial volume by contact
+vllm,,,,,,Self-hosted. The cost is GPU time, not tokens

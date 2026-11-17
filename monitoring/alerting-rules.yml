@@ -165,6 +165,20 @@ groups:
           description: "Taxpayers are asking about things the corpus does not cover — a knowledge gap, not an outage."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/corpus-coverage.md"
 
+      - alert: UraLanguageAbstentionGap
+        expr: >
+          (ura:locale_turns:abstention_ratio_1h{locale!~"en|other"}
+            - on () group_left ura:locale_turns:abstention_ratio_1h{locale="en"}) > 0.15
+          and ura:locale_turns:rate1h{locale!~"en|other"} * 3600 >= 20
+        for: 2h
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Abstention in {{ $labels.locale }} is more than 15 points above English"
+          description: "Taxpayers who write in {{ $labels.locale }} get no answer far more often than those who write in English, on at least 20 turns an hour. Look for a retrieval or translation gap in that language."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#language-parity"
+
       - alert: UraRetrievalDegraded
         expr: ura:retrieval_keyword_fallback:ratio_rate10m > 0.2
         for: 10m

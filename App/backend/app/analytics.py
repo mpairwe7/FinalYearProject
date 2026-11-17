@@ -650,6 +650,11 @@ def record_chat_turn(
     outcome = "error" if error else turn_outcome(result)
     mode = str(result.get("retrieval_mode") or "unknown")
     metrics.inc("chat_turns_total", labels={"channel": channel, "outcome": outcome})
+    # Outcome by reply language: the parity check that abstention and escalation
+    # do not fall harder on taxpayers who write in Luganda, Swahili, Runyankole or Acholi.
+    locale = str(result.get("locale") or "")
+    locale = locale if locale in _DECISION_LOCALES else "other"
+    metrics.inc("locale_turns_total", labels={"locale": locale, "outcome": outcome})
     metrics.inc("retrieval_mode_total", labels={"mode": mode})
     if elapsed_ms > 0:
         metrics.observe("chat_response_time_ms", elapsed_ms, labels={"channel": channel, "mode": mode})
@@ -664,6 +669,7 @@ def record_chat_turn(
     # still open a ticket, and that hand-off is an escalation.
     if outcome == "escalated" or (not error and (result.get("escalation_required") or result.get("handoff"))):
         metrics.inc("escalation_required_total", labels={"channel": channel})
+        metrics.inc("locale_escalations_total", labels={"locale": locale})
 
 
 # ---------------------------------------------------------------------------

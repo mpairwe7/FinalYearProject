@@ -18,6 +18,9 @@ Rules:
 
 - A new governance record goes into its module here. A control, alert rule or
   test stays where it runs, and its module README links to it.
+- A model swap or prompt change adds a row to `systems/ura-ai-chatbot/change_log.md`.
+  A production incident adds a row to `evidence/incident_log/README.md`. A new
+  AI provider gets a folder in `vendors/` and a row in `monitoring/cost_per_decision.csv`.
 - When a linked file moves, update the README. `tests/test_governance_evidence.py`
   fails on a broken link.
 - Threat-model code lives in `threat-model/`. Security claims must match

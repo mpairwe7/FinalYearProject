@@ -19,6 +19,12 @@ REQUIRED_FILES = [
     "governance/systems/ura-ai-chatbot/manifest.yaml",
     "governance/REGISTRY_README.md",
     "governance/OWNERS.md",
+    "governance/systems/ura-ai-chatbot/fria.md",
+    "governance/systems/ura-ai-chatbot/change_log.md",
+    "governance/policies/prohibited_uses.md",
+    "governance/policies/risk_appetite.md",
+    "governance/evidence/incident_log/README.md",
+    "governance/monitoring/cost_per_decision.csv",
     "SECURITY.md",
     "App/backend/app/guardrails.py",
     "App/backend/app/tracing.py",
@@ -237,6 +243,24 @@ def _declared_functions(source: str) -> set[str]:
     }
 
 
+def _declares(source: str, parts: list[str]) -> bool:
+    """True when *source* declares the test a pytest node id names: ``test`` or ``Class::test``."""
+    import ast
+
+    if len(parts) == 1:
+        return parts[0] in _declared_functions(source)
+    scope, node = ast.parse(source).body, None
+    for part in parts:
+        node = next(
+            (n for n in scope if isinstance(n, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) and n.name == part),
+            None,
+        )
+        if node is None:
+            return False
+        scope = node.body
+    return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+
+
 def _missing_evidence(ref: str) -> str:
     path, _, name = ref.partition("::")
     full = PROJECT_ROOT / path
@@ -244,10 +268,10 @@ def _missing_evidence(ref: str) -> str:
         return "file missing"
     if name:
         try:
-            declared = _declared_functions(full.read_text())
+            found = _declares(full.read_text(), name.split("::"))
         except SyntaxError:
             return "file does not parse"
-        if name not in declared:
+        if not found:
             return "test not found"
     return ""
 
