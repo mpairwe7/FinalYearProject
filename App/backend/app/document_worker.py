@@ -147,7 +147,7 @@ def _child(kind: str, data: bytes, conn: Any) -> None:
             extraction = _extract_xlsx_pages(data)
         else:
             from .documents import _EXTRACTORS, UnsupportedDocumentError
-            from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+            from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 
             if kind == "pdf":
                 try:

@@ -32,7 +32,7 @@
   3. Texting shorthand `wht is` was expanded as Withholding Tax rather than "what is".
 - **Resolution**:
   - Updated `rewrite_with_history()` to bind pronouns to intra-sentential subjects before looking backward to prior turns.
-  - Added action verbs ("use", "using", "require", "mandate") to `_STOP_AND_ACTION_WORDS` in `premise_guard.py`.
+  - Added action verbs ("use", "using", "require", "mandate") to `_STOP_AND_ACTION_WORDS` in `guardrails/premise.py`.
   - Updated `numeric_contradiction()` and `verify_claims()` to subtract user query amounts before checking for legal threshold contradictions.
   - Added disambiguation for `wht is/are/does` into `what is/are/does` in `correct_spelling()`.
 

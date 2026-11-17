@@ -247,7 +247,7 @@ THREAT_REGISTRY: list[dict] = [
             "client that discards its session starts over, so the IP limit stays in front: mitigated in part"
         ),
         "evidence": [
-            "App/backend/app/guard_friction.py",
+            "App/backend/app/guardrails/friction.py",
             "App/backend/app/rag/pipeline.py",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
@@ -988,7 +988,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "Fail-closed PDF guards reject encryption, JS/Launch/GoToR/XFA/embedded files before extract or OCR",
         "evidence": [
-            "App/backend/app/pdf_guards.py",
+            "App/backend/app/guardrails/pdf.py",
             "App/backend/app/documents.py",
         ],
         "status": "mitigated",
@@ -1001,7 +1001,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0029",
         "mitigation": "Header/magic checks, xref and page-edge caps, Office zip-slip/macro/encryption reject, Pillow pixel cap, OCR sidecar magic + concurrency",
         "evidence": [
-            "App/backend/app/pdf_guards.py",
+            "App/backend/app/guardrails/pdf.py",
             "App/backend/app/documents.py",
             "App/backend/app/ocr_service.py",
         ],
@@ -1041,7 +1041,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0020",
         "mitigation": "PDF header must be %PDF- at start; Office ZIP must contain Content_Types + word/ or xl/; images verified by Pillow; client MIME is untrusted",
         "evidence": [
-            "App/backend/app/pdf_guards.py",
+            "App/backend/app/guardrails/pdf.py",
             "App/backend/app/documents.py",
         ],
         "status": "mitigated",
@@ -1055,7 +1055,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Same structural PDF guards on export; SHA-256 manifest; ingest rejects hash drift; injection scrub on retrieved chunks",
         "evidence": [
             "App/backend/app/ingestion/pdf_corpus.py",
-            "App/backend/app/pdf_guards.py",
+            "App/backend/app/guardrails/pdf.py",
         ],
         "status": "mitigated",
     },
@@ -1281,7 +1281,7 @@ THREAT_REGISTRY: list[dict] = [
         "description": "Live web research SSRF, DNS rebinding to internal/metadata IPs, or malicious statutory/MDA PDF extraction outside the ephemeral sandbox (ADR-0008, ADR-0009, OWASP ASI04/ASI05/LLM01)",
         "owasp_llm": "LLM01",
         "mitre_atlas": "AML.T0052",
-        "mitigation": "Domain allowlisting (ura.go.ug, parliament.go.ug, bou.or.ug, ulii.org, etc.) on the default https port only, follow_redirects=False with every hop re-validated, connections pinned to the address they were validated against by app/egress.py (resolve once, every answer publicly routable, TLS still verified against the hostname), so DNS rebinding is closed for every fetch on a turn (ADR-0035), and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural pdf_guards.py checks. Residual: the CI crawler is not yet on the pinned backend (G533)",
+        "mitigation": "Domain allowlisting (ura.go.ug, parliament.go.ug, bou.or.ug, ulii.org, etc.) on the default https port only, follow_redirects=False with every hop re-validated, connections pinned to the address they were validated against by app/egress.py (resolve once, every answer publicly routable, TLS still verified against the hostname), so DNS rebinding is closed for every fetch on a turn (ADR-0035), and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural guardrails/pdf.py checks. Residual: the CI crawler is not yet on the pinned backend (G533)",
         "evidence": [
             "App/backend/app/egress.py",
             "App/backend/app/web_research.py",

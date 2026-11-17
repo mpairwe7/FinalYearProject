@@ -7,7 +7,7 @@ Implements Phase D of the Sovereign Live Web Research & Self-Updating Qdrant pla
 2. Safe streaming download (:func:`download_to_sandbox`) enforcing HTTPS,
    Tier-1 source authority, a strict 25 MB mid-stream byte abort and a
    wall-clock deadline (G490).
-3. Structural security inspection via :func:`app.pdf_guards.inspect_pdf_bytes`,
+3. Structural security inspection via :func:`app.guardrails.pdf.inspect_pdf_bytes`,
    then :func:`app.guardrails.injection_present` and
    :func:`app.mcp.validation.screen_tool_result` on every page. A page that
    trips either rejects the whole document (G487), cached copies included.
@@ -43,7 +43,7 @@ from .guardrails.input_checks import _record_guardrail_security_event, injection
 from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
 from .ingestion.pdf_corpus import CORPUS_FETCH_USER_AGENT
-from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
     TAINTED_DOCUMENT_MARKER,
     classify_source_authority,
@@ -329,7 +329,7 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
     inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)
     pages: list[tuple[int, str]] = []
 
-    # 1. Primary: pypdfium2 (matches documents.py and pdf_guards.py)
+    # 1. Primary: pypdfium2 (matches documents.py and guardrails/pdf.py)
     try:
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 

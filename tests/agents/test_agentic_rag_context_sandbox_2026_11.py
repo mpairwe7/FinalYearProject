@@ -68,7 +68,7 @@ def test_a_parse_child_keeps_only_allowlisted_settings() -> None:
 def test_every_setting_the_extractors_read_is_allowed_through() -> None:
     import re
 
-    sources = ["documents.py", "ephemeral_pdf_sandbox.py", "ingestion/docling_intelligence.py", "pdf_guards.py",
+    sources = ["documents.py", "ephemeral_pdf_sandbox.py", "ingestion/docling_intelligence.py", "guardrails/pdf.py",
                "ingestion/document_normalization.py", "ocr_service.py"]
     names: set[str] = set()
     for name in sources:

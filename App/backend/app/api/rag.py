@@ -390,7 +390,7 @@ async def chat_title(
     one came back; the client keeps the provisional title it already shows.
     """
     from ..chat_title import generate_title
-    from ..guard_friction import principal_key
+    from ..guardrails.friction import principal_key
 
     user_text = next(message.content for message in body.messages if message.role == "user")
     assistant_text = next((message.content for message in body.messages if message.role == "assistant"), "")

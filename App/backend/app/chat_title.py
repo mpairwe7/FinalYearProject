@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from .rag import generator
-from .guard_friction import note_refusal, paused
+from .guardrails.friction import note_refusal, paused
 from .guardrails.input_checks import InputGuard
 from .guardrails.pii import contains_pii, redact_pii_text
 from .prompts.title import CHAT_TITLE_SYSTEM as _SYSTEM_PROMPT

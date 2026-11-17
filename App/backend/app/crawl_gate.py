@@ -251,7 +251,7 @@ def vet_new_pdfs(
     """
     from .malware_scan import MalwareRejected, scan_bytes
     from .ingestion.pdf_corpus import inspect_pdf_for_prompt_injection
-    from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
+    from .guardrails.pdf import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
 
     known = before_state.get("pdf_hashes") or {}
     hashes: dict[str, Any] = after_state.get("pdf_hashes") or {}

@@ -10,7 +10,7 @@ Macro-enabled Office (`.xlsm`, `.docm`, `.pptm`) is rejected.
 - 10 MiB source limit; clients must send `Content-Length` when possible.
 - The API reads the uploaded file in 64 KiB chunks, caps multipart fields and
   file count, and validates PDF, Office ZIP, and image content before parsing.
-- PDF intake (`app/pdf_guards.py`) requires `%PDF-` at the start (short
+- PDF intake (`app/guardrails/pdf.py`) requires `%PDF-` at the start (short
   whitespace prefix only), refuses encryption, JavaScript / Launch / GoToR /
   XFA / embedded files, and caps xref objects and page dimensions. If PyMuPDF
   is absent (slim Crane Cloud profile), only the header check runs and

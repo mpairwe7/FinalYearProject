@@ -34,7 +34,7 @@ During live evaluation on `dev-2.0`, five representative complex tax questions w
 |---|---|---|---|
 | **1. EFRIS & Input VAT** | VAT distributor (UGX 600M turnover) bought goods (UGX 40M) with manual paper invoice. Can input VAT be claimed? Penalties? | *"I know deadlines can be stressful... What is the amount in UGX? (e.g. 1,000,000 or 1m — tell me if it already includes VAT)"* | **Regex Interception:** `calculator_router.py:649` saw money amounts + "VAT" keyword, bypassed the calculation verb check, and forced a calculator wizard. `text_signals.py:160` matched "penalties" to inject empathy. |
 | **2. Mixed-Use Rental Tax** | UGX 90M gross: UGX 40M residential + UGX 50M commercial shops. How is rental tax calculated for an individual? | Repeated canned UGX 6M FAQ example; truncated mid-sentence: `Chargeable income = UGX 6,000,0001]`. Ignored user's 90M/40M/50M amounts. | **Token Limit & Capacity:** `LLM_MAX_TOKENS=512` cut generation off mid-sentence. Model failed to synthesize multi-property pooling rules. |
-| **3. WHT Default Assessment & Objection** | Administrative default assessment of UGX 50M for WHT. 30% payment rule on disputed tax? | *"Under current Ugandan tax laws... there is no official 'Disputes Tax'. The URA does not administer or impose such a tax..."* | **Cascading Corruption:** `query.py` spellchecker turned *"disputed tax"* into *"dispute tax"*. `premise_guard.py` flagged "disputes tax" as a nonexistent statutory tax and rejected the entire query. |
+| **3. WHT Default Assessment & Objection** | Administrative default assessment of UGX 50M for WHT. 30% payment rule on disputed tax? | *"Under current Ugandan tax laws... there is no official 'Disputes Tax'. The URA does not administer or impose such a tax..."* | **Cascading Corruption:** `query.py` spellchecker turned *"disputed tax"* into *"dispute tax"*. `guardrails/premise.py` flagged "disputes tax" as a nonexistent statutory tax and rejected the entire query. |
 | **4. Imported Digital Services (SaaS)** | Ugandan company pays $4,000/mo to Irish SaaS provider. WHT and reverse-charge VAT rates? | Hallucinated a physical customs formula (`CIF + CIF x Duty Rate`), was caught by the Response Judge, and replaced with unrelated FAQ bullets about hotels and schools. | **Noisy Flat Retrieval & Naive Revision:** Flat dense retrieval lacked legal graph joins; Response Judge's `_build_grounded_revision` blindly dumped raw text excerpts. |
 | **5. Non-Resident PAYE & Benefits in Kind** | Foreign specialist on 8-month contract ($6,000/mo + house + car). Non-resident PAYE calculation? | *"Under current Ugandan tax laws... there is no official 'Non Resident Tax'. The URA does not administer or impose such a tax..."* | **False Premise Regex Over-Extraction:** The phrase *"non-resident tax table"* matched `(?P<modifier>.*?)\s+tax`. The guard treated "non-resident" as a tax kind and aborted. |
 
@@ -138,8 +138,8 @@ Fix the five acute bugs that caused immediate failure during testing.
   - Fix abbreviation expansion to use word boundaries and avoid expanding if already preceded or followed by the expanded term:
     `re.sub(r"(?<!Withholding Tax )\bWHT\b(?!\))", "Withholding Tax (WHT)", query)`
 
-#### 0.4 Fix False Premise Guard False Positives in `App/backend/app/premise_guard.py`
-- **Location:** `App/backend/app/premise_guard.py:206-262`
+#### 0.4 Fix False Premise Guard False Positives in `App/backend/app/guardrails/premise.py`
+- **Location:** `App/backend/app/guardrails/premise.py:206-262`
 - **Current Defect:**
   - `_CANDIDATE_PATTERNS` matches `(?P<modifier>.*?)\s+(?P<kind>tax|duty...)`. When the word after "tax" is a noun (e.g. `tax table`, `tax return`, `tax bracket`, `tax rate`, `tax credit`), it incorrectly extracts candidate tax concepts like "non resident tax".
   - Missing legitimate concepts: `"dispute"`, `"disputes"`, `"non-resident"`, `"non resident"`.
@@ -250,7 +250,7 @@ Create `tests/agents/test_frontier_reasoning_pipeline.py`:
 - Test that `calculator_router.py` does not intercept complex legal questions containing numbers.
 - Test that `text_signals.py` does not treat statutory terms like "penalties" as emotional urgency.
 - Test that `query.py` does not corrupt "disputed", "consulting", or acronyms.
-- Test that `premise_guard.py` permits "non-resident tax table", "disputes tax", and "input VAT".
+- Test that `guardrails/premise.py` permits "non-resident tax table", "disputes tax", and "input VAT".
 
 #### 5.2 End-to-End Golden Scenarios to Verify
 1. **Scenario 1 (EFRIS & Input VAT):** Confirms that an unregistered or manual paper tax invoice from an EFRIS-mandated supplier **disallows** input tax credit under the VAT Act, explains the supplier's penalty under Section 62B of the Tax Procedures Code Act, and guides the taxpayer on portal reporting.

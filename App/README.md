@@ -54,7 +54,7 @@ App/
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails/    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
 │   │   ├── linear_text.py   # One-pass scans that replace regexes slow on chat text (ADR-0057)
-│   │   ├── guard_friction.py # Per-principal cool-down after repeated guard refusals (G464)
+│   │   ├── guardrails/friction.py # Per-principal cool-down after repeated guard refusals (G464)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
 │   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)

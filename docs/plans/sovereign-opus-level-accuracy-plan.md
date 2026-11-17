@@ -412,7 +412,7 @@ Root cause (D8): `max_tokens` too small, and `finish_reason` is thrown away; the
 
 Generalisation strategy: **(1)** a generic per-conversation *facts* layer, **(2)** a generic *planner* that maps facts + question to tools, **(3)** rules as **data** in the rate table with `legal_basis`, and **(4)** an explicit "no tool covers this" disclosure. New tax rules then become data plus a small tool, not new router special cases.
 
-Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` (`CalculatorTool`, `PAYECalculator`, `CALCULATOR_TOOLS`, `_require_scalar`, `_require_bands`, `apply_bands`), `app/tax/tables.py` (`_load_table` validation), `app/tax/data/FY2026-27.json` and `FY2025-26.json`, `app/rag/context_manager.py` (`ConversationEntities`, `extract_conversation_entities`, `RollingContextManager`), `app/premise_guard.py`, `service._maybe_handle_calculator` (≈ line 8620), `service._evaluate_calculation_context` (≈ line 997), and `tests/test_calculator_router.py` / `tests/test_tax_calculators.py`.
+Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` (`CalculatorTool`, `PAYECalculator`, `CALCULATOR_TOOLS`, `_require_scalar`, `_require_bands`, `apply_bands`), `app/tax/tables.py` (`_load_table` validation), `app/tax/data/FY2026-27.json` and `FY2025-26.json`, `app/rag/context_manager.py` (`ConversationEntities`, `extract_conversation_entities`, `RollingContextManager`), `app/guardrails/premise.py`, `service._maybe_handle_calculator` (≈ line 8620), `service._evaluate_calculation_context` (≈ line 997), and `tests/test_calculator_router.py` / `tests/test_tax_calculators.py`.
 
 ### F.1 CaseFacts — per-conversation structured facts (fixes D2, enables everything else)
 - New module `app/memory/case_facts.py`:
@@ -474,7 +474,7 @@ Rate-table changes go in **both** `FY2026-27.json` and `FY2025-26.json` where th
 Tests: `tests/test_tax_calculators.py` — every formula with hand-computed expectations **computed in the test from the table values** (not literals), the edge cases (0 days, exactly 183, 182, loan of exactly 1,000,000, the de-minimis boundary), and the unverified surfacing.
 
 ### F.5 Premise and contradiction checks (fixes D4 for all heads)
-- In `app/premise_guard.py` add `check_fact_contradictions(facts: CaseFacts, tool_results: dict) -> list[Contradiction]`. Start with these rules and keep them data-driven (a list of small rule functions):
+- In `app/guardrails/premise.py` add `check_fact_contradictions(facts: CaseFacts, tool_results: dict) -> list[Contradiction]`. Start with these rules and keep them data-driven (a list of small rule functions):
   - the user claims non-resident but `determine_residency` says resident, or the reverse
   - the user says "below the VAT threshold" but `annual_turnover` ≥ `vat_registration_threshold_annual`
   - the user expects an expense deduction for individual rental income

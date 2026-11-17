@@ -12,7 +12,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.pdf_guards import (
+from app.guardrails.pdf import (
     QUERY_PDF_LIMITS,
     PdfInspection,
     PdfRejected,
@@ -47,7 +47,7 @@ def _minimal_catalog_pdf(*, extra_catalog: str = "") -> bytes:
 class PdfUnavailableTests(unittest.TestCase):
     def test_missing_pymupdf_warning_reaches_the_record(self) -> None:
         from app import documents
-        from app.pdf_guards import PdfInspection
+        from app.guardrails.pdf import PdfInspection
         from unittest import mock
 
         inspection = PdfInspection()
@@ -57,10 +57,10 @@ class PdfUnavailableTests(unittest.TestCase):
         self.assertTrue(any("PyMuPDF" in item for item in record.warnings))
 
     def test_missing_pymupdf_skips_structural_inspect(self) -> None:
-        from app.pdf_guards import PdfUnavailable
+        from app.guardrails.pdf import PdfUnavailable
         from unittest import mock
 
-        with mock.patch("app.pdf_guards._open_document", side_effect=PdfUnavailable("no engine")):
+        with mock.patch("app.guardrails.pdf._open_document", side_effect=PdfUnavailable("no engine")):
             inspection = inspect_pdf_bytes(b"%PDF-1.7 hello")
         self.assertEqual(inspection.findings, [])
         self.assertTrue(any("PyMuPDF" in item for item in inspection.warnings))
@@ -181,7 +181,7 @@ class PdfBytesGuardTests(unittest.TestCase):
             inspect_pdf_bytes(data)
 
     def test_corpus_best_effort_does_not_raise_on_unreadable_bytes(self) -> None:
-        from app.pdf_guards import CORPUS_PDF_LIMITS
+        from app.guardrails.pdf import CORPUS_PDF_LIMITS
 
         inspection = inspect_pdf_bytes(b"%PDF-1.7 not really a pdf", CORPUS_PDF_LIMITS)
         self.assertTrue(inspection.warnings or inspection.findings == [])

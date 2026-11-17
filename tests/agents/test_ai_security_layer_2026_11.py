@@ -24,7 +24,7 @@ import re
 
 import pytest
 from app.rag import pipeline
-from app.guard_friction import COOLDOWN_REPLY, StrikeTracker, principal_key, strike_tracker
+from app.guardrails.friction import COOLDOWN_REPLY, StrikeTracker, principal_key, strike_tracker
 from app.guardrails.fences import fence_untrusted_document_body
 from app.guardrails.input_checks import (
     InputGuard,

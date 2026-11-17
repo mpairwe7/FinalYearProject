@@ -153,16 +153,16 @@ from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from ..config.flags import _log_safe, flags
 from ..linear_text import strip_spans
-from ..guard_friction import note_refusal as note_guard_refusal
-from ..guard_friction import paused as paused_turn
-from ..guard_friction import principal_key
+from ..guardrails.friction import note_refusal as note_guard_refusal
+from ..guardrails.friction import paused as paused_turn
+from ..guardrails.friction import principal_key
 from ..guardrails.input_checks import GuardResult, InputGuard
 from ..guardrails.output_checks import OutputGuard, neutralize_untrusted_links
 from ..guardrails.pii import STORE_RAW_PROMPTS, redact_pii_text, user_stated_identifiers
 from ..memory.language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from ..memory import get_memory_service
 from ..model_welfare import is_model_welfare_query
-from ..premise_guard import check_false_premise
+from ..guardrails.premise import check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
     canonicalize_tax_terms,
@@ -12124,7 +12124,7 @@ class ChatModel:
                 # tier is selected here and carried on the trace whether
                 # or not the flag is on — off, it reports T1, which is
                 # what the single configured model has always been.
-                from ..premise_guard import check_fact_contradictions
+                from ..guardrails.premise import check_fact_contradictions
                 from ..scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
@@ -12159,7 +12159,7 @@ class ChatModel:
                     trace_ctx["endpoint_model"] = turn_endpoint.model
                 log_tier("chat", tier_decision)
             elif tiering_enabled:
-                from ..premise_guard import check_fact_contradictions
+                from ..guardrails.premise import check_fact_contradictions
                 from ..scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
@@ -14262,7 +14262,7 @@ class ChatModel:
         planned_specs_s: list[Any] = []
         has_premise_contra_s = False
         if flags.is_enabled("agentic_mode") or stream_tiering_enabled:
-            from ..premise_guard import check_fact_contradictions
+            from ..guardrails.premise import check_fact_contradictions
             from ..scenario_planner import plan_tools
 
             active_cf_s = _ACTIVE_CASE_FACTS.get()

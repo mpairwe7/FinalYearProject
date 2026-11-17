@@ -253,7 +253,7 @@ class Statutory2024To2027CorpusAndRatesTests(unittest.TestCase):
     def test_official_2024_2027_pdfs_are_indexed_and_freshness_snapshot_is_clean(self) -> None:
         import json
 
-        from app.pdf_guards import CORPUS_PDF_LIMITS, inspect_pdf_path
+        from app.guardrails.pdf import CORPUS_PDF_LIMITS, inspect_pdf_path
 
         for pdf_name in self.EXPECTED_NEW_PDFS:
             with self.subTest(pdf=pdf_name):

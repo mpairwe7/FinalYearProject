@@ -9,7 +9,7 @@ import pytest
 from App.backend.tests.test_calculator_router import ExplanationVsCalculationRoutingTests  # noqa: F401
 from app.rag import pipeline as pipeline_module
 from app.memory.case_facts import extract_case_facts
-from app.premise_guard import check_fact_contradictions
+from app.guardrails.premise import check_fact_contradictions
 from app.scenario_planner import build_verified_facts, plan_tools
 from app.tools import ToolRegistry
 
