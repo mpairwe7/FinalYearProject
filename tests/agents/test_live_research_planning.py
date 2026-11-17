@@ -689,12 +689,12 @@ class TestCorpusSyncApproval:
 
 class TestGraphParity:
     def _state(self, query: str = QUESTION):
-        from app.agents.graphs.state import AgentGraphState
+        from app.workflows.graph.state import AgentGraphState
 
         return AgentGraphState(query=query, rewritten_query=query, locale="en", top_k=3)
 
     def test_the_graph_runs_the_check_once_however_often_it_retrieves(self, monkeypatch):
-        from app.agents.graphs import main_graph
+        from app.workflows.graph import main_graph
 
         monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         calls: list[str] = []
@@ -718,7 +718,7 @@ class TestGraphParity:
     def test_a_retried_retrieval_keeps_the_live_evidence(self, monkeypatch):
         # Reflection re-enters retrieval, and the check does not run again, so
         # the evidence the notice describes must survive the second pass.
-        from app.agents.graphs import main_graph
+        from app.workflows.graph import main_graph
 
         monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         rows = (RawResult("Notice", "https://ura.go.ug/en/notice/", "Penalty waiver."),)
@@ -734,8 +734,8 @@ class TestGraphParity:
         assert state.retrieval_mode == "live_web_unconfirmed"
 
     def test_an_abstained_graph_reply_carries_the_disclosure(self):
-        from app.agents.graphs import main_graph
-        from app.agents.graphs.state import GraphOutcome
+        from app.workflows.graph import main_graph
+        from app.workflows.graph.state import GraphOutcome
 
         state = self._state()
         state.outcome = GraphOutcome.ABSTAINED
@@ -746,8 +746,8 @@ class TestGraphParity:
         assert state.reply.endswith(UNAVAILABLE)
 
     def test_a_clarifying_graph_reply_does_not(self):
-        from app.agents.graphs import main_graph
-        from app.agents.graphs.state import GraphOutcome
+        from app.workflows.graph import main_graph
+        from app.workflows.graph.state import GraphOutcome
 
         state = self._state()
         state.outcome = GraphOutcome.CLARIFY
@@ -759,8 +759,8 @@ class TestGraphParity:
         assert state.reply == "Which return?"
 
     def test_the_graph_appends_the_disclosure_to_an_answer(self):
-        from app.agents.graphs import main_graph
-        from app.agents.graphs.state import GraphOutcome
+        from app.workflows.graph import main_graph
+        from app.workflows.graph.state import GraphOutcome
 
         state = self._state()
         state.reply = "URA may waive penalties on application."

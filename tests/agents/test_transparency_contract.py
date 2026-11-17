@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 from app.rag import pipeline as pipeline_module
-from app.agents.graphs.main_graph import node_reflect, node_synthesize
-from app.agents.graphs.state import AgentGraphState
+from app.workflows.graph.main_graph import node_reflect, node_synthesize
+from app.workflows.graph.state import AgentGraphState
 from app.audit import turns
 from app.config.flags import flags
 from app.guardrails.output_checks import OutputGuard
@@ -254,7 +254,7 @@ class TestADegradedAnswerIsNotKept:
 
 class TestAGraphFallback:
     def test_says_so_on_the_stream_too(self, chat_model, clean_flags, tmp_db, monkeypatch) -> None:
-        from app.agents.graphs.state import AgentGraphState, GraphOutcome
+        from app.workflows.graph.state import AgentGraphState, GraphOutcome
 
         final = AgentGraphState(
             query="q", reply=HIT["text"], outcome=GraphOutcome.ANSWERED,
@@ -268,7 +268,7 @@ class TestAGraphFallback:
 
         flags.set("langgraph", True)
         flags.set("agentic_mode", True)
-        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: Graph())
+        monkeypatch.setattr("app.workflows.graph.main_graph.build_main_graph", lambda: Graph())
         token = pipeline_module._TURN_GENERATION.set(pipeline_module._new_generation_record())
         try:
             result = chat_model.generate_retrieval_only(

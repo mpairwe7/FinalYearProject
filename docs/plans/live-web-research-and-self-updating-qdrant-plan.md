@@ -368,7 +368,7 @@ Implement `compare_and_sync_ura_document(sandbox_doc: SandboxDocument, retriever
 
 ## 8. Phase F — End-to-End Orchestration (`service.py`, `verify_figure_lock`, `claim_verifier`, SSE Stream)
 
-Read `App/backend/app/rag/pipeline.py` (lines `1830–1940`, `2200–2360`, `11000–11800`, `12700–13115`), `App/backend/app/agents/evaluator.py` (lines `335–425`), and `App/backend/app/rag/claim_verifier.py` (lines `230–315`):
+Read `App/backend/app/rag/pipeline.py` (lines `1830–1940`, `2200–2360`, `11000–11800`, `12700–13115`), `App/backend/app/agents/critic.py` (lines `335–425`), and `App/backend/app/rag/claim_verifier.py` (lines `230–315`):
 
 1. **Hook Live Web Research into `_generate_en` (REST) and `generate_retrieval_only` (SSE Streaming):**
    - Right after Step 3b (`corrective_rag`), when `flags.is_enabled("live_web_research")`:

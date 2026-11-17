@@ -35,9 +35,9 @@ from app.graph.query import (
 )
 from app.graph.schema import Edge, EdgeKind, Node, NodeKind
 from app.graph.store import MAX_HOPS, MAX_NODES, InMemoryGraphStore
-from app.agents.graphs import AgentGraphState, GraphOutcome, GraphRuntime, NodeResult
-from app.agents.graphs.main_graph import node_retrieve
-from app.agents.graphs.runtime import END
+from app.workflows.graph import AgentGraphState, GraphOutcome, GraphRuntime, NodeResult
+from app.workflows.graph.main_graph import node_retrieve
+from app.workflows.graph.runtime import END
 
 
 class KeyParsingTests(unittest.TestCase):
@@ -113,7 +113,7 @@ class GraphRuntimeSafetyTests(unittest.TestCase):
             ),
             mock.patch("app.graph.shadow.graph_hit_for", return_value=graph_hit),
             mock.patch(
-                "app.agents.graphs.main_graph._apply_faq_gates",
+                "app.workflows.graph.main_graph._apply_faq_gates",
                 side_effect=lambda query, hits: hits,
             ),
         ):

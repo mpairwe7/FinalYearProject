@@ -3,20 +3,20 @@ from __future__ import annotations
 
 import unittest
 import pytest
-from app.agents.graphs.compactor import (
+from app.workflows.graph.compactor import (
     compact_messages,
     compact_tool_observation,
     node_context_compactor,
 )
-from app.agents.graphs.main_graph import build_main_graph, node_human_gate
-from app.agents.graphs.runtime import (
+from app.workflows.graph.main_graph import build_main_graph, node_human_gate
+from app.workflows.graph.runtime import (
     END,
     DurableCheckpointStore,
     GraphRuntime,
     InMemoryCheckpointStore,
     NodeResult,
 )
-from app.agents.graphs.state import (
+from app.workflows.graph.state import (
     AgentGraphState,
     GoalSpec,
     GraphOutcome,

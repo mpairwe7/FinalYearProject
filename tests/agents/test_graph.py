@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from app.agents.graphs import (
+from app.workflows.graph import (
     AgentGraphState,
     GraphOutcome,
     GraphRuntime,
     NodeResult,
 )
-from app.agents.graphs.main_graph import (
+from app.workflows.graph.main_graph import (
     bind_arguments,
     build_main_graph,
     node_act,
@@ -18,7 +18,7 @@ from app.agents.graphs.main_graph import (
     node_route,
     node_synthesize,
 )
-from app.agents.graphs.runtime import END
+from app.workflows.graph.runtime import END
 from app.agents.loop_control import ToolCallBudget
 from app.agents.state import AgentRoute
 
@@ -219,7 +219,7 @@ class TestMainGraph:
         monkeypatch.setattr("app.rag.retriever.HybridRetriever", OfflineRetriever)
         monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: name in {"graph_fusion", "tax_graph"})
         monkeypatch.setattr("app.graph.shadow.graph_hit_for", lambda query: graph_hit)
-        monkeypatch.setattr("app.agents.graphs.main_graph._apply_faq_gates", lambda query, hits: hits)
+        monkeypatch.setattr("app.workflows.graph.main_graph._apply_faq_gates", lambda query, hits: hits)
 
         state = AgentGraphState(query="What is the VAT rate in Uganda?")
         node_retrieve(state)

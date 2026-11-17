@@ -317,7 +317,7 @@ def test_the_security_layer_and_tools_do_not_reach_into_the_orchestrator() -> No
     importers = _importers_of_pipeline()
 
     for lower in ("guardrails/input_checks.py", "guardrails/output_checks.py", "guardrails/pii.py", "guardrails/fences.py", "guardrails/normalize.py",
-                  "agents/evaluator.py", "tools/empathy.py", "rag/query.py", "rag/retriever.py",
+                  "agents/critic.py", "tools/empathy.py", "rag/query.py", "rag/retriever.py",
                   "rag/context_manager.py", "rag/corrective_rag.py", "rag/turn_context.py", *_EXTRACTED):
         assert lower not in importers, lower
 
@@ -328,7 +328,7 @@ def test_no_new_module_imports_the_orchestrator() -> None:
 
 def test_the_graph_does_not_import_the_orchestrator() -> None:
     """G486: the graph took eight service privates; they now live in leaf-ward modules."""
-    assert "agents/graphs/main_graph.py" not in _importers_of_pipeline()
+    assert "workflows/graph/main_graph.py" not in _importers_of_pipeline()
 
 
 def test_the_extracted_modules_do_not_import_the_graph() -> None:

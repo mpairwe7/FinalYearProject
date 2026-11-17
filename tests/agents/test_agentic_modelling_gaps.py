@@ -18,8 +18,8 @@ import unittest.mock as mock
 from typing import Any
 
 import pytest
-from app.agents.graphs import AgentGraphState, GraphOutcome
-from app.agents.graphs.main_graph import bind_arguments, build_main_graph
+from app.workflows.graph import AgentGraphState, GraphOutcome
+from app.workflows.graph.main_graph import bind_arguments, build_main_graph
 from app.guardrails.premise import check_false_premise
 from app.rag.pipeline import ChatModel, _call_llm_agentic, run_chat_turn
 
@@ -232,7 +232,7 @@ class TestGraphArgumentBinding:
         assert bind_arguments("calculate_vat", state_incomplete) is None
 
     def test_graph_synthesizes_prose_for_rate_and_calendar_tools(self, fresh_registry):
-        from app.agents.graphs.main_graph import _format_observation_prose
+        from app.workflows.graph.main_graph import _format_observation_prose
 
         rate_obs = {
             "ok": True,
@@ -356,7 +356,7 @@ class TestLangGraphFeatureFlag:
         # The graph may have crossed the tool boundary before failing.
         mock_state.plan = ["calculate_vat"]
         mock_graph.run.return_value = mock_state
-        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: mock_graph)
+        monkeypatch.setattr("app.workflows.graph.main_graph.build_main_graph", lambda: mock_graph)
 
         model = ChatModel()
         monkeypatch.setattr(model._retriever, "initialize", lambda: False)
@@ -553,7 +553,7 @@ class TestWorkflowResumptionNextActions:
 
     def test_langgraph_errored_fails_over_to_standard_retrieval(self, clean_flags, monkeypatch, tmp_db):
         from unittest.mock import MagicMock
-        from app.agents.graphs.state import AgentGraphState, GraphOutcome
+        from app.workflows.graph.state import AgentGraphState, GraphOutcome
 
         clean_flags.set("langgraph", True)
         mock_graph = MagicMock()
@@ -562,7 +562,7 @@ class TestWorkflowResumptionNextActions:
         mock_state.reply = ""
         mock_graph.run.return_value = mock_state
 
-        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: mock_graph)
+        monkeypatch.setattr("app.workflows.graph.main_graph.build_main_graph", lambda: mock_graph)
 
         model = ChatModel()
         # Should gracefully fail over to standard retrieval

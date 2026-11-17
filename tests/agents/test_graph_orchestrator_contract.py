@@ -16,9 +16,9 @@ from unittest import mock
 
 import pytest
 from app.rag import pipeline as pipeline_module
-from app.agents.graphs.main_graph import build_main_graph, node_human_gate
-from app.agents.graphs.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
-from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
+from app.workflows.graph.main_graph import build_main_graph, node_human_gate
+from app.workflows.graph.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
+from app.workflows.graph.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
 from app.config.flags import flags
 from app.providers.routing import ModelTier, TierDecision
 from app.resilience import turn_deadline
@@ -77,7 +77,7 @@ def on_graph(clean_flags, tmp_db, monkeypatch):
     flags.set("ticket_queue", True)
 
     def install(final: AgentGraphState) -> None:
-        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: FakeGraph(final))
+        monkeypatch.setattr("app.workflows.graph.main_graph.build_main_graph", lambda: FakeGraph(final))
 
     return install
 
@@ -326,7 +326,7 @@ class TestCheckpointsAreSafeToKeep:
         assert graph.run(AgentGraphState(), thread_id="t1").outcome is GraphOutcome.ANSWERED
 
     def test_a_durable_store_reports_a_failed_save(self, monkeypatch) -> None:
-        from app.agents.graphs.runtime import DurableCheckpointStore
+        from app.workflows.graph.runtime import DurableCheckpointStore
 
         def down(*_args: Any, **_kwargs: Any) -> None:
             raise ConnectionError("database unreachable")

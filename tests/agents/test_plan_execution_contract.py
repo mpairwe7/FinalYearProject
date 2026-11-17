@@ -249,13 +249,13 @@ class TestPlanReachesTheLedger:
 class TestGraphBinding:
     @pytest.fixture
     def state(self):
-        from app.agents.graphs.state import AgentGraphState
+        from app.workflows.graph.state import AgentGraphState
 
         return lambda query: AgentGraphState(query=query, rewritten_query=query, locale="en", top_k=3)
 
     def test_a_year_is_not_an_amount(self, state, fresh_registry, monkeypatch):
         from app import calculator_router
-        from app.agents.graphs.main_graph import bind_arguments
+        from app.workflows.graph.main_graph import bind_arguments
 
         monkeypatch.setattr(calculator_router, "plan_calculation", lambda _q: None)
 
@@ -265,7 +265,7 @@ class TestGraphBinding:
 
     def test_two_amounts_are_not_guessed_between(self, state, fresh_registry, monkeypatch):
         from app import calculator_router
-        from app.agents.graphs.main_graph import bind_arguments
+        from app.workflows.graph.main_graph import bind_arguments
 
         monkeypatch.setattr(calculator_router, "plan_calculation", lambda _q: None)
 

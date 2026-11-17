@@ -14,7 +14,7 @@ from app import ephemeral_pdf_sandbox as sbx
 from app.rag import pipeline
 from app import web_fx
 from app import web_research as wr
-from app.agents.evaluator import verify_figure_lock
+from app.agents.critic import verify_figure_lock
 from app.rag.claim_verifier import verify_claims
 from app.config.flags import flags
 from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id

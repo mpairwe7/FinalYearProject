@@ -51,7 +51,7 @@ from . import prompt_builder
 from .. import mt
 from .. import officer_hours
 from ..agents import AgentRoute, supervisor
-from ..agents.evaluator import RevisionBudget, evaluate
+from ..agents.critic import RevisionBudget, evaluate
 from ..observability.analytics import metrics
 from ..connector_intent import ConnectorIntent, detect_connector_intent
 from ..connector_outcome import classify_all as classify_connector_outcomes
@@ -2185,7 +2185,7 @@ def _without_figures(reply: str) -> str:
     in it and keeps the rest. The fault that stopped the check can stop that too, and
     then nothing says the reply is free of figures, so none of it is shown.
     """
-    from ..agents.evaluator import strip_unverified_figure_sentences
+    from ..agents.critic import strip_unverified_figure_sentences
 
     try:
         return strip_unverified_figure_sentences(reply, [reply])
@@ -2210,7 +2210,7 @@ def _figure_lock(
     positive rate should not be switched on for live taxpayers blind:
     ``figure_lock_checks_total{mode="shadow"}`` is the evidence for enforcing it.
     """
-    from ..agents.evaluator import strip_unverified_figure_sentences, verify_figure_lock
+    from ..agents.critic import strip_unverified_figure_sentences, verify_figure_lock
 
     mode = "enforced" if enforce else "shadow"
     try:
@@ -8810,8 +8810,8 @@ class ChatModel:
         or contradiction withholding, and ``attest_turn`` reported it clean. A
         clarification or an abstention is canned text with no claim to check.
         """
-        from ..agents.graphs.main_graph import assumed_inputs_notice
-        from ..agents.graphs.state import GraphOutcome
+        from ..workflows.graph.main_graph import assumed_inputs_notice
+        from ..workflows.graph.state import GraphOutcome
 
         disclosure = final_state.live_check_disclosure or ""
         notice = assumed_inputs_notice(final_state)
@@ -12327,8 +12327,8 @@ class ChatModel:
                 graph_state = None
                 try:
                     with trace_stage("langgraph_execution", timings=timings):
-                        from ..agents.graphs.main_graph import build_main_graph
-                        from ..agents.graphs.state import AgentGraphState, GraphOutcome
+                        from ..workflows.graph.main_graph import build_main_graph
+                        from ..workflows.graph.state import AgentGraphState, GraphOutcome
 
                         graph = build_main_graph()
                         graph_state = AgentGraphState(
@@ -13273,14 +13273,14 @@ class ChatModel:
                             else:
                                 metrics.inc("numeric_revision_failed_total")
                                 if offending_figs:
-                                    from ..agents.evaluator import strip_unverified_figure_sentences
+                                    from ..agents.critic import strip_unverified_figure_sentences
 
                                     rem_offending = list(
                                         recheck.detail.get("offending_figures") or offending_figs
                                     )
                                     reply = strip_unverified_figure_sentences(candidate, rem_offending)
                         elif offending_figs:
-                            from ..agents.evaluator import strip_unverified_figure_sentences
+                            from ..agents.critic import strip_unverified_figure_sentences
 
                             reply = strip_unverified_figure_sentences(reply, offending_figs)
                     else:
@@ -13289,7 +13289,7 @@ class ChatModel:
                             "reason": why if not allowed else "llm unavailable",
                         }
                         if offending_figs:
-                            from ..agents.evaluator import strip_unverified_figure_sentences
+                            from ..agents.critic import strip_unverified_figure_sentences
 
                             reply = strip_unverified_figure_sentences(reply, offending_figs)
             elif reply:
@@ -14416,8 +14416,8 @@ class ChatModel:
         if flags.is_enabled("langgraph") and flags.is_enabled("agentic_mode"):
             graph_state = None
             try:
-                from ..agents.graphs.main_graph import build_main_graph
-                from ..agents.graphs.state import AgentGraphState, GraphOutcome
+                from ..workflows.graph.main_graph import build_main_graph
+                from ..workflows.graph.state import AgentGraphState, GraphOutcome
 
                 graph = build_main_graph()
                 graph_state = AgentGraphState(

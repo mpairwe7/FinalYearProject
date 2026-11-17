@@ -513,8 +513,8 @@ def test_vernacular_model_welfare_queries_match_consciousness(vernacular_query: 
 
 def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
     """Supervisor and main_graph handle welfare queries through retrieve -> synthesize without escalating."""
-    from app.agents.graphs.main_graph import build_main_graph
-    from app.agents.graphs.state import AgentGraphState, GraphOutcome
+    from app.workflows.graph.main_graph import build_main_graph
+    from app.workflows.graph.state import AgentGraphState, GraphOutcome
     from app.agents.state import AgentRoute
     from app.agents.supervisor import supervisor
 
