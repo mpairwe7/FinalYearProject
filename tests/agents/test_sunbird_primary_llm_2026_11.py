@@ -206,7 +206,7 @@ def test_failover_stops_at_the_deadline_and_timeouts_shrink_to_it(monkeypatch: p
 
 
 def test_chat_completion_is_traced_with_the_providers_usage(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import tracing
+    from app.observability import tracing
 
     recorded: dict = {}
 
@@ -277,7 +277,7 @@ def test_a_spent_budget_skips_sunbird_without_counting_a_failure(chain) -> None:
 def test_an_empty_reply_is_recorded_as_the_traced_calls_error(monkeypatch: pytest.MonkeyPatch) -> None:
     from contextlib import contextmanager
 
-    from app import tracing
+    from app.observability import tracing
 
     recorded: dict = {}
 

@@ -23,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from ..tracing import llm_call
+from ..observability.tracing import llm_call
 from .config import get_cloud_settings
 from .scope import cloud_models_allowed
 

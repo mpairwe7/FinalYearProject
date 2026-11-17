@@ -27,7 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .analytics import metrics
+from ..analytics import metrics
 
 logger = logging.getLogger("app.client")
 

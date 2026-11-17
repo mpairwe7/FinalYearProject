@@ -82,7 +82,7 @@ on recognition, and it makes iterating against them expensive.
    contain, and a test fails when one does not. Matching tolerates Markdown emphasis. A word 8-gram
    fingerprint of `llm.SYSTEM_PROMPT`, minus the refusal and contact text the prompt tells the model to
    say, flags a reply sharing two or more n-grams and redacts the lines that carry them.
-7. **Alerts that select these events.** `security_events.py` said a `SecurityEventSpike` alert watched
+7. **Alerts that select these events.** `observability/security_events.py` said a `SecurityEventSpike` alert watched
    `ura_security_events_total`, but no such rule existed: only authentication and authorisation
    failures paged anyone. `GuardrailProbingCampaign` (three or more cool-downs in 15 minutes) and
    `IndirectInjectionOrUntrustedLinkSpike` (more than 20 scrubbed third-party texts or de-linked URLs in

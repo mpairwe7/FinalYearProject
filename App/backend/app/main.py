@@ -46,9 +46,9 @@ from .db import database as db
 from . import documents
 from . import officer_hours
 from .analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
-from .security_events import record_http_security_event
+from .observability.security_events import record_http_security_event
 from .text_signals import ESCALATION_NOT_QUEUED_REPLY
-from .tracing import current_traceresponse
+from .observability.tracing import current_traceresponse
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import (
     ConsentGrantRequest,
@@ -1182,7 +1182,7 @@ app.state.limiter = limiter
 # gets its own providers. APP_VERSION feeds service.version and the audit rows.
 os.environ.setdefault("APP_VERSION", app.version)
 try:
-    from .tracing import init_tracing
+    from .observability.tracing import init_tracing
 
     init_tracing(app)
 except Exception:
@@ -1948,7 +1948,7 @@ async def voice_chat(
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
-    from .language_state import normalize_locale_tag, resolve_turn_locale
+    from .memory.language_state import normalize_locale_tag, resolve_turn_locale
     from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
 
     transcript = repair_asr_entities(asr_result.text)
@@ -2979,7 +2979,7 @@ def analytics_comparison(
 
 
 # ---------------------------------------------------------------------------
-# Real-user monitoring from the web client (app.client_telemetry)
+# Real-user monitoring from the web client (app.observability.client_telemetry)
 # ---------------------------------------------------------------------------
 async def _telemetry_body(request: Request) -> bytes:
     """The raw body, refused as soon as it is oversized.
@@ -2989,7 +2989,7 @@ async def _telemetry_body(request: Request) -> bytes:
     Read as a stream with a running count: a chunked request carries no
     ``content-length``, and ``request.body()`` would buffer all of it first.
     """
-    from .client_telemetry import MAX_BODY_BYTES
+    from .observability.client_telemetry import MAX_BODY_BYTES
 
     too_large = HTTPException(status_code=413, detail="telemetry payload too large")
     declared = request.headers.get("content-length", "")
@@ -3011,7 +3011,7 @@ async def telemetry_vitals(request: Request) -> Response:
     """Core Web Vitals measured in the browser (anonymous; aggregated on /metrics)."""
     from pydantic import ValidationError
 
-    from .client_telemetry import WebVitalsBatch, record_web_vitals
+    from .observability.client_telemetry import WebVitalsBatch, record_web_vitals
 
     body = await _telemetry_body(request)
     try:
@@ -3028,7 +3028,7 @@ async def telemetry_errors(request: Request) -> Response:
     """An uncaught client error or error-boundary render failure (anonymous, scrubbed)."""
     from pydantic import ValidationError
 
-    from .client_telemetry import ClientError, record_client_error
+    from .observability.client_telemetry import ClientError, record_client_error
 
     body = await _telemetry_body(request)
     try:
@@ -5246,7 +5246,7 @@ def me_withdraw_consent(
 def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
     """UDPA 2019 data-portability export — identity, profile, consents, chat
     history (+ escalation tickets), and personalization memory facts."""
-    from .case_facts import export_user_case_facts
+    from .memory.case_facts import export_user_case_facts
     from .memory.service import get_memory_service
 
     row = db.upsert_user(
@@ -5285,7 +5285,7 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    from .case_facts import forget_user_case_facts
+    from .memory.case_facts import forget_user_case_facts
     from .memory.service import get_memory_service
 
     counts = db.delete_user_cascade(

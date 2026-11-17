@@ -608,7 +608,7 @@ _DECISION_LOCALES = frozenset({"en", "lg", "sw", "nyn", "ach"})
 def record_language_decision(result: Mapping[str, Any], *, channel: str) -> None:
     """Count why this turn was answered in its language (``ura_language_decisions_total``).
 
-    ``source`` is :data:`app.language_state.LocaleSource`: an explicit request,
+    ``source`` is :data:`app.memory.language_state.LocaleSource`: an explicit request,
     the client's explicit choice, continuity, a switch, detection, the profile
     or the default. A rising ``switched`` or ``detected`` share in Luganda and
     Swahili is the first sign the language decision is drifting. A turn
@@ -616,7 +616,7 @@ def record_language_decision(result: Mapping[str, Any], *, channel: str) -> None
     """
     from typing import get_args
 
-    from .language_state import LocaleSource
+    from .memory.language_state import LocaleSource
 
     source = str(result.get("locale_source") or "")
     if not source:

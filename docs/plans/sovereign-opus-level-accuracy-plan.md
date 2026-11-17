@@ -415,7 +415,7 @@ Generalisation strategy: **(1)** a generic per-conversation *facts* layer, **(2)
 Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` (`CalculatorTool`, `PAYECalculator`, `CALCULATOR_TOOLS`, `_require_scalar`, `_require_bands`, `apply_bands`), `app/tax/tables.py` (`_load_table` validation), `app/tax/data/FY2026-27.json` and `FY2025-26.json`, `app/rag/context_manager.py` (`ConversationEntities`, `extract_conversation_entities`, `RollingContextManager`), `app/premise_guard.py`, `service._maybe_handle_calculator` (≈ line 8620), `service._evaluate_calculation_context` (≈ line 997), and `tests/test_calculator_router.py` / `tests/test_tax_calculators.py`.
 
 ### F.1 CaseFacts — per-conversation structured facts (fixes D2, enables everything else)
-- New module `app/case_facts.py`:
+- New module `app/memory/case_facts.py`:
   ```python
   @dataclass
   class Money: amount: Decimal; currency: str  # "UGX" | "USD" | "EUR" | "GBP" | "KES" …

@@ -37,7 +37,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.db import database  # noqa: E402
 from app.rag import pipeline as pipeline_module  # noqa: E402
-from app import tracing  # noqa: E402
+from app.observability import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 from app.audit.turns import TURN_PAYLOAD_SCHEMA  # noqa: E402
 from app.main import app  # noqa: E402

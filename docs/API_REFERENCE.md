@@ -169,7 +169,7 @@ POST /v1/chat
 | `locale_explicit` | boolean | No | `true` when the taxpayer picked `locale`; `false` when it is only the client's default or an earlier detection. Omitted: a requested `lg`/`sw` counts as a choice and `en` as a default |
 | `connector_namespaces` | string[] | No | Chat connectors the taxpayer chose for this conversation (up to 8, from `GET /v1/connectors?view=chat`). Ones this turn cannot use are left out and reported in `connector_notices`; they never fail the request |
 
-**Which language the reply is in** (`app/language_state.py`), highest first:
+**Which language the reply is in** (`app/memory/language_state.py`), highest first:
 a request typed into the message ("answer in Luganda"); a language the
 taxpayer picked (`locale_explicit: true`); the language the conversation was
 last answered in, until a substantive message clearly switches; detection of

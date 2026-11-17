@@ -266,7 +266,7 @@ class WsChatSession:
         """Append a turn to the in-memory history (FIFO eviction).
 
         *locale* is the language the reply was given in; the next turn's
-        answer language continues from it (``app.language_state``).
+        answer language continues from it (``app.memory.language_state``).
         *user_en* / *assistant_en* are the turn in English when it was in
         Luganda or Swahili: the models read those (G119).
         """
@@ -909,7 +909,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             locale, supported = "en", False
         # The client says whether the taxpayer picked the language. A client
         # that does not say keeps the older contract: lg/sw are a choice, en is
-        # only the default (app.language_state).
+        # only the default (app.memory.language_state).
         flagged = config.get("locale_explicit")
         if isinstance(flagged, bool):
             locale_explicit = supported and flagged

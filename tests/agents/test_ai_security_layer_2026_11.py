@@ -320,7 +320,7 @@ def chat_model():
 
 
 def test_repeated_guard_blocks_pause_the_principal(chat_model, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.security_events as security_events
+    import app.observability.security_events as security_events
 
     events: list[str] = []
     monkeypatch.setattr(security_events, "record_security_event", lambda event, **_kw: events.append(event))
@@ -568,7 +568,7 @@ def test_a_crisis_message_is_never_paused(chat_model) -> None:
 
 
 def test_a_failing_cooldown_event_still_returns_the_refusal(chat_model, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.security_events as security_events
+    import app.observability.security_events as security_events
 
     def broken(*_args, **_kwargs):
         raise RuntimeError("log sink down")
@@ -582,7 +582,7 @@ def test_a_failing_cooldown_event_still_returns_the_refusal(chat_model, monkeypa
 
 
 def test_cooldown_event_names_the_hashed_principal(chat_model, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.security_events as security_events
+    import app.observability.security_events as security_events
 
     seen: list[dict] = []
     monkeypatch.setattr(security_events, "record_security_event", lambda event, **kw: seen.append({"event": event, **kw}))
@@ -641,7 +641,7 @@ def test_anonymous_principals_are_scoped_to_their_tenant() -> None:
 def test_alerted_security_events_stay_distinct_at_the_series_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """At the minimum series cap a guardrail event must not fold into __other__ and mute its alert."""
     import app.analytics as analytics
-    from app.security_events import SECURITY_EVENT_NAMES, record_security_event
+    from app.observability.security_events import SECURITY_EVENT_NAMES, record_security_event
 
     monkeypatch.setattr(analytics, "_MAX_SERIES_PER_METRIC", 10)
     name = "test_reserved_security_events_total"

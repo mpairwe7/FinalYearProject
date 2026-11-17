@@ -3,7 +3,7 @@
 ``generate_retrieval_only`` is what the web and WebSocket clients use. These
 pin the parity it lacked:
 
-* the answer language comes from ``app.language_state`` (a default ``en`` from
+* the answer language comes from ``app.memory.language_state`` (a default ``en`` from
   the client is not a choice);
 * the English-pattern routers — workflows, topic tracking, the FAQ
   authorization gate, the input guard — read the English form of the turn;

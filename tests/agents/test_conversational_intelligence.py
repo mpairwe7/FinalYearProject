@@ -428,7 +428,7 @@ class TestConversationalIntelligenceEngine:
 
         # 11. Runyankole ("eigana" / "igana" / "kikumi") & 4-locale TTS/ASR/entailment/MT/case_facts parity
         from app import mt
-        from app.case_facts import _normalize_vernacular_amount_words
+        from app.memory.case_facts import _normalize_vernacular_amount_words
         from app.rag.entailment import percentages
         from app.receptionist.lexicon import repair_asr_entities
         from app.speech_normalization import clean_text_for_speech

@@ -30,7 +30,7 @@ User Query
   │     │     sector-guide demotion (`demote_sector_guides`), and topic-section hints (`preferred_sections`)
   │     └── decompose_query() — multi-intent split (up to 4 sub-queries, stripping enumeration prefixes)  [FLAG_QUERY_DECOMPOSITION]
   │
-  ├─► Stage 0c: Answer language (language_state.py) — conversation state
+  ├─► Stage 0c: Answer language (memory/language_state.py) — conversation state
   │     ├── typed request > picked language (locale_explicit) > stored thread
   │     │   language until a clear switch > detection > profile > English
   │     └── English router form (_english_router_form): workflows, calculator,
@@ -198,7 +198,7 @@ User Query
 **Locale in the streaming path.** `run_chat_turn` reassigns its `locale` from
 the retrieval result immediately after `generate_retrieval_only` returns, not
 from the caller's parameter. The decision is made *inside* that call
-(`app.language_state`, the same as `ChatModel.generate()`), so a taxpayer who
+(`app.memory.language_state`, the same as `ChatModel.generate()`), so a taxpayer who
 simply types Luganda arrives with `locale="en"` and the resolved value is only
 on the result, with its `locale_source`. Keying off the parameter is what made
 the streaming path — the one the web and WebSocket clients actually use — answer
@@ -236,7 +236,7 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   than re-detecting old text. A typed request ("answer in English") or a language
   the taxpayer picked (`locale_explicit: true`) takes priority; a short follow-up
   stays in the thread's language and a substantive message in another language
-  switches it (`app.language_state`).
+  switches it (`app.memory.language_state`).
 - **Model-facing history is English (G119).** A Luganda or Swahili turn is stored
   with its English form beside the original (`user_message_en`: the question as
   routed; `bot_reply_en`: the answer before translation). The generator, the
@@ -340,7 +340,7 @@ chat's owner (`receptionist/carryover.py`).
 
 ### Phase 5: Observability
 
-**OpenTelemetry** (`tracing.py`):
+**OpenTelemetry** (`observability/tracing.py`):
 - Parent span: `rag.pipeline` with `gen_ai.system`, `gen_ai.request.model`, `gen_ai.prompt.length`
 - Child spans: `rag.query_rewrite`, `rag.input_guard`, `rag.cache_lookup`, `rag.hybrid_search`, `rag.corrective_rag`, `rag.llm_generate`, `rag.output_guard`, `rag.grounding`
 - Metrics: `gen_ai.client.token.usage` counter, `gen_ai.retrieval.duration` histogram
@@ -475,7 +475,7 @@ App/backend/app/
 ├── premise_guard.py     # False-premise detector & legitimate statutory modifier allowlist
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
-├── tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
+├── observability/tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
@@ -1109,7 +1109,7 @@ When `FLAG_MODEL_TIERING=true`, `providers/routing.py` (`select_tier`, `ENDPOINT
 
 - **T1 (`Sunbird/Sunflower-Qwen3.5-9B`, `VLLM_BASE_URL`):** Fast single-clause RAG, greetings, local machine translation, and vernacular locales (`lg`, `sw`, `nyn`, `ach` unless `FLAG_REASONER_FOR_TRANSLATED_LOCALES=true`).
 - **T2 / T3 (`Qwen/Qwen3.8-27B-FP8`, `REASONER_BASE_URL`, `enable_thinking=False`):** Multi-hop legal reasoning, multi-tool tax scenarios (`planner_tool_count >= 2`), statutory premise contradictions (`premise_contradiction=True`), and dispute/objection turns. Capped by a rolling 200-turn window (`REASONER_MAX_SHARE=0.25`) and per-turn timeout (`REASONER_DEADLINE_S=90`) with automatic local T1 fallback (`reasoner_fallback_total`).
-- **Code-Owned Tax Scenario Planner (`case_facts.py`, `scenario_planner.py`, `premise_guard.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
+- **Code-Owned Tax Scenario Planner (`memory/case_facts.py`, `scenario_planner.py`, `premise_guard.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
 - **Polarity-Aware Faithfulness & Figure Lock (`rag/claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
 
 Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.

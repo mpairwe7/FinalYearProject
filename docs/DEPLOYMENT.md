@@ -434,7 +434,7 @@ Model weights are pulled from Hugging Face Hub (`HF_MODEL_REPO=mpairweLandwind/u
 
 ### OpenTelemetry
 
-The API ships with full OTel support (see `App/backend/app/tracing.py`). Enable it:
+The API ships with full OTel support (see `App/backend/app/observability/tracing.py`). Enable it:
 
 ```dotenv
 OTEL_ENABLED=true

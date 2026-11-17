@@ -502,7 +502,7 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
 
 def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> None:
     from app.calculator_router import continue_calculation
-    from app.case_facts import extract_case_facts
+    from app.memory.case_facts import extract_case_facts
     from app.rag.context_manager import RollingContextManager
 
     # 1. Multi-turn benefit retraction in CaseFacts
@@ -567,7 +567,7 @@ def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> 
 
 def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: pytest.LogCaptureFixture) -> None:
     import logging
-    from app.security_events import EVENT_BY_STATUS, MCP_SECURITY_EVENT_KINDS
+    from app.observability.security_events import EVENT_BY_STATUS, MCP_SECURITY_EVENT_KINDS
 
     assert EVENT_BY_STATUS[413] == "input_validation_payload_too_large"
     assert {
@@ -618,7 +618,7 @@ def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: 
 
 def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_claim_verifier() -> None:
     from app.calculator_router import continue_calculation, plan_calculation
-    from app.case_facts import extract_case_facts
+    from app.memory.case_facts import extract_case_facts
     from app.rag.claim_verifier import verify_claims
     from app.rag.query import _fuzzy_correct_word
     from plugins.ursb.database import UrsbDatabase

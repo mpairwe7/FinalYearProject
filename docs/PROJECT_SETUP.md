@@ -700,7 +700,7 @@ FinalYearProject/
 │   │   │   │   └── flags.py    # Feature flag registry (91 flags, env-backed)
 │   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
 │   │   │   ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
-│   │   │   ├── tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
+│   │   │   ├── observability/tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
 │   │   │   ├── analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
 │   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)

@@ -539,7 +539,7 @@ def _remembered_amount(value: object) -> object:
     The rule a figure in the question follows: only an unambiguous amount binds, and a
     foreign-currency figure is never read as shillings.
     """
-    from ...case_facts import extract_all_money
+    from ...memory.case_facts import extract_all_money
 
     text = str(value)
     figures = extract_all_money(text)

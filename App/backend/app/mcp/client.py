@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..resilience import CircuitBreaker
-from ..security_events import record_mcp_security_event
-from ..tracing import trace_tool_call
+from ..observability.security_events import record_mcp_security_event
+from ..observability.tracing import trace_tool_call
 from .mrtr import parse_input_required, unwrap_request_state, wrap_request_state
 from .policy import authorize_tool_call
 from .transport import (

@@ -384,7 +384,7 @@ class TestPlanSpan:
             return False
 
     def test_planning_is_one_span_named_by_the_conventions(self, monkeypatch):
-        from app import tracing
+        from app.observability import tracing
 
         spans: list = []
 
@@ -405,7 +405,7 @@ class TestPlanSpan:
         assert plan.attributes["ura.plan.step_count"] == 2
 
     def test_a_planning_failure_marks_the_span_failed(self, monkeypatch):
-        from app import tracing
+        from app.observability import tracing
 
         spans: list = []
 
@@ -423,7 +423,7 @@ class TestPlanSpan:
         assert spans[0].exit_info[0] is ValueError
 
     def test_a_tracing_fault_does_not_cost_the_verified_figures(self, monkeypatch):
-        from app import tracing
+        from app.observability import tracing
 
         class Broken:
             def start_as_current_span(self, *_a, **_k):

@@ -1419,7 +1419,7 @@ def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_c
 def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     from app import glossary, mt, orpheus_tts, spark_tts_salt, sunbird
     from app import speech_service as ss
-    from app.language_state import normalize_locale_tag, resolve_turn_locale
+    from app.memory.language_state import normalize_locale_tag, resolve_turn_locale
     from app.number_words import ach_words, nyn_words
     from app.rag.query import SUPPORTED_LOCALES, detect_language, english_retrieval_query
     from app.receptionist.clarify import classify_yes_no

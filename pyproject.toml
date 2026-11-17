@@ -76,7 +76,7 @@ omit = [
     "App/backend/app/rag/corrective_rag.py",
     "App/backend/app/speech_service.py",
     "App/backend/app/resilience.py",
-    "App/backend/app/tracing.py",
+    "App/backend/app/observability/tracing.py",
     "App/backend/app/rag/retriever.py",
 ]
 

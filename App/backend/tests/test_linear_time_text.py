@@ -12,7 +12,7 @@ import time
 
 import pytest
 from app import calculator_router, guardrails, mt
-from app.case_facts import extract_all_money
+from app.memory.case_facts import extract_all_money
 from app.linear_text import strip_blocks, strip_spans
 from app.rag import entailment, pipeline
 from app.rag.context_manager import extract_conversation_entities

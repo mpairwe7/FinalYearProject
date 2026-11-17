@@ -1,4 +1,4 @@
-"""GenAI telemetry (app.tracing): model calls, tools, evaluations, turn usage.
+"""GenAI telemetry (app.observability.tracing): model calls, tools, evaluations, turn usage.
 
 Token usage used to be the user's message counted in words under vLLM, and
 the LLM/tool span helpers had no callers. These tests pin what a model call
@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
 
-from app import tracing  # noqa: E402
+from app.observability import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 
 USAGE_PAYLOAD = {

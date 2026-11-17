@@ -737,7 +737,7 @@ class GuardResult:
 def _record_guardrail_security_event(event: str, *, reason: str = "") -> None:
     """Record a bounded guardrail security event into `ura_security_events_total`."""
     try:
-        from .security_events import record_security_event
+        from .observability.security_events import record_security_event
 
         record_security_event(event, reason=reason)
     except Exception:

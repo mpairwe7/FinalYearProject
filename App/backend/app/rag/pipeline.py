@@ -165,7 +165,7 @@ from ..guardrails import (
     redact_pii_text,
     user_stated_identifiers,
 )
-from ..language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
+from ..memory.language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from ..memory import get_memory_service
 from ..model_welfare import is_model_welfare_query
 from ..premise_guard import check_false_premise
@@ -241,7 +241,7 @@ from ..text_signals import (
     tone_hint_for,
 )
 from ..topics import classify_topic, resolve_topic, topic_retrieval_query
-from ..tracing import (
+from ..observability.tracing import (
     record_evaluation,
     record_retrieval_metrics,
     set_turn_attribute,
@@ -5476,7 +5476,7 @@ class ChatModel:
                         prefill_slots[str(sk)] = sv
             active_facts = _ACTIVE_CASE_FACTS.get()
             if active_facts is None:
-                from ..case_facts import recall_case_facts
+                from ..memory.case_facts import recall_case_facts
 
                 active_facts = recall_case_facts(
                     _state_conversation_id(""),
@@ -6962,7 +6962,7 @@ class ChatModel:
         locale_explicit: bool | None = None,
         profile_locale: str = "",
     ) -> str:
-        """The answer language for a turn; see :mod:`app.language_state`."""
+        """The answer language for a turn; see :mod:`app.memory.language_state`."""
         return resolve_turn_locale(
             message,
             requested_locale=requested_locale,
@@ -10323,7 +10323,7 @@ class ChatModel:
     ) -> Any:
         """Extract, merge, and persist conversation-scoped :class:`CaseFacts` for this turn."""
         try:
-            from ..case_facts import extract_case_facts, recall_case_facts, remember_case_facts
+            from ..memory.case_facts import extract_case_facts, recall_case_facts, remember_case_facts
 
             # Keyed like workflow state, so another session holding this
             # conversation id is never handed the salary or turnover stated here.
@@ -10372,7 +10372,7 @@ class ChatModel:
         did contain, so the user is asked only for what's absent.
         """
         from ..calculator_router import is_explanation_question, prefill_plan_from_case_facts
-        from ..case_facts import recall_case_facts
+        from ..memory.case_facts import recall_case_facts
 
         # Rate-table inquiries carry no amounts and are answered by _maybe_handle_rate_lookup.
         if plan_rate_lookup(message) or plan_rate_lookup(rewritten):
@@ -11286,7 +11286,7 @@ class ChatModel:
         ``channel`` names the transport for the audit row and metrics
         (``rest``, ``voice``, ``call``). ``locale_explicit`` says whether
         *locale* is the taxpayer's own choice or only a default; ``None`` keeps
-        the older contract (see :mod:`app.language_state`). ``memory_write``
+        the older contract (see :mod:`app.memory.language_state`). ``memory_write``
         False keeps this turn out of long-term memory (a low-confidence call
         transcript). ``defer_audit`` hands the turn's audit fields back under
         ``_pending_audit`` instead of writing the row: for a transport that
@@ -11608,7 +11608,7 @@ class ChatModel:
                     rewritten = normalize_query(message)
 
             # 0c. The answer language is conversation state, not a per-message
-            #     guess (app.language_state). The profile's saved language is
+            #     guess (app.memory.language_state). The profile's saved language is
             #     consent-gated personalization, so that loads first.
             personalization = self._load_personalization_state(user_id, tenant_id or "default", message)
             with trace_stage("lang_detect", timings=timings):
@@ -13850,7 +13850,7 @@ class ChatModel:
             rewritten = normalize_query(message)
 
         # The answer language, decided the same way generate() decides it
-        # (app.language_state); the profile's saved language is consented
+        # (app.memory.language_state); the profile's saved language is consented
         # personalization, so that loads first.
         personalization = self._load_personalization_state(user_id, tenant_id or "default", message)
         language = self._resolve_turn_language(

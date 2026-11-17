@@ -1,6 +1,6 @@
 """Declarative scenario planner and verified-facts block builder (Phase F.6).
 
-Maps conversation-scoped :class:`app.case_facts.CaseFacts` and the taxpayer's
+Maps conversation-scoped :class:`app.memory.case_facts.CaseFacts` and the taxpayer's
 question to deterministic calculator and statutory-rule tools, executes them
 through the MCP client (`get_client().call_tool(...)`), checks for statutory
 premise contradictions via :func:`app.premise_guard.check_fact_contradictions`,
@@ -39,7 +39,7 @@ from .calculator_router import (
     has_money_amount,
     plan_calculation,
 )
-from .case_facts import CaseFacts, extract_case_facts
+from .memory.case_facts import CaseFacts, extract_case_facts
 from .premise_guard import check_fact_contradictions
 
 logger = logging.getLogger(__name__)
@@ -1287,7 +1287,7 @@ def build_verified_facts(
     line simply absent, and the model filled that silence from memory.
     """
     from .agents.loop_control import Admission, ToolCallBudget
-    from .tracing import trace_plan
+    from .observability.tracing import trace_plan
 
     text = (question or "").strip()
     if not text:

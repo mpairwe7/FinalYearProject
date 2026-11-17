@@ -758,7 +758,7 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     )
 
     # 10. Evals & Observability: segment metrics, GenAI evaluation histogram, and PII scrubbing in preference export
-    from app import tracing
+    from app.observability import tracing
     from app.analytics import metrics
     from app.evaluation import EvalMetric, EvalReport, record_eval_report
     from evals.export_preferences import build_bilevel_preference_bundle

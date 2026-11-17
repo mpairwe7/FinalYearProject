@@ -100,7 +100,7 @@ nist_ai_rmf:
       status: "implemented"
       evidence: >
         monitoring/alerting-rules.yml routed by monitoring/alertmanager.yml; security events
-        (App/backend/app/security_events.py); incident playbooks in docs/MONITORING.md §10.
+        (App/backend/app/observability/security_events.py); incident playbooks in docs/MONITORING.md §10.
       verified_by:
         - "App/backend/tests/test_observability_endpoints.py::test_denied_metrics_scrape_is_a_logged_counted_event"
         - "tests/test_monitoring_config.py::test_alerts_are_routable_and_actionable"
@@ -145,7 +145,7 @@ iso_42001:
     evidence: "governance/systems/ura-ai-chatbot/manifest.yaml"
   - clause: "9.1 Monitoring, measurement, analysis and evaluation"
     status: "implemented"
-    evidence: "App/backend/app/analytics.py, App/backend/app/tracing.py"
+    evidence: "App/backend/app/analytics.py, App/backend/app/observability/tracing.py"
   - clause: "10.1 Continual improvement"
     status: "implemented"
     evidence: "App/backend/app/main.py (feedback loop), ml/pipelines/ (retraining)"
