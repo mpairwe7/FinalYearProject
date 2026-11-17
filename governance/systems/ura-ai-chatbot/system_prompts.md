@@ -7,8 +7,8 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 
 | Prompt | Text | Sent by | Pinned by |
 | --- | --- | --- | --- |
-| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | `tests/agents/test_harness_prompt_contract.py`; the leak fingerprint |
-| Governed cloud prompt | `answer.py` `CLOUD_SYSTEM_PROMPT` | `rag/pipeline._build_fallback_prompt`, which nothing in the app calls since ADR-0036 (G667) | `tests/agents/test_harness_prompt_contract.py`; the leak fingerprint |
+| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | Partly: `tests/agents/test_harness_prompt_contract.py` checks the refusal wording, the length limit and the fiscal-year rule, not the full text |
+| Governed cloud prompt | `answer.py` `CLOUD_SYSTEM_PROMPT` | `rag/pipeline._build_fallback_prompt`, which nothing in the app calls since ADR-0036 (G667) | Partly: the same contract test checks selected rules, not the full text |
 | FAQ judge | `answer.py` `FAQ_JUDGE_PROMPT` | `rag/pipeline`, ranking FAQ candidates (ADR-0037) | None |
 | Follow-up rewriter | `query.py` `REWRITE_SYSTEM`, `REWRITE_PROMPT` | `rag/query`, behind a default-off flag (ADR-0031) | `tests/agents/test_agentic_rag_context_sandbox_2026_11.py` |
 | Call query extraction | `receptionist.py` `QUERY_EXTRACT_SYSTEM` | `receptionist/brain` | `App/backend/tests/test_call_carryover.py` |
@@ -28,14 +28,20 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 - **Only current, enforced facts.** A prompt states no rule the code does not
   enforce and no figure: ADR-0030, and G662, where a hard-coded example once put
   stale rates into every answer.
-- **Retrieved text is data.** Every prompt path fences retrieved passages so a
-  passage cannot close the fence or write a new instruction (ADR-0027).
-- **Leak protection.** The output guard checks each reply against signature
+- **Retrieved text is data.** The chat prompt paths fence retrieved passages so a
+  passage cannot close the fence or write a new instruction (ADR-0027). Exception:
+  the call receptionist's direct Luganda synthesis (`receptionist/brain.py`, local
+  vLLM only) joins retrieved passages into its prompt without a fence (G668).
+- **Leak protection.** The output guard checks each chat reply against signature
   phrases and a word 8-gram fingerprint of `SYSTEM_PROMPT` and
-  `CLOUD_SYSTEM_PROMPT` (OWASP LLM07, ADR-0029).
+  `CLOUD_SYSTEM_PROMPT` (OWASP LLM07, ADR-0029). The fingerprint is rebuilt from
+  the live prompts, so it follows an edit rather than catching one. Exception: the
+  direct Luganda call synthesis is a second model answer no output guard reads;
+  only its figures and units are checked against the English answer (G588, G668).
 
 ## Known gaps
 
+- The direct Luganda call synthesis is neither fenced nor output-guarded (G668).
 - `CLOUD_SYSTEM_PROMPT` carries ADR-0030's governed rules, but production answers
   use `SYSTEM_PROMPT`. Whether `SYSTEM_PROMPT` carries every one of those rules is
   open (G667).

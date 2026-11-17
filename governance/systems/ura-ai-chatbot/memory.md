@@ -22,11 +22,18 @@ it keeps it, and who can read it. The code is in
 - **Consent.** Every read of episodic and semantic memory and the resolution
   ledger is gated on the taxpayer's active `personalization` consent. No consent
   returns nothing.
-- **Off by default.** `FLAG_MEMORY_ENABLED` (default off) decides whether
-  personal memory facts reach the prompts at all.
-- **Erasure.** `MemoryService.forget_user` removes a taxpayer from every tier when
-  they withdraw consent or call `DELETE /v1/me`.
-- **Expiry.** `retention.py` deletes expired rows at startup and on an interval,
-  watched by the `RetentionJobFailing` and `RetentionJobStale` alerts.
+- **The switch.** `FLAG_MEMORY_ENABLED` decides whether personal memory facts
+  reach the prompts at all. It is off in the code's registry, but
+  `App/docker-compose.prod.yml` turns it on unless the variable is set
+  (`${FLAG_MEMORY_ENABLED:-true}`).
+- **Erasure.** Withdrawing `personalization` consent calls
+  `MemoryService.forget_user`, which clears working, episodic and semantic memory.
+  `DELETE /v1/me` does that and also clears case facts (`forget_user_case_facts`)
+  and uploaded documents.
+- **Expiry.** `retention.py` deletes expired database, document, memory and voice
+  rows at startup and on an interval, watched by the `RetentionJobFailing` and
+  `RetentionJobStale` alerts. Case facts expire through their 6-hour Redis TTL, or
+  the in-process deadline when Redis is absent. An expired resolution case is
+  ignored when it is read.
 
 The DPIA's processing scope covers memory ([dpia.md](dpia.md)).
