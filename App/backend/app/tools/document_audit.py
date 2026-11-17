@@ -81,7 +81,7 @@ class AuditTaxDocumentTool(Tool):
         **kwargs: Any,
     ) -> dict[str, Any]:
         from ..documents import get_document, reconcile_tax_document
-        from ..guardrails import scan_retrieved_text
+        from ..guardrails.input_checks import scan_retrieved_text
         from ..vision.ocr import (
             extract_dates,
             extract_efris_invoice_numbers,

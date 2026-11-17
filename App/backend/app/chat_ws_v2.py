@@ -401,7 +401,8 @@ async def _run_response_create(
 
     final_log: dict[str, Any] | None = None
     full_reply = ""
-    from .guardrails import OutputGuard, StreamingDLPFilter, user_stated_identifiers
+    from .guardrails.output_checks import OutputGuard
+    from .guardrails.pii import StreamingDLPFilter, user_stated_identifiers
 
     stated_ids = user_stated_identifiers(user_input)
     dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)

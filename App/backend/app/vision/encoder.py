@@ -23,7 +23,7 @@ import re
 import threading
 from typing import Any
 
-from ..guardrails import scan_retrieved_text
+from ..guardrails.input_checks import scan_retrieved_text
 from .document_classifier import classify_with_context
 from .ocr import (
     clean_ocr_text,

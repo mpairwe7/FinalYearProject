@@ -21,7 +21,8 @@ import re
 
 from .rag import generator
 from .guard_friction import note_refusal, paused
-from .guardrails import InputGuard, contains_pii, redact_pii_text
+from .guardrails.input_checks import InputGuard
+from .guardrails.pii import contains_pii, redact_pii_text
 from .prompts.title import CHAT_TITLE_SYSTEM as _SYSTEM_PROMPT
 
 MAX_WORDS = 6

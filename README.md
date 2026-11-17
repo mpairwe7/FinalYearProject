@@ -76,7 +76,7 @@ FinalYearProject/
 │   │       │   └── corpus_sync.py # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │       ├── db/
 │   │       │   └── database.py    # SQLite WAL analytics/feedback/session/conversation store
-│   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
+│   │       ├── guardrails/  # OWASP LLM Top 10 input/output guards
 │   │       ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │       ├── web_research.py # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
@@ -172,7 +172,7 @@ User Query
 | **Cognitive Memory** | `memory/` (`4-tier` + `ResolutionLedger`) | Working, Episodic, Semantic, and Procedural memory + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 |
 | **Speech & Voice** | `Sunbird/SunflowerASR-51-african-languages` + `Orpheus-3B-TTS` | Hybrid S2S + Regulated Cascaded Router, `spoken_figure_guard`, multimodal affect prosody, and 8 kHz G.711 μ-law 2G/3G wire transcoding |
 | **Safety & Governance** | OWASP LLM Top 10 + `governance_v3.py` | Injection detection, PII redaction, `#NMBRA#` sentinel figure protection, `ActionAuditRecord` v3, and `InteractionQualityScorecard` |
-| **Escalation** | `guardrails.py` + `officer_chat.py` | Auto-flag for human review, bilingual Officer Co-Pilot drafts, `Officer -> AI` workflow delegation, and DPO preference capture |
+| **Escalation** | `guardrails/` + `officer_chat.py` | Auto-flag for human review, bilingual Officer Co-Pilot drafts, `Officer -> AI` workflow delegation, and DPO preference capture |
 | **Observability** | OpenTelemetry + Prometheus | Per-stage GenAI latency spans, token usage metrics, bounded label series |
 | **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates + 30,000-scenario trilingual (TTT/STT/TTS) stress & fuzzy verification |
 

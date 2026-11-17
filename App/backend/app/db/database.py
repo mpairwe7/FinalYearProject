@@ -1354,7 +1354,7 @@ def save_feedback(
     them after the conversation itself has expired. An empty *user_id* is an
     anonymous rating: nothing ties it to a person.
     """
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     comment = redact_pii_text(comment)
     user_query = redact_pii_text(user_query)
@@ -1387,7 +1387,7 @@ def save_feedback(
 def update_feedback_comment(message_id: str, comment: str, user_id: str = "") -> bool:
     """Update the comment on an existing feedback entry (for follow-up comments)."""
     conn = _get_connection()
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     try:
         cursor = conn.execute(
@@ -1488,7 +1488,7 @@ def track_event(
 ) -> None:
     """Record an analytics event."""
     conn = _get_connection()
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     try:
         conn.execute(
@@ -1630,7 +1630,7 @@ def log_conversation(
     one otherwise.
     """
     conn = _get_connection()
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
@@ -2196,7 +2196,7 @@ def _redact_ticket_value(value: Any) -> Any:
     that create or update a ticket without going through ``ChatModel``.
     """
     if isinstance(value, str):
-        from ..guardrails import redact_pii_text
+        from ..guardrails.pii import redact_pii_text
 
         return redact_pii_text(value)
     if isinstance(value, list):
@@ -3295,7 +3295,7 @@ def create_or_increment_discrepancy(
     cited_sources: list[str] | None = None,
     priority: str = "normal",
 ) -> dict[str, Any]:
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     bot_statement = redact_pii_text(str(bot_statement or "").strip())
     user_correction = redact_pii_text(str(user_correction or "").strip())

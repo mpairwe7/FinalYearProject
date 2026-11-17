@@ -30,7 +30,7 @@ from app.agents import tiebreak
 from app.agents.tiebreak import _READ_ONLY_TOOLS, cache_clear, refine
 from app.observability.analytics import metrics
 from app.config.flags import flags
-from app.guardrails import FigureReleaseGate, OutputGuard
+from app.guardrails.output_checks import FigureReleaseGate, OutputGuard
 from app.providers.routing import ModelTier
 from app.tools import ToolRegistry
 

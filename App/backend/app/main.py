@@ -2909,7 +2909,7 @@ def track_analytics_event(
     """Track a client-side analytics event."""
     if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
         return {"status": "ignored", "reason": "analytics_consent_required"}
-    from .guardrails import redact_pii_text
+    from .guardrails.pii import redact_pii_text
 
     db.track_event(
         event_type=body.event_type,
@@ -5526,7 +5526,7 @@ async def voice_vision_chat(
                     import numpy as np
                     from PIL import Image, ImageOps
 
-                    from .guardrails import scan_retrieved_text
+                    from .guardrails.input_checks import scan_retrieved_text
                     from .vision.ocr import clean_ocr_text, extract_ocr_result
 
                     with Image.open(_io.BytesIO(image_bytes)) as raw_img:

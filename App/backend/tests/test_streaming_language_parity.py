@@ -104,7 +104,7 @@ class EnglishFormRoutingTest(_Base):
         self.assertEqual(bind.call_args.kwargs["binding_query"], EN_TIN)
 
     def test_input_guard_also_reads_the_english_form(self) -> None:
-        from app.guardrails import GuardResult
+        from app.guardrails.input_checks import GuardResult
 
         calls: list[str] = []
 

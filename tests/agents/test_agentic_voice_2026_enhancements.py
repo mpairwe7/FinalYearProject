@@ -1633,7 +1633,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
 
 def test_phase39_eq_conversational_and_structuring_tools_5_locale_uniformity():
     from app.conversational import handle_conversational_turn
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
     from app.rag.pipeline import ChatModel
     from app.text_signals import (
         ack_already_given,
@@ -1841,7 +1841,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
     assert rate_ach is not None and rate_ach.tax_type == "vat_standard"
 
     # 7. Cross-lingual abstention threshold parity across lg, sw, nyn, and ach
-    from app.guardrails import (
+    from app.guardrails.output_checks import (
         ABSTENTION_THRESHOLD_NORM_ACH,
         ABSTENTION_THRESHOLD_NORM_LG,
         ABSTENTION_THRESHOLD_NORM_NYN,
@@ -1861,7 +1861,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
 
 def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrails():
     from app.rag import generator
-    from app.guardrails import InputGuard
+    from app.guardrails.input_checks import InputGuard
 
     # 1. TraSe English-pivot prompt construction when no locale LoRA adapter is active
     msgs_nyn = generator._build_messages(
@@ -1898,7 +1898,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
     from app.agents.graphs.main_graph import _is_reasoning_miss
     from app.agents.graphs.state import AgentGraphState
     from app.rag.claim_verifier import verify_claims
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
 
     hits = [{"source": "ura_vat.pdf", "text": "The standard Value Added Tax (VAT) rate in Uganda is 18% on taxable supplies."}]
     cites = [{"ref": "[1]", "source": "ura_vat.pdf", "passage": hits[0]["text"]}]

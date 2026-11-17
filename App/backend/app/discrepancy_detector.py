@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .guardrails import redact_pii_text
+from .guardrails.pii import redact_pii_text
 
 logger = logging.getLogger(__name__)
 

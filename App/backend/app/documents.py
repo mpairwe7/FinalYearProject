@@ -42,7 +42,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .guardrails import scan_retrieved_text
+from .guardrails.input_checks import scan_retrieved_text
 from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (

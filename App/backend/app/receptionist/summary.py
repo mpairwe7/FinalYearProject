@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from ..db import database as db
-from ..guardrails import redact_pii_text
+from ..guardrails.pii import redact_pii_text
 from .language import LANGUAGE_NAMES, lexical_hits
 from .store import get_call, list_turns, update_call
 from ..prompts.receptionist import SUMMARY_SYSTEM

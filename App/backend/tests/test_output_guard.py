@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 
 
 class OutputGuardSanitizerTests(unittest.TestCase):
@@ -378,7 +378,7 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
     """Verify SG-01 through SG-05 (Unicode Tag smuggling, compactor sanitization, email domain spoofing, Markdown URI schemes, security telemetry)."""
 
     def test_unicode_tag_smuggled_injection_is_blocked(self) -> None:
-        from app.guardrails import (
+        from app.guardrails.input_checks import (
             REPLAY_WITHHELD,
             InputGuard,
             scan_external_tool_text,
@@ -414,7 +414,7 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("[REDACTED_INSTRUCTION]", ret_out)
 
     def test_obfuscated_system_prompt_leakage_and_streaming_dlp_phone_split(self) -> None:
-        from app.guardrails import StreamingDLPFilter
+        from app.guardrails.pii import StreamingDLPFilter
 
         # Zero-width / Cyrillic homoglyph obfuscated system prompt leakage is caught & redacted (SG-07)
         # The persona the live SYSTEM_PROMPT uses; the former "URA Digital
@@ -436,7 +436,7 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("[REDACTED_UG_PHONE]", joined)
 
     def test_email_domain_substring_spoofing_is_redacted(self) -> None:
-        from app.guardrails import is_official_ura_email, redact_pii_text
+        from app.guardrails.pii import is_official_ura_email, redact_pii_text
 
         self.assertTrue(is_official_ura_email("services@ura.go.ug"))
         self.assertTrue(is_official_ura_email("help@customs.ura.go.ug"))

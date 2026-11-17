@@ -698,7 +698,7 @@ FinalYearProject/
 │   │   │   │   └── postgres.py # PostgreSQL analytics backend (opt-in)
 │   │   │   ├── config/
 │   │   │   │   └── flags.py    # Feature flag registry (91 flags, env-backed)
-│   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
+│   │   │   ├── guardrails/ # OWASP LLM Top 10 2025 (input/output/indirect injection)
 │   │   │   ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   │   ├── observability/tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
 │   │   │   ├── observability/analytics.py # Prometheus-compatible metrics + middleware

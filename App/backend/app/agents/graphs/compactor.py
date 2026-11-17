@@ -53,7 +53,7 @@ _ESSENTIAL_STATUTORY_KEYS = frozenset({
 
 def _scrub_tool_str(text: str, limit: int) -> str:
     """Scrub indirect prompt-injection payloads from tool string values before compaction."""
-    from ...guardrails import scan_external_tool_text
+    from ...guardrails.input_checks import scan_external_tool_text
 
     scrubbed, _ = scan_external_tool_text(str(text or "")[: limit * 2])
     return scrubbed[:limit]
@@ -120,7 +120,8 @@ def compact_messages(
     if turn_count <= max_messages:
         return list(messages), ""
 
-    from ...guardrails import redact_pii_text, scan_replayed_text
+    from ...guardrails.input_checks import scan_replayed_text
+    from ...guardrails.pii import redact_pii_text
 
     older = messages[:-max_messages]
     recent = list(messages[-max_messages:])

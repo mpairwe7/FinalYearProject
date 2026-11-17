@@ -156,15 +156,9 @@ from ..linear_text import strip_spans
 from ..guard_friction import note_refusal as note_guard_refusal
 from ..guard_friction import paused as paused_turn
 from ..guard_friction import principal_key
-from ..guardrails import (
-    STORE_RAW_PROMPTS,
-    GuardResult,
-    InputGuard,
-    OutputGuard,
-    neutralize_untrusted_links,
-    redact_pii_text,
-    user_stated_identifiers,
-)
+from ..guardrails.input_checks import GuardResult, InputGuard
+from ..guardrails.output_checks import OutputGuard, neutralize_untrusted_links
+from ..guardrails.pii import STORE_RAW_PROMPTS, redact_pii_text, user_stated_identifiers
 from ..memory.language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from ..memory import get_memory_service
 from ..model_welfare import is_model_welfare_query
@@ -850,7 +844,7 @@ def _fallback_history_block(conversation_history: list[dict[str, Any]] | None) -
     if not conversation_history:
         return ""
     from .context_manager import PROMPT_VERBATIM_TURNS, english_view, normalize_history_turns
-    from ..guardrails import fence_spotlight_body
+    from ..guardrails.fences import fence_spotlight_body
 
     lines: list[str] = []
     for turn in english_view(normalize_history_turns(conversation_history))[-PROMPT_VERBATIM_TURNS:]:
@@ -882,7 +876,7 @@ def _build_fallback_prompt(
     which carries the governed rules a one-paragraph prompt lacked (G475), and
     the last turns are replayed so a follow-up keeps its subject (G476).
     """
-    from ..guardrails import fence_spotlight_body
+    from ..guardrails.fences import fence_spotlight_body
 
     blocks = [
         prompt_builder.spotlight_passage(i, p, max_chars=800)[0]
@@ -2786,7 +2780,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     """
     import inspect
 
-    from ..guardrails import FigureReleaseGate, OutputGuard
+    from ..guardrails.output_checks import FigureReleaseGate, OutputGuard
 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()

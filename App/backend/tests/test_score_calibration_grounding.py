@@ -38,7 +38,7 @@ class NormalizationTest(unittest.TestCase):
 
 class AbstainTest(unittest.TestCase):
     def test_uses_normalized_scale_and_degraded_mode(self) -> None:
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertTrue(OutputGuard.should_abstain([]))  # no hits
         self.assertFalse(OutputGuard.should_abstain([{"score_norm": 0.8}]))  # confident

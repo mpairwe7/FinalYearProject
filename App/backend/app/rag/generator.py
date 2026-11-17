@@ -67,11 +67,8 @@ from typing import TYPE_CHECKING, Any, Final
 
 from ..agents.loop_control import Admission, BudgetDecision, ToolCallBudget
 from ..prompts.agents import specialist_prompt
-from ..guardrails import (
-    fence_prompt_header_field,
-    fence_spotlight_body,
-    scan_external_tool_text,
-)
+from ..guardrails.fences import fence_prompt_header_field, fence_spotlight_body
+from ..guardrails.input_checks import scan_external_tool_text
 from ..resilience import raise_if_turn_cancelled
 from ..observability.tracing import llm_call
 from .prompt_builder import (
@@ -2297,7 +2294,7 @@ def translate_text(
     Uses the already-loaded local LLM with a minimal prompt (no RAG context)
     and capped output length to avoid runaway generation.
     """
-    from ..guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
+    from ..guardrails.input_checks import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
     if not (text or "").strip():
         # Given nothing, the model translates the instructions themselves.

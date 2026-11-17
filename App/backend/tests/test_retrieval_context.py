@@ -72,7 +72,7 @@ class ContextPruningTests(unittest.TestCase):
     def test_the_floor_sits_below_the_abstention_threshold(self) -> None:
         # This trims a result set that was already good enough to answer
         # from. It must never be the thing that decides to abstain.
-        from app.guardrails import ABSTENTION_THRESHOLD_NORM
+        from app.guardrails.output_checks import ABSTENTION_THRESHOLD_NORM
         from app.rag.retriever import _CONTEXT_FLOOR
 
         self.assertLess(_CONTEXT_FLOOR, ABSTENTION_THRESHOLD_NORM)

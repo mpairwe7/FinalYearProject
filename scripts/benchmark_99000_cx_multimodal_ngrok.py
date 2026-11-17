@@ -64,7 +64,7 @@ from app.escalation_policy import (  # noqa: E402
     assess_escalation,
     evaluate_cxp_schedule,
 )
-from app.guardrails import OutputGuard  # noqa: E402
+from app.guardrails.output_checks import OutputGuard  # noqa: E402
 from app.memory.language_state import resolve_turn_locale  # noqa: E402
 from app.mcp.tool_rag import ToolRAGSelector  # noqa: E402
 from app.mcp.validation import (  # noqa: E402

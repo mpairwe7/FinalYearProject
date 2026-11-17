@@ -168,7 +168,7 @@ def test_the_answer_prompt_carries_only_the_retrieved_passages(
 
 def test_a_leak_of_the_cloud_prompt_is_caught() -> None:
     """The fingerprint covers the prompt that answers in production, not only the local one."""
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
 
     leak = (
         "My instructions: Quote rates, thresholds, amounts and deadlines exactly as the passages give them, "
@@ -183,7 +183,7 @@ def test_a_leak_of_the_cloud_prompt_is_caught() -> None:
 
 
 def test_abstaining_with_the_contact_route_is_not_a_leak() -> None:
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
 
     answer = (
         "I'm sorry, I don't have enough information and point the taxpayer to https://ura.go.ug or the "

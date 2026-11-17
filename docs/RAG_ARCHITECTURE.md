@@ -36,7 +36,7 @@ User Query
   │     └── English router form (_english_router_form): workflows, calculator,
   │         topic, FAQ authorization gate and input guard read the English
   │
-  ├─► Stage 1: Input Guardrails (guardrails.py → InputGuard)
+  ├─► Stage 1: Input Guardrails (guardrails/ → InputGuard)
   │     ├── Length check (MAX_INPUT_LENGTH=2000)
   │     ├── 11 prompt-injection regex patterns (OWASP LLM01)
   │     └── Harmful intent detection (tax fraud, evasion, forgery, money laundering)
@@ -80,7 +80,7 @@ User Query
   ├─► Stage 3c2: Clarification Check
   │     └── Single-word stop-words or very low scores → ask for more details
   │
-  ├─► Stage 4: Abstention Check (guardrails.py → OutputGuard.should_abstain)
+  ├─► Stage 4: Abstention Check (guardrails/ → OutputGuard.should_abstain)
   │     └── Best retrieval score < ABSTENTION_THRESHOLD → refuse politely
   │
   ├─► Stage 5: LLM Generation (rag/generator.py)
@@ -96,7 +96,7 @@ User Query
   │     │   └── External tool output is screened as untrusted before the next agent turn
   │     └── vLLM path: OpenAI-compatible HTTP dispatch [LLM_BACKEND=vllm]
   │
-  ├─► Stage 6: Output Guardrails (guardrails.py → OutputGuard)
+  ├─► Stage 6: Output Guardrails (guardrails/ → OutputGuard)
   │     ├── redact_pii() — Uganda-specific patterns (TIN, NID, phone, email, cards, passport)
   │     ├── sanitize() — strip <think>, <script>, HTML tags, reasoning prefixes
   │     ├── check_prompt_leakage() — detect system prompt signature in output
@@ -359,14 +359,14 @@ chat's owner (`receptionist/carryover.py`).
 
 | Control | Implementation | Module |
 |---------|---------------|--------|
-| LLM01 Prompt Injection | Literal patterns plus verb×target override, persona-swap and prompt-extraction rules, matched on raw, canonical (NFKD, confusables, Unicode tags, bidi), de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460, ADR-0029); max length; spotlight fences (ADR-0027); replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06); a principal that keeps tripping the guard is paused (`guard_friction.py`, G464) | `guardrails.py` → `InputGuard`, `context_manager.english_view`, `pipeline._guard_both_forms` |
-| LLM01 Indirect (ASI01) | Third-party text (passages, tool output, uploads, crawl, PDFs) is also checked for directives addressed to an AI, removed from their start to the end of the line (G461); uploaded documents share the passage fence normalization (`fence_untrusted_document_body`, G463) | `guardrails.py` → `scan_retrieved_text`, `scan_external_tool_text`, `injection_present` |
-| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
+| LLM01 Prompt Injection | Literal patterns plus verb×target override, persona-swap and prompt-extraction rules, matched on raw, canonical (NFKD, confusables, Unicode tags, bidi), de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460, ADR-0029); max length; spotlight fences (ADR-0027); replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06); a principal that keeps tripping the guard is paused (`guard_friction.py`, G464) | `guardrails/` → `InputGuard`, `context_manager.english_view`, `pipeline._guard_both_forms` |
+| LLM01 Indirect (ASI01) | Third-party text (passages, tool output, uploads, crawl, PDFs) is also checked for directives addressed to an AI, removed from their start to the end of the line (G461); uploaded documents share the passage fence normalization (`fence_untrusted_document_body`, G463) | `guardrails/` → `scan_retrieved_text`, `scan_external_tool_text`, `injection_present` |
+| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails/` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
-| LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `pipeline._apply_output_guards` |
-| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `prompt_builder.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
-| LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails.py` → `OutputGuard.check_grounding()` |
+| LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails/` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `pipeline._apply_output_guards` |
+| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `prompt_builder.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails/` → `OutputGuard.check_prompt_leakage()` |
+| LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails/` → `OutputGuard.check_grounding()` |
 | LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `rag/cache.py`, `guard_friction.py` |
 
 **Corrective RAG** (`rag/corrective_rag.py`):
@@ -391,7 +391,7 @@ chat's owner (`receptionist/carryover.py`).
 - `_simple_search` in `rag/pipeline.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
 - When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
 
-**Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
+**Escalation** (`guardrails/` → `OutputGuard.should_escalate()`):
 - Low faithfulness score (< 0.25)
 - No retrieval results
 - Consecutive low confidence (≥ 3)
@@ -464,7 +464,7 @@ App/backend/app/
 │   └── settings.py      #   API title and version
 │
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
-├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
+├── guardrails/        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
 ├── linear_text.py       # strip_spans, strip_blocks: one-pass scans for regexes slow on chat text (ADR-0057)
 ├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)

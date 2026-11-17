@@ -18,7 +18,8 @@ from app.rag.context_manager import (
     extract_conversation_entities,
 )
 from app.rag.entailment import is_contradicted, numeric_contradiction
-from app.guardrails import OutputGuard, redact_pii_text
+from app.guardrails.output_checks import OutputGuard
+from app.guardrails.pii import redact_pii_text
 from app.premise_guard import check_false_premise
 from app.rag.query import correct_spelling, rewrite_with_history
 

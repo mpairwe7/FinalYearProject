@@ -380,14 +380,14 @@ class LexicalRelevanceGateTests(unittest.TestCase):
         self.assertEqual(encoder.term_idf("nonexistentword"), encoder.max_idf)
 
     def test_abstains_on_a_stamped_low_relevance_hit(self) -> None:
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertTrue(
             OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": 0.10}])
         )
 
     def test_answers_on_a_stamped_high_relevance_hit(self) -> None:
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertFalse(
             OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": 0.95}])
@@ -395,7 +395,7 @@ class LexicalRelevanceGateTests(unittest.TestCase):
 
     def test_a_reranker_score_still_takes_precedence(self) -> None:
         """The cross-encoder is the better signal wherever it exists."""
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertFalse(
             OutputGuard.should_abstain([{"score_norm": 0.9, "score_lexical": 0.0}])
@@ -408,12 +408,12 @@ class LexicalRelevanceGateTests(unittest.TestCase):
         """Keyword/FAQ hits arrive unstamped and already carry their own
         authorization gate; scoring them again double-gates them and re-breaks
         distress-framed questions (the bug PR #167 fixed)."""
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertFalse(OutputGuard.should_abstain([{"_overlap": 3.2, "answer": "..."}]))
 
     def test_a_malformed_stamp_is_ignored_rather_than_crashing(self) -> None:
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         self.assertFalse(
             OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": "nonsense"}])
@@ -498,7 +498,7 @@ class LexicalStampWiringTests(unittest.TestCase):
     def test_the_stamp_survives_into_the_abstention_decision(self) -> None:
         """End-to-end within the retriever+guard pair: an off-topic question over
         this corpus must come back as abstain, an on-topic one must not."""
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         payloads = [
             {

@@ -19,7 +19,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 
-from app.guardrails import contains_pii, redact_pii_text  # noqa: E402
+from app.guardrails.pii import contains_pii, redact_pii_text  # noqa: E402
 from app.vision.ocr import extract_nin_numbers  # noqa: E402
 
 REAL_SHAPES = [

@@ -384,7 +384,7 @@ class VoiceSessionV2:
         # Inject vision context if present (scrubbed + spotlighted against visual prompt injection)
         message_for_llm = query_text
         if image_context:
-            from .guardrails import scan_retrieved_text
+            from .guardrails.input_checks import scan_retrieved_text
             from .vision.ocr import escape_untrusted_document_markers
 
             doc_type = image_context.get("doc_type", "document")
@@ -466,7 +466,7 @@ class VoiceSessionV2:
         except Exception:
             logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
 
-        from .guardrails import OutputGuard
+        from .guardrails.output_checks import OutputGuard
 
         reply_for_tts = OutputGuard.redact_pii(reply_for_tts)
 

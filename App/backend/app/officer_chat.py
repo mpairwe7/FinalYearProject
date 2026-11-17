@@ -128,7 +128,7 @@ def _ensure() -> None:
 
 
 def _redact(text: str, limit: int = 4000) -> str:
-    from .guardrails import redact_pii_text
+    from .guardrails.pii import redact_pii_text
 
     return redact_pii_text((text or "").strip())[:limit]
 

@@ -16,7 +16,7 @@ This record establishes traceability for the fixes applied to close domestic tax
 - `App/frontend/src/app/page.tsx`: SSE streaming event-buffered reader loop preserving multiline `data:` records.
 - `App/frontend/src/components/ChatMessage.tsx`: Direct synchronous import of `Markdown` component to eliminate unstyled fallback flashes.
 - `App/frontend/src/store/useChatStore.ts`: Unsmashing of inline list numbering (`steps:1.**`, `section.2.**`) and paragraph breaks.
-- `App/backend/app/guardrails.py`: OutputGuard `normalize_structure()` regex strict boundary matching on horizontal whitespace; stray glued citation marker cleanup (`otherL1]` $\rightarrow$ `other [1]`).
+- `App/backend/app/guardrails/`: OutputGuard `normalize_structure()` regex strict boundary matching on horizontal whitespace; stray glued citation marker cleanup (`otherL1]` $\rightarrow$ `other [1]`).
 - `App/backend/app/text_signals.py`: `_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")` to split lists and bullet points into distinct sentences for faithfulness scoring.
 - `App/backend/app/rag/claim_verifier.py`: `_SENTENCE_RE` matching non-punctuated list lines; cross-passage corroboration across all retrieved `hits`; revision rather than escalation when no contradiction exists.
 - `App/backend/app/mt.py`: Currency tokens (`milioni`, `obukadde`, `emitwalo`); statutory article and clause subsection shielding (`Article 1.2`, `ekiwandiiko 1.2`).

@@ -29,7 +29,7 @@ from typing import Any, Literal
 
 from ..calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
 from ..rag.context_manager import extract_conversation_entities
-from ..guardrails import redact_pii_text
+from ..guardrails.pii import redact_pii_text
 from ..number_words import (
     _ACH_TENS,
     _ACH_UNITS,

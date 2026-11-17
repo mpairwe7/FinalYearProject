@@ -25,17 +25,19 @@ import re
 import pytest
 from app.rag import pipeline
 from app.guard_friction import COOLDOWN_REPLY, StrikeTracker, principal_key, strike_tracker
-from app.guardrails import (
-    _DEFAULT_EXTRA_LINK_HOSTS,
-    _PROMPT_SIGNATURE_PHRASES,
+from app.guardrails.fences import fence_untrusted_document_body
+from app.guardrails.input_checks import (
     InputGuard,
-    OutputGuard,
-    fence_untrusted_document_body,
     injection_present,
-    is_trusted_link_target,
-    neutralize_untrusted_links,
     scan_external_tool_text,
     scan_retrieved_text,
+)
+from app.guardrails.output_checks import (
+    _DEFAULT_EXTRA_LINK_HOSTS,
+    _PROMPT_SIGNATURE_PHRASES,
+    OutputGuard,
+    is_trusted_link_target,
+    neutralize_untrusted_links,
 )
 from app.rag.prompt_builder import SYSTEM_PROMPT
 

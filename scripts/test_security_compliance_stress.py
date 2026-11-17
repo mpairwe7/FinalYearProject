@@ -59,7 +59,9 @@ os.environ["FLAG_TOOL_USE"] = "true"
 from fastapi.testclient import TestClient
 
 from app.db import database as db
-from app.guardrails import InputGuard, OutputGuard, redact_pii_text, scan_retrieved_text
+from app.guardrails.input_checks import InputGuard, scan_retrieved_text
+from app.guardrails.output_checks import OutputGuard
+from app.guardrails.pii import redact_pii_text
 from app.main import app as fastapi_app
 from scripts.cleanup_gpu_processes import cleanup_mpairwe7_gpu_processes
 

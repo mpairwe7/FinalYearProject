@@ -278,7 +278,7 @@ def test_scenario_planner_bypass_regex_matches_compared_to_and_versus() -> None:
 
 def test_streaming_apply_output_guards_honors_verified_facts() -> None:
     """Verify _apply_output_guards passes verified_facts and calculation_message to judge and claim verifier."""
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
     from app.rag.pipeline import _apply_output_guards
 
     class _StubModel:

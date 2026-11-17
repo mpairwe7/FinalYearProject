@@ -423,7 +423,7 @@ def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a
         ]
 
     with mock.patch(
-        "App.backend.app.guardrails.OutputGuard.should_escalate",
+        "App.backend.app.guardrails.output_checks.OutputGuard.should_escalate",
         return_value=(True, "test escalation"),
     ):
         events = asyncio.run(_run())

@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .guardrails import GuardResult
+    from .guardrails.input_checks import GuardResult
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ def paused(principal: str, *, crisis: bool = False) -> GuardResult | None:
         return None
     if strike_tracker.cooldown_remaining(principal) <= 0:
         return None
-    from .guardrails import GuardResult
+    from .guardrails.input_checks import GuardResult
 
     return GuardResult(allowed=False, reason=COOLDOWN_REPLY, flags=["guardrail_cooldown"])
 

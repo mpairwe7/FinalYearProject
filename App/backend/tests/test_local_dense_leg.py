@@ -732,7 +732,7 @@ class _OverlapReranker:
 
 
 def test_a_dense_only_passage_with_no_word_in_common_cannot_carry_an_answer() -> None:
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
     from app.rag.retriever import gating_relevance
 
     r = _retriever([], _FakeStore([("efris", EFRIS, 0.9)]))

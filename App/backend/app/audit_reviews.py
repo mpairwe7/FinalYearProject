@@ -141,7 +141,7 @@ def set_review(
         raise ValueError(f"unknown review status {status!r}")
     _ensure()
     tenant = _tenant(tenant_id)
-    from .guardrails import redact_pii_text
+    from .guardrails.pii import redact_pii_text
 
     clean_note = redact_pii_text((note or "").strip())[:1000]
     now = time.time()

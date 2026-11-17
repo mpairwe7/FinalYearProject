@@ -23,7 +23,7 @@ from unittest import mock
 import pytest
 from app.rag import pipeline as pipeline_module
 from app.audit import turns
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 from app.turn_pipeline import attest_turn
 
 HIT = {"text": "The standard VAT rate in Uganda is 18 percent.", "source": "vat.pdf", "score_rerank": 0.9}

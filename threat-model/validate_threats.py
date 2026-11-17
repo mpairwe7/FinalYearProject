@@ -180,7 +180,7 @@ THREAT_REGISTRY: list[dict] = [
             "fences, output guards and tool tiers remain the controls that hold"
         ),
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "Data/eval/redteam_corpus.jsonl",
             "Data/eval/guardrail_benign_controls.jsonl",
             "App/backend/tests/test_redteam_corpus.py",
@@ -205,7 +205,7 @@ THREAT_REGISTRY: list[dict] = [
             "removal is sent as a revision"
         ),
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/rag/pipeline.py",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
@@ -226,7 +226,7 @@ THREAT_REGISTRY: list[dict] = [
             "wrapped, on every path that builds the fence"
         ),
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/vision/ocr.py",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
@@ -408,7 +408,7 @@ THREAT_REGISTRY: list[dict] = [
             "Spaced runs read as words; control-signal markers are indirect injections. Residual: static "
             "detectors lose to adaptive attacks, so the fence, verified-facts boundary and link allowlist hold"
         ),
-        "evidence": ["App/backend/app/guardrails.py", "tests/agents/test_web_research_integrity_2026_11.py"],
+        "evidence": ["App/backend/app/guardrails/", "tests/agents/test_web_research_integrity_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -717,7 +717,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "API key auth for sensitive endpoints, rate limiting per IP",
         "evidence": [
             "App/backend/app/main.py",
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
         ],
         "status": "mitigated",
     },
@@ -770,7 +770,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0024.001",
         "mitigation": "OutputGuard PII redaction (UG phone, TIN, NID, email, CC, passport)",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
         ],
         "status": "mitigated",
     },
@@ -808,7 +808,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0051",
         "mitigation": "InputGuard regex patterns, input length limits, retrieval-only architecture",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
         ],
         "status": "mitigated",
     },
@@ -857,7 +857,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "OutputGuard HTML/script stripping, frontend output encoding",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/frontend/src/components/Markdown.tsx",
         ],
         "status": "mitigated",
@@ -896,7 +896,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0051.001",
         "mitigation": "InputGuard blocks reveal-prompt and extraction probes ('what is your system prompt', 'text above starting with'); OutputGuard scrubs signature phrases kept in sync with the live prompts by test, and a word 8-gram fingerprint of SYSTEM_PROMPT catches a rule repeated without them (G465); prompt confidentiality is not treated as a security boundary (OWASP LLM08:2026)",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
         "status": "mitigated",
@@ -936,7 +936,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0048",
         "mitigation": "Runtime faithfulness scoring, calibrated abstention, low-confidence disclaimer",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "ml/pipelines/evaluate_rag.py",
         ],
         "status": "mitigated",
@@ -1016,7 +1016,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "scan_retrieved_text on extract and on prompt assembly; untrusted_user_document wrappers; system rule that uploads are evidence only",
         "evidence": [
             "App/backend/app/documents.py",
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/rag/generator.py",
         ],
         "status": "mitigated",
@@ -1301,7 +1301,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/web_research.py",
             "App/backend/app/rag/generator.py",
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/rag/pipeline.py",
             "tests/agents/test_web_evidence_boundary.py",
             "tests/agents/test_web_research_adversarial_eval.py",
@@ -1347,7 +1347,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0024.001",
         "mitigation": "strip_hidden_control_and_bidi, scan_retrieved_text, and <untrusted_user_document> wrapping on OCR/VLM paths; unified 13-15 char C[MFR] NIN redaction across guardrails.py, StreamingDLPFilter, Semgrep, and gitleaks; and localized spoken redaction labels in speech_normalization.py",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/speech_normalization.py",
             "tests/agents/test_nin_redaction.py",
         ],
@@ -1419,7 +1419,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0048",
         "mitigation": "FigureReleaseGate holds a stream from its first figure until verified; every graph answer passes the output guards; the figure lock runs on every transport and enforces on the reasoning tier. Enforcement on other tiers awaits shadow evidence (G360), so this is mitigated in part.",
         "evidence": [
-            "App/backend/app/guardrails.py",
+            "App/backend/app/guardrails/",
             "App/backend/app/agents/evaluator.py",
             "tests/agents/test_reasoner_integrity.py",
             "tests/agents/test_graph_orchestrator_contract.py",

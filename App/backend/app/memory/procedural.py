@@ -353,7 +353,7 @@ def _valid_identifier(value: Any) -> str:
 def _redact(value: Any) -> Any:
     """PII-redact every string in *value*, recursively (the guardrails redactor)."""
     if isinstance(value, str):
-        from ..guardrails import redact_pii_text
+        from ..guardrails.pii import redact_pii_text
 
         return redact_pii_text(value)
     if isinstance(value, list):
@@ -552,7 +552,7 @@ class ProceduralMemory:
         """
         import hashlib
 
-        from ..guardrails import scan_retrieved_text
+        from ..guardrails.input_checks import scan_retrieved_text
 
         if not evaluator_passed:
             return None

@@ -14,5 +14,5 @@ The system prompts live in `App/backend/app/prompts/`, one module per area
 
 The module that uses a prompt imports it from there under the name it had, so
 `rag/prompt_builder.py` still assembles the answer messages. Guardrail signatures
-in `guardrails.py` must stay in sync with any new system-prompt line. There is no
+in `guardrails/output_checks.py` must stay in sync with any new system-prompt line. There is no
 hot-reload YAML store; ADR-0060 says why.

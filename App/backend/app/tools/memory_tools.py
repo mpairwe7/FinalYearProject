@@ -191,7 +191,7 @@ class MemoryStoreTool(Tool):
         import time
         import uuid
 
-        from ..guardrails import scan_retrieved_text
+        from ..guardrails.input_checks import scan_retrieved_text
         from ..memory import UserFact, get_memory_service
         from ..vision.ocr import strip_hidden_control_and_bidi
 

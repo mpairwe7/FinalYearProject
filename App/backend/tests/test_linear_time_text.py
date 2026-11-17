@@ -11,7 +11,8 @@ import re
 import time
 
 import pytest
-from app import calculator_router, guardrails, mt
+from app import calculator_router, mt
+from app.guardrails import output_checks
 from app.memory.case_facts import extract_all_money
 from app.linear_text import strip_blocks, strip_spans
 from app.rag import entailment, pipeline
@@ -88,23 +89,23 @@ def test_strip_blocks_matches_the_regex(text):
     # The script oracle is built from the module's own halves: as one literal, CodeQL reads it
     # as a tag filter (py/bad-tag-filter) rather than as the regex being replaced.
     script_pattern = (
-        guardrails._SCRIPT_OPEN_RE.pattern + "[^>]*>.*?" + guardrails._SCRIPT_CLOSE_RE.pattern
+        output_checks._SCRIPT_OPEN_RE.pattern + "[^>]*>.*?" + output_checks._SCRIPT_CLOSE_RE.pattern
     )
     script = re.sub(script_pattern, "", text, flags=flags)
     assert (
         strip_blocks(
-            text, guardrails._REASONING_OPEN_RE, guardrails._REASONING_CLOSE_RE, or_to_end=True
+            text, output_checks._REASONING_OPEN_RE, output_checks._REASONING_CLOSE_RE, or_to_end=True
         )
         == reasoning
     )
-    assert strip_blocks(text, guardrails._SCRIPT_OPEN_RE, guardrails._SCRIPT_CLOSE_RE) == script
+    assert strip_blocks(text, output_checks._SCRIPT_OPEN_RE, output_checks._SCRIPT_CLOSE_RE) == script
 
 
 @pytest.mark.parametrize(
     ("scan", "pattern", "repl", "flags", "texts"),
     [
         (
-            guardrails._join_digit_bracket_glitches,
+            output_checks._join_digit_bracket_glitches,
             r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)",
             r"\1\2",
             0,
@@ -120,7 +121,7 @@ def test_strip_blocks_matches_the_regex(text):
             ],
         ),
         (
-            guardrails._strip_language_tags,
+            output_checks._strip_language_tags,
             r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*",
             "",
             re.IGNORECASE,
@@ -165,20 +166,20 @@ def test_first_number_prefix_matches_the_regex(text):
 @pytest.mark.parametrize(
     ("fn", "slow"),
     [
-        (guardrails.neutralize_untrusted_links, "![](" + "\t" * N + "x"),
+        (output_checks.neutralize_untrusted_links, "![](" + "\t" * N + "x"),
         (lambda s: strip_spans(s, "<", ">", min_inner=1), "<" * N),
         (
             lambda s: strip_blocks(
-                s, guardrails._REASONING_OPEN_RE, guardrails._REASONING_CLOSE_RE, or_to_end=True
+                s, output_checks._REASONING_OPEN_RE, output_checks._REASONING_CLOSE_RE, or_to_end=True
             ),
             "<think" * (N // 6),
         ),
         (
-            lambda s: strip_blocks(s, guardrails._SCRIPT_OPEN_RE, guardrails._SCRIPT_CLOSE_RE),
+            lambda s: strip_blocks(s, output_checks._SCRIPT_OPEN_RE, output_checks._SCRIPT_CLOSE_RE),
             "<script" * (N // 7),
         ),
-        (guardrails._join_digit_bracket_glitches, "0" * N + "x"),
-        (guardrails._strip_language_tags, "[" * N),
+        (output_checks._join_digit_bracket_glitches, "0" * N + "x"),
+        (output_checks._strip_language_tags, "[" * N),
         (entailment._join_decimal_gaps, "0" * N + "x"),
         (entailment._amount_figures, "0" * N + "x"),
         (lambda s: mt._prefix_first_number(s, "UGX "), "a " + "0" * N + "x"),

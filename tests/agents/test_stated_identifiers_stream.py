@@ -14,7 +14,7 @@ import asyncio
 from typing import Any
 
 from app.rag import pipeline as pipeline_module
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 
 
 def test_a_streamed_turn_keeps_the_tin_the_taxpayer_typed(monkeypatch) -> None:

@@ -1044,7 +1044,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() -> None:
     """Verify MCP tax_calculator tools/prompts, 5-locale empathy Tool-RAG, and paragraph structuring."""
     from app.conversational import handle_conversational_turn
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
     from app.mcp.servers.tax_calculator.server import server as tax_calc_server
     from app.mcp.tool_rag import ToolRAGSelector
     from app.tools import ToolRegistry

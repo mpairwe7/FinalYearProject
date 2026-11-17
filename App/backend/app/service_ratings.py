@@ -184,7 +184,7 @@ def answer(
         raise ValueError(f"invalid rating status {status!r}")
     if score is not None and not 1 <= int(score) <= 5:
         raise ValueError("a score is 1 to 5")
-    from .guardrails import redact_pii_text
+    from .guardrails.pii import redact_pii_text
 
     _ensure()
     column, value = _key_column(ticket_id, call_id)

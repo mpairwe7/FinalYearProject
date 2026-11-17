@@ -44,7 +44,7 @@ class _GuardFakeModel:
 class ApplyOutputGuardsUnitTest(unittest.TestCase):
     def test_runs_claim_verification_and_feeds_judge(self) -> None:
         from app.rag import pipeline
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
 
         model = _GuardFakeModel()
         report = {"decision": "approve", "score": 1.0, "claim_count": 1}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from app.guardrails import StreamingDLPFilter, user_stated_identifiers
+from app.guardrails.pii import StreamingDLPFilter, user_stated_identifiers
 
 
 class TestStreamingDLPFilter(unittest.TestCase):
