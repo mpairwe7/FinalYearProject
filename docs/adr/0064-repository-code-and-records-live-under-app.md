@@ -5,7 +5,7 @@
 Accepted, 2026-11-18. Carried out in three phases, one pull request each.
 
 - Phase A (done): remove the root pointer folders and the fine-tuning code, and move `configs/`.
-- Phase B: remove the byte-identical duplicate PDFs from `Data/pdfs`.
+- Phase B (done): remove the byte-identical duplicate PDFs from `Data/pdfs`.
 - Phase C: move the root code and record folders under `App/`.
 
 ## Context and Problem Statement
@@ -52,6 +52,12 @@ Option 1, chosen by the service owner over the narrower option 2.
   (git-ignored) rather than the deleted `fine-tuning/adapters`. The download,
   export and inference scripts in `ml/scripts`, and `evals/export_preferences.py`,
   stay.
+- **Phase B.** `Data/pdfs` held 11 documents twice under two names. The export
+  already chunked only the first name in sort order and recorded the other as
+  `duplicate_of`, so the copies removed are exactly the ones it skipped: the indexed
+  corpus and every passage's source name stay the same. `crawl_state.json`'s
+  entries for the removed names now name the kept copy, so the crawler's hash
+  record matches the files, and its hash check still skips a re-download.
 - **Phases B and C.** Each gets its own pull request, so CI and a reverting commit
   cover one step at a time. Phase C moves folders with a rerunnable script that
   rewrites every path reference. 535 files and 12 workflows name those folders.
