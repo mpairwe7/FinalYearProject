@@ -239,7 +239,7 @@ are inhibited as symptoms.
 Test rule changes before pushing:
 
 ```bash
-docker run --rm -v "$PWD/monitoring:/m:ro" -w /m --entrypoint promtool \
+docker run --rm -v "$PWD/App/monitoring:/m:ro" -w /m --entrypoint promtool \
   prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
 python -m pytest App/tests/test_monitoring_config.py -q
 ```

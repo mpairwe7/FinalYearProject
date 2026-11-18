@@ -43,7 +43,7 @@ class PluginOrchestrator:
         """Enable a plugin and initialize its connector."""
         plugin = self.get_plugin(name)
         if not plugin:
-            logger.warning("Cannot enable unknown plugin '%s'", name)
+            logger.warning("Cannot enable unknown plugin '%s'", str(name).replace("\r", " ").replace("\n", " "))
             return False
         return plugin.enable()
 
@@ -138,8 +138,14 @@ class PluginOrchestrator:
         t0 = time.perf_counter()
         try:
             healthy = p.connector.is_healthy()
-        except Exception as exc:
-            return {"ok": False, "healthy": False, "error": str(exc), "latency_ms": round((time.perf_counter() - t0) * 1000, 2)}
+        except Exception:
+            logger.exception("Connector health check failed for %s", name_clean)
+            return {
+                "ok": False,
+                "healthy": False,
+                "error": "Connector health check failed; see the server log.",
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+            }
 
         latency_ms = round((time.perf_counter() - t0) * 1000, 2)
         tools = [t.schema.name for t in p.connector.get_tools()]

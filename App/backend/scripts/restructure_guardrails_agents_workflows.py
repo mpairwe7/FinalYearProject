@@ -143,9 +143,8 @@ def _hand_edits(phase: int, apply: bool) -> None:
         if not path.exists():
             continue  # removed since (the root pointer folders)
         text = path.read_text()
-        if new in text and old not in text:
-            continue  # already applied
-        assert old in text, f"{rel}: {old[:60]!r} not found"
+        if old not in text:
+            continue  # applied, or rewritten since (ADR-0064 moved these files)
         applied += 1
         if apply:
             path.write_text(text.replace(old, new))

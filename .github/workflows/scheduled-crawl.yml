@@ -136,6 +136,7 @@ jobs:
 
       - name: Crawl
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           TIER: ${{ needs.plan.outputs.tier }}
           MAX_FETCHES: ${{ inputs.max_fetches }}
         run: |

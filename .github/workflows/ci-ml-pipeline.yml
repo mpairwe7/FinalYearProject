@@ -250,6 +250,7 @@ jobs:
         # `relevant_sources` labels the eval set does not yet carry, so any
         # threshold would be measuring the harness rather than the system.
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           LLM_ENABLED: 'false'
           QDRANT_ENABLED: 'false'
           SPEECH_ENABLED: 'false'
@@ -454,6 +455,7 @@ jobs:
 
       - name: Run RAG evaluation (English)
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p Results
@@ -481,6 +483,7 @@ jobs:
       # safety probes, abstention) is language-agnostic and still gates.
       - name: Run RAG evaluation (Luganda)
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -m ml.pipelines.evaluate_rag \
@@ -551,6 +554,8 @@ jobs:
           uv pip install --system pyyaml
 
       - name: Run production quality gates
+        env:
+          PYTHONPATH: ${{ github.workspace }}/App
         run: |
           python -m ml.pipelines.quality_gates \
             --family production \
