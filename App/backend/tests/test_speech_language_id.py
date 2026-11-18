@@ -3,7 +3,7 @@
 Against a stand-in model: the real weights are ~6 GB and gated. What matters
 here is the request shape (one decoder step from <|startoftranscript|>, read
 only at the candidates' SALT token ids) and that the method never raises.
-The accuracy of the real model is measured by scripts/eval_language_id.py.
+The accuracy of the real model is measured by App/scripts/eval_language_id.py.
 """
 
 from __future__ import annotations

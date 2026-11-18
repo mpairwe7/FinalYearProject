@@ -23,7 +23,7 @@ RUN groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
 
 # Copy plugins package and create data_store volume directory
-COPY --chown=appuser:appuser plugins/ /app/plugins/
+COPY --chown=appuser:appuser App/plugins/ /app/plugins/
 RUN mkdir -p /app/data_store && chown -R appuser:appuser /app
 
 USER appuser

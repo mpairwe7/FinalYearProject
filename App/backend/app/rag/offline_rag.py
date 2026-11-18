@@ -10,7 +10,7 @@ Architecture::
                                                                │
                                               (optional) GGUF LLM ──▶ answer
 
-The offline bundle is exported via ``scripts/export_offline_bundle.py``
+The offline bundle is exported via ``App/scripts/export_offline_bundle.py``
 and contains:
 
 * ``faiss_index.bin``       — FAISS flat or IVF index (~30-80 MB)

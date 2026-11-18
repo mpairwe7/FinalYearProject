@@ -485,7 +485,7 @@ def patches_through_main() -> list[str]:
         return (isinstance(node, ast.Name) and node.id in {"main", "main_mod", "main_module"}) or (
             isinstance(node, ast.Attribute) and node.attr == "main" and isinstance(node.value, ast.Name))
 
-    files = subprocess.run(["git", "ls-files", "App/backend/tests/*.py", "tests/*.py"], cwd=repo,
+    files = subprocess.run(["git", "ls-files", "App/backend/tests/*.py", "App/tests/*.py"], cwd=repo,
                            capture_output=True, text=True, check=True).stdout.split()
     found = []
     for rel in files:

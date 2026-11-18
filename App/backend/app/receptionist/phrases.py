@@ -9,7 +9,7 @@ REVIEW STATUS: the Luganda and Swahili strings are drafts. They were written
 from the project's existing, reviewed copy where it existed (``glossary.py``,
 the ``lib/i18n`` dictionaries, ``text_signals`` courtesy replies) and have
 **not yet been checked by a native speaker**. Do not demo them before that
-review — see ``docs/runbooks/voice-receptionist-demo.md``. A missing key in a
+review — see ``App/docs/runbooks/voice-receptionist-demo.md``. A missing key in a
 language falls back to English rather than failing a call, and
 ``test_receptionist_phrases.py`` fails the build if any key is missing.
 """
@@ -33,7 +33,7 @@ UNSPOKEN: frozenset[str] = frozenset(
 
 _PHRASES: dict[str, dict[str, str]] = {
     "en": {
-        # The agreed line (docs/plans/multilingual-receptionist.md §1), plus
+        # The agreed line (App/docs/plans/multilingual-receptionist.md §1), plus
         # what a caller must hear first on an AI-answered line: that it is an
         # AI, and that a person is one request away.
         "greeting": (

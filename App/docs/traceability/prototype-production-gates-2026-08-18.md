@@ -1,8 +1,8 @@
 # Prototype gaps + production gates — 2026-08-18
 
 Traceability record for the remaining-gap close and the production
-activation layer. Pair with `docs/GAPS_AND_AGENTIC_ROADMAP.md` (living
-register) and `docs/PRODUCTION_GATES.md` (operator checklist). This file
+activation layer. Pair with `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` (living
+register) and `App/docs/PRODUCTION_GATES.md` (operator checklist). This file
 is the decision log: what shipped, why, how to re-verify, and what a
 later audit must not treat as a live URA integration.
 
@@ -31,7 +31,7 @@ stay default **off**.
 | Notifications | In-app inbox + mock outbox. `NOTIFICATION_LIVE` must stay false | No SES / Africa's Talking in this repo. |
 | Publications | https URL or offline fixture. Production forbids fixture. Never auto-`--recreate` | A laptop can ingest; an index rebuild stays an ops act. |
 | Seed data | `Data/eval/prototype_seed.json`; skipped in production and under pytest | Deterministic demo rows without polluting CI. |
-| Multi-tenant | Predicate + `infra/postgres/rls.sql`. Production needs `MULTI_TENANT_RLS_APPLIED=true` | The app filter is not Postgres RLS. |
+| Multi-tenant | Predicate + `App/infra/postgres/rls.sql`. Production needs `MULTI_TENANT_RLS_APPLIED=true` | The app filter is not Postgres RLS. |
 | DPO | Export pairs; `DPO_RUN` without `EVAL_GATE_OK` exits 2 | No trainer is wired. |
 | HPA / chaos | Example YAML + in-process drills only | Not applied to a cluster. |
 | Flag persist | `flag_overrides` on **this replica** | Cluster-wide still needs `FLAG_*`. |
@@ -48,11 +48,11 @@ How a later reviewer traces each feature from claim → code → gate → test.
 | G14 inbox / outbox | `notify.py`, `/v1/me/reminders`, `/admin/outbox` | `NOTIFICATION_LIVE` false | `test_remaining_gaps` | In-app live. Email/SMS not sent. |
 | G15 publications | `publications.py`, `publications-ingest.yml` | https URL | `test_malware_and_publications` | Fixture in demo. No auto-recreate. |
 | G28 red-team corpus | `guardrails.py`, `Data/eval/redteam_corpus.jsonl` | — | `test_redteam_corpus` | CI refuse-all on the corpus. |
-| G29 preference export | `evals/export_preferences.py`, `evals/dpo_job.py` | `EVAL_GATE_OK` | `test_remaining_gaps` | Export only. |
-| G30 tenancy | `tenancy.py`, `infra/postgres/rls.sql` | RLS ack | `tests/chaos` | Predicate shipped. RLS not auto-applied. |
+| G29 preference export | `App/evals/export_preferences.py`, `evals/dpo_job.py` | `EVAL_GATE_OK` | `test_remaining_gaps` | Export only. |
+| G30 tenancy | `tenancy.py`, `App/infra/postgres/rls.sql` | RLS ack | `App/tests/chaos` | Predicate shipped. RLS not auto-applied. |
 | G31 overrides | `cms.py`, `/admin/overrides` | `SEED_PROTOTYPE` false | `test_seed_prototype` | Exact-match CMS. |
 | G32 tickets | staff workbench + `ticket_queue` | flag must stay on | existing ticket suites | Shipped. |
-| G33 / G34 | `infra/k8s/*`, `tests/chaos/` | not a start blocker | `test_failure_modes`; envelope: `capacity-envelope-2026-08-19.md` | G33 p95 measured 2026-08-19; HPA/KEDA still not applied. G34 still deferred. |
+| G33 / G34 | `App/infra/k8s/*`, `App/tests/chaos/` | not a start blocker | `test_failure_modes`; envelope: `capacity-envelope-2026-08-19.md` | G33 p95 measured 2026-08-19; HPA/KEDA still not applied. G34 still deferred. |
 | Startup safety | `main._validate_production_env` | calls `gap_gate_errors()` | `test_production_hardening` (CI FastAPI) | Existing RS256 / OIDC / Postgres checks remain. |
 | Gap probe | `app/production_readiness.py` | CLI `--as-production` | `test_production_readiness` | Exit 2 lists blockers. |
 
@@ -64,13 +64,13 @@ every chat/stream/voice/WS turn still persists which flags served it
 
 | Area | Files |
 |------|-------|
-| Gates | `app/production_readiness.py` (new), `main.py`, `scripts/validate_env.py` |
+| Gates | `app/production_readiness.py` (new), `main.py`, `App/scripts/validate_env.py` |
 | Account | `ura_account_mock.py`, `tools/ura_account.py` |
 | Docs ingest | `publications.py`, `malware_scan.py`, `document_worker.py` |
 | Notify / CMS | `notify.py`, `cms.py`, `seed_prototype.py` |
-| Tenancy | `tenancy.py`, `infra/postgres/rls.sql` |
+| Tenancy | `tenancy.py`, `App/infra/postgres/rls.sql` |
 | Frontend | Settings sandbox card, `/admin/overrides`, `/admin/outbox` |
-| Docs | `docs/PRODUCTION_GATES.md`, this file, `GAPS_AND_AGENTIC_ROADMAP.md` §2.8 |
+| Docs | `App/docs/PRODUCTION_GATES.md`, this file, `GAPS_AND_AGENTIC_ROADMAP.md` §2.8 |
 
 ## 5. Flags and environment (2026-08-18)
 
@@ -101,10 +101,10 @@ PYTHONPATH=App/backend python3 -m pytest \
   App/backend/tests/test_seed_prototype.py \
   App/backend/tests/test_malware_and_publications.py \
   App/backend/tests/test_redteam_corpus.py \
-  tests/chaos/test_failure_modes.py -q
+  App/tests/chaos/test_failure_modes.py -q
 
 PYTHONPATH=App/backend python3 -m app.production_readiness --as-production
-python3 scripts/validate_env.py --env production
+python3 App/scripts/validate_env.py --env production
 ```
 
 Inventory (do not cite from memory):

@@ -1,4 +1,4 @@
-"""Trilingual multi-turn gate (G123): ``evals/multiturn_trilingual/scenarios.jsonl``.
+"""Trilingual multi-turn gate (G123): ``App/evals/multiturn_trilingual/scenarios.jsonl``.
 
 Each scenario is a conversation in English, Luganda and Swahili, replayed the
 way the server keeps one. Every turn is decided by the real language state
@@ -14,7 +14,7 @@ English form. The checks are:
 The client is modelled as the web client behaves: a language the taxpayer
 typed a request for, or picked, is their choice; any other answer language is
 only a hint. Deterministic, with no model: the live counterpart is
-``scripts/eval_multiturn_trilingual.py`` against the GPU stack.
+``App/scripts/eval_multiturn_trilingual.py`` against the GPU stack.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from app.guardrails.input_checks import REPLAY_WITHHELD, scan_replayed_text
 from app.memory.language_state import LanguageDecision, resolve_turn_locale
 from app.memory.extractor import FactExtractor
 
-SCENARIOS = Path(__file__).resolve().parents[3] / "evals" / "multiturn_trilingual" / "scenarios.jsonl"
+SCENARIOS = Path(__file__).resolve().parents[3] / "App" / "evals" / "multiturn_trilingual" / "scenarios.jsonl"
 
 
 def load_scenarios() -> list[dict[str, Any]]:

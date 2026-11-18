@@ -9,7 +9,7 @@ content in place rather than erroring on it). This is what populates the index
 ``HybridRetriever``'s Vectorize fallback queries, restoring real dense
 retrieval on Crane Cloud and the HF Space whenever their baked-in Qdrant
 collection is sparse-only (the CPU-only images ship no torch to compute dense
-vectors locally) — see ``docs/CLOUDFLARE_FALLBACKS.md``.
+vectors locally) — see ``App/docs/CLOUDFLARE_FALLBACKS.md``.
 
 Prerequisites (load the gitignored .env into the process env first so both this
 script *and* wrangler see the credentials, without printing them):

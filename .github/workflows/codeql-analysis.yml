@@ -45,7 +45,7 @@ jobs:
         include:
           - language: python
             build-mode: none
-            paths: "ml/,App/backend/"
+            paths: "App/ml/,App/backend/"
           - language: javascript-typescript
             build-mode: none
             paths: "App/frontend/"

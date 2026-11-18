@@ -16,7 +16,7 @@ from ..guardrails.pii import redact_pii_text
 logger = logging.getLogger(__name__)
 
 #: Columns added to ``voice_calls`` after it first shipped, for the officer's
-#: Call Desk (docs/plans/officer-call-desk-plan.md §5). Added by
+#: Call Desk (App/docs/plans/officer-call-desk-plan.md §5). Added by
 #: :func:`_ensure_columns` on startup, so an existing database keeps its rows.
 _CALL_DESK_COLUMNS: dict[str, str] = {
     "topic": "TEXT NOT NULL DEFAULT ''",

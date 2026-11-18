@@ -11,7 +11,7 @@
 version: 2
 updates:
   # =============================================================================
-  # CRAWLER - hash-locked, read-only job (ml/requirements-crawl.txt) -> Sunday 01:00 UTC
+  # CRAWLER - hash-locked, read-only job (App/ml/requirements-crawl.txt) -> Sunday 01:00 UTC
   # =============================================================================
   - package-ecosystem: "pip"
     directory: "/ml"

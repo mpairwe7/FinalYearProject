@@ -1,6 +1,6 @@
 """Tests for Luganda Receptionist Knowledge Parity, Cross-Lingual RAG Bridge, and Calibrated Escalations.
 
-Validates the implementation of docs/plans/luganda-receptionist-knowledge-parity-plan.md:
+Validates the implementation of App/docs/plans/luganda-receptionist-knowledge-parity-plan.md:
 - Direct cross-lingual understanding & English URA knowledge retrieval
 - Preservation of statutory figures (18% VAT, 2% late payment penalty, rental tax rates)
 - Voice-calibrated escalations: answering with officer offer on moderate confidence

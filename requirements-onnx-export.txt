@@ -14,13 +14,13 @@
 # toolchain gets its own environment and stays on transformers 4.x.
 #
 # Nothing imports these at serving time. The four call sites
-# (scripts/quantize_models.py, ml/scripts/{asr,mt,tts}/export_*_onnx.py) all
+# (App/scripts/quantize_models.py, App/ml/scripts/{asr,mt,tts}/export_*_onnx.py) all
 # import lazily inside try/except and already degrade to "skipping ONNX export"
 # when the package is absent, which is exactly what happens in the runtime env.
 #
 # Usage:
 #   python -m venv .venv-onnx && .venv-onnx/bin/pip install -r requirements-onnx-export.txt
-#   .venv-onnx/bin/python scripts/quantize_models.py ...
+#   .venv-onnx/bin/python App/scripts/quantize_models.py ...
 #
 # RESIDUAL RISK — read before using this file.
 #

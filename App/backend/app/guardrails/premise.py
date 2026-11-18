@@ -305,7 +305,7 @@ _INTERROGATIVE_PREFIX = re.compile(
 #: "audit", "arrears", "liability", "dispute", "objection", "obligations",
 #: "certificate") do not belong here: G224 added them and fabricated-tax recall
 #: fell from 19/19 to 5/19 on the probe set in
-#: tests/agents/test_premise_guard_recall.py, while the benchmark it targeted
+#: App/tests/agents/test_premise_guard_recall.py, while the benchmark it targeted
 #: stayed at 0 false positives without them (G244). Qualifiers belong in
 #: ``_STOP_AND_ACTION_WORDS`` instead, which costs no recall.
 _NON_TAX_NOUN_FOLLOWERS = re.compile(

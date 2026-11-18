@@ -52,7 +52,7 @@ export interface CallRecord {
   officer_id: string | null;
   officer_rating: number | null;
   officer_note: string | null;
-  // Officer Call Desk (docs/plans/officer-call-desk-plan.md §5). Optional:
+  // Officer Call Desk (App/docs/plans/officer-call-desk-plan.md §5). Optional:
   // rows written before the columns existed read back with their defaults.
   /** Handoff-packet topic key, e.g. `objection_or_dispute`; '' until transferred. */
   topic?: string;
@@ -92,7 +92,7 @@ export interface BriefClaim {
   turn_seqs: number[];
 }
 
-/** The officer's brief (docs/plans/officer-call-desk-plan.md §6.2). Always English. */
+/** The officer's brief (App/docs/plans/officer-call-desk-plan.md §6.2). Always English. */
 export interface CallBrief {
   why_officer: BriefClaim | null;
   caller_goal: BriefClaim;

@@ -7,7 +7,7 @@ permissions:
 
 # checkov:skip=CKV_GHA_7:The dispatch inputs only select which load PHASE to
 # run and at what concurrency (smoke/load/volume/spike/stress, VU counts). They
-# are read solely as CLI arguments to tests/load/tax_education_load_suite.py,
+# are read solely as CLI arguments to App/tests/load/tax_education_load_suite.py,
 # which sends HTTP requests to an already-deployed target and writes a JSON
 # report. This workflow builds no artifact and publishes nothing, so there is
 # no build-provenance surface a caller-supplied value could influence.
@@ -20,7 +20,7 @@ on:
     paths:
       - "App/backend/**"
       - "App/frontend/**"
-      - "tests/load/tax_education_load_suite.py"
+      - "App/tests/load/tax_education_load_suite.py"
       - ".github/workflows/tax-education-load-tests.yml"
   # Weekly full suite on Sunday 07:00 UTC (after dependabot at 06:00)
   schedule:
@@ -88,7 +88,7 @@ jobs:
         id: smoke
         run: |
           mkdir -p results
-          python3 tests/load/tax_education_load_suite.py \
+          python3 App/tests/load/tax_education_load_suite.py \
             --phase smoke \
             --out results/smoke_${{ github.run_id }}.json \
             --verbose
@@ -204,7 +204,7 @@ jobs:
         id: suite
         run: |
           mkdir -p results
-          python3 tests/load/tax_education_load_suite.py \
+          python3 App/tests/load/tax_education_load_suite.py \
             --phase ${{ steps.params.outputs.phase }} \
             --vu ${{ steps.params.outputs.vu }} \
             --sessions ${{ steps.params.outputs.sessions }} \

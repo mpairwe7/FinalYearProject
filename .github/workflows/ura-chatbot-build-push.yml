@@ -5,7 +5,7 @@
 # and pushes to Docker Hub as `landwind/ura-chatbot:<tag>`.  Mirrors the
 # HealthSyncUganda build-push.yml shape but targets Docker Hub instead of
 # GHCR because the URA chatbot image is published under the `landwind`
-# Docker Hub namespace (see docs/CRANE_CLOUD_DEPLOYMENT.md §3).
+# Docker Hub namespace (see App/docs/CRANE_CLOUD_DEPLOYMENT.md §3).
 #
 # Triggers:
 #   * push to dev / main             → tags: <branch>, sha-<short>
@@ -116,13 +116,13 @@ jobs:
       # written only by this workflow, which runs on push to dev/main/v* and on
       # maintainer dispatch; the repo has no pull_request_target, issue_comment
       # or other untrusted-input workflow that could write a cache on those
-      # refs (tests/test_ci_supply_chain_policy.py keeps it that way).
+      # refs (App/tests/test_ci_supply_chain_policy.py keeps it that way).
       - name: Cache the PDF chunk corpus
         id: pdf-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/pdf_jsonl
-          key: pdf-jsonl-v2-${{ hashFiles('Data/pdfs/**', 'App/backend/app/ingestion/pdf_corpus.py', 'ml/scripts/data_aug/chunkers.py') }}
+          key: pdf-jsonl-v2-${{ hashFiles('Data/pdfs/**', 'App/backend/app/ingestion/pdf_corpus.py', 'App/ml/scripts/data_aug/chunkers.py') }}
 
       - name: Export corpora
         working-directory: App/backend

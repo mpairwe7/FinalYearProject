@@ -64,7 +64,7 @@ SNAC_DEVICE = os.getenv("ORPHEUS_SNAC_DEVICE", "cuda")
 MAX_TOKENS = int(os.getenv("ORPHEUS_MAX_TOKENS", "1200"))
 # "fp8" = weight-only FP8 (Marlin kernels on Ampere). Decoding a 3B model is
 # memory-bound, and at bf16 an RTX A6000 generates at ~0.96x real time — no
-# headroom for a second caller. See evals/reports/orpheus_tts_*.json.
+# headroom for a second caller. See App/evals/reports/orpheus_tts_*.json.
 QUANTIZATION = os.getenv("ORPHEUS_QUANTIZATION", "").strip() or None
 
 # Complete official speaker catalog from Sunbird/orpheus-3b-tts-multilingual model card (20 configs).

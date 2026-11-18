@@ -80,7 +80,7 @@ This release closes critical customer experience (CX) and operational gaps ident
   - **Upgraded Staff Workbench (`/admin/connectors`)**: Added an **"+ Add Connector"** modal dialog, live diagnostic ping button with real-time RTT latency badges (`✓ Ping OK (12 ms · 4 MCP tools)`), settings modal, and visual environment indicators (`Live Production` vs `Simulation Mode`).
   - **Public Composer Clarification**: Public chat attachments focus strictly on document uploads (PDF, Word, Excel, CSV) and camera capture, while connector infrastructure is managed through `/admin/connectors` behind `StaffGuard`.
 
-**Current behavior (2026-10-07):** The earlier workbench description above is superseded by the screenshot and connector-flow review. Built-in connector rows are explicitly labeled local simulations, **Test connection** checks local health, and the Add/Details dialogs provide deployment guidance. `POST /v1/connectors/register` and `POST /v1/connectors/{name}/configure` now fail closed with `410 Gone`; new server endpoints and credentials are supplied through reviewed deployment configuration. The screenshot flow now carries backend screenshot guidance into chat, uses a general image prompt for image attachments, and labels interpretation as potentially incomplete. See `docs/runbooks/enterprise-connectors-and-mcp.md` for the current connector procedure.
+**Current behavior (2026-10-07):** The earlier workbench description above is superseded by the screenshot and connector-flow review. Built-in connector rows are explicitly labeled local simulations, **Test connection** checks local health, and the Add/Details dialogs provide deployment guidance. `POST /v1/connectors/register` and `POST /v1/connectors/{name}/configure` now fail closed with `410 Gone`; new server endpoints and credentials are supplied through reviewed deployment configuration. The screenshot flow now carries backend screenshot guidance into chat, uses a general image prompt for image attachments, and labels interpretation as potentially incomplete. See `App/docs/runbooks/enterprise-connectors-and-mcp.md` for the current connector procedure.
 
 ### 2.7 October 2026 Standards Hardening: Blast Radius, Vaulting, and Saga Compensation
 * **OWASP LLM06 Excessive Agency Mitigation (`App/backend/app/mcp/policy.py`)**:
@@ -89,7 +89,7 @@ This release closes critical customer experience (CX) and operational gaps ident
 * **OpenTelemetry 1.30+ W3C Distributed Tracing (`App/backend/app/observability/tracing.py`)**:
   - Implemented `generate_w3c_traceparent()` and `inject_trace_context()` to propagate standard W3C `traceparent` headers into outbound connector requests.
   - Added `trace_tool_call()` adhering to `gen_ai.system`, `gen_ai.tool.name`, and `gen_ai.tool.call.id` semconv.
-* **Anthropic MCP Resources Primitive & Universal Saga Compensation (`plugins/base.py`)**:
+* **Anthropic MCP Resources Primitive & Universal Saga Compensation (`App/plugins/base.py`)**:
   - Added `MCPResource` schema and `get_resources()` / `read_resource()` on `SystemConnector` to standardize read-only data access without LLM tool-call loops.
   - Added `compensate_action()` interface on `SystemConnector` to standardize automated rollback (e.g. issuing offsetting EFRIS credit notes or cancelling PRNs).
 * **NIST SP 800-57 Token Vaulting (`App/backend/app/auth/vault.py`)**:

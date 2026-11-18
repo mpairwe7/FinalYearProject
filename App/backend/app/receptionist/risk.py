@@ -1,6 +1,6 @@
 """Call Desk Phase 3: Live call risk signals and queue marker detection.
 
-Evaluates each caller turn for risk factors (docs/plans/officer-call-desk-plan.md §6.6):
+Evaluates each caller turn for risk factors (App/docs/plans/officer-call-desk-plan.md §6.6):
 - ≥ 2 clarifications
 - repeated question (normalized similarity ≥ 0.8 with an earlier caller turn)
 - distress (text_signals.detect_user_distress or sentiment)

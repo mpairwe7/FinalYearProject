@@ -1,0 +1,596 @@
+# promtool unit tests for App/monitoring/{recording,alerting}-rules.yml.
+#   docker run --rm -v "$PWD/monitoring:/m:ro" -w /m --entrypoint promtool \
+#     prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
+# Each case pins a failure the old rules had (see App/docs/GAPS_AND_AGENTIC_ROADMAP.md G99).
+rule_files:
+  - ../recording-rules.yml
+  - ../alerting-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 5% of requests are 5xx: the fast availability burn fires.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+95x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="500"}'
+        values: '0+5x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "5xx responses are burning the 99.9% availability budget fast"
+              description: "At this rate the 30-day error budget is gone within days (1h/5m or 6h/30m window pair above threshold)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#high-error-rate"
+
+  # A single 500 among thousands of requests is not an outage. The old rule
+  # divided each error series by its own request series and saw 100%.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+1000x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="500"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts: []
+
+  # 404s from scanners and 401s from unauthenticated callers are client
+  # errors; they do not spend the availability budget.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="GET",path="__unmatched__",status="404"}'
+        values: '0+500x80'
+      - series: 'ura_http_requests_total{method="GET",path="/metrics",status="401"}'
+        values: '0+50x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+100x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts: []
+
+  # Half the chat turns take longer than 3 s for 7 hours: the latency budget
+  # burns. The old rule selected path="/v1/chat" on a histogram with no path
+  # label and could never fire.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_response_time_ms_bucket{channel="sse",mode="hybrid",le="3000.0"}'
+        values: '0+50x430'
+      - series: 'ura_chat_response_time_ms_bucket{channel="sse",mode="hybrid",le="+Inf"}'
+        values: '0+100x430'
+      - series: 'ura_chat_response_time_ms_count{channel="sse",mode="hybrid"}'
+        values: '0+100x430'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: UraChatLatencyBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "Too many chat turns are slower than 3 s"
+              description: "The share of turns over the NFR-01 3 s objective is burning the 5% latency budget fast."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#slow-responses"
+    promql_expr_test:
+      - expr: ura:chat_turns_slow:ratio_rate1h
+        eval_time: 7h
+        exp_samples:
+          - labels: 'ura:chat_turns_slow:ratio_rate1h'
+            value: 0.5
+
+  # The scrape fails (API down, or the scrape token rejected with 401).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="ura-api",instance="api:8000"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: UraApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+              job: ura-api
+              instance: "api:8000"
+            exp_annotations:
+              summary: "The API cannot be scraped"
+              description: "Prometheus has not read /metrics for 2 minutes: the API is down, or the scrape token is wrong (401)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#api-down-or-unscrapeable"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_audit_chain_breaks_total{scope="full"}'
+        values: '0 0 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: AuditChainBreakDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: security
+              scope: full
+            exp_annotations:
+              summary: "The audit trail failed its integrity check"
+              description: "An event or a seal no longer matches its fingerprint. Treat as a security incident: snapshot the database before anything else and do not seal."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/audit-trail.md#when-the-check-fails"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_eval_metric_passed{name="faithfulness"}'
+        values: '0x10'
+      - series: 'ura_eval_metric_passed{name="answer_relevancy"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraEvalRegression
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+              name: faithfulness
+            exp_annotations:
+              summary: "Online evaluation below threshold: faithfulness"
+              description: "The scheduled evaluation of recent conversations reported faithfulness under its threshold."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#online-evaluation"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="authn_login_fail"}'
+        values: '0+120x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AuthenticationFailureSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Sustained authentication failures (> 1/s)"
+              description: "Possible credential stuffing or an expired IdP signing key. Read the authn_login_fail log events."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#security-events"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_strike_cooldown"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: GuardrailProbingCampaign
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Repeated guardrail cool-downs"
+              description: "Three or more guard-strike cool-downs started within 15 minutes. One principal can start several; group the guardrail_strike_cooldown log events by their hashed principal to tell one prober from many."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/ai-security-guardrails.md#a-probing-campaign"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_strike_cooldown"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: GuardrailProbingCampaign
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_untrusted_link"}'
+        values: '0+2x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: IndirectInjectionOrUntrustedLinkSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Injected instructions or untrusted links are reaching the model"
+              description: "More than 20 scrubbed passages, tool results, uploads or de-linked answer URLs in an hour. A poisoned source or a prompt-injection campaign is likely; read the guardrail_indirect_injection and guardrail_untrusted_link log events for their reason."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/ai-security-guardrails.md#injected-content-or-untrusted-links"
+
+  - interval: 5m
+    input_series:
+      - series: 'ura_retention_last_success_timestamp_seconds'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: RetentionJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "Retention cleanup has not succeeded for 3 hours"
+              description: "RETENTION_CLEANUP_INTERVAL_SECONDS is 1h by default."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#retention"
+
+  # Containment: 80 answered, 10 escalated, 10 abstained per minute.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_turns_total{channel="sse",outcome="answered"}'
+        values: '0+80x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="escalated"}'
+        values: '0+10x90'
+      - series: 'ura_chat_turns_total{channel="ws",outcome="abstained"}'
+        values: '0+10x90'
+    promql_expr_test:
+      - expr: round(ura:chat_turns:containment_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 80
+      - expr: round(ura:chat_turns:escalation_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 10
+
+  # Every checked reply passed, so no reject series exists: the ratio is 0, not missing.
+  - interval: 1m
+    input_series:
+      - series: 'ura_figure_lock_checks_total{mode="shadow",outcome="pass"}'
+        values: '0+10x1500'
+    promql_expr_test:
+      - expr: sum(ura:figure_lock:shadow_reject_ratio_1d)
+        eval_time: 1441m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  # A breaker open past its window names itself; one that recovers does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'ura_circuit_breaker_state{breaker="llm"}'
+        values: '2x30'
+      - series: 'ura_circuit_breaker_state{breaker="gemini_flash"}'
+        values: '2 2 2 0x27'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CircuitBreakerOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+              breaker: llm
+            exp_annotations:
+              summary: "A circuit breaker has not closed for 10 minutes"
+              description: "No call has shown the dependency is back, so turns may be falling back or degrading. The state only moves when a call arrives, so on a quiet worker this can mean nothing has tried since the back-off ended. Check the dependency the breaker names."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/agent-fault-tolerance.md#circuit-breaker-open"
+
+  # One fault is enough: a gate that cannot decide is failing closed for writes.
+  - interval: 1m
+    input_series:
+      - series: 'ura_autonomy_gate_faults_total{stage="audit"}'
+        values: '0 0 0 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: AutonomyGateFaulting
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: security
+            exp_annotations:
+              summary: "The autonomy gate could not decide, or could not record a refusal"
+              description: "Writes are failing closed. Reads continue. Refusals may be missing from the ledger."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/agent-fault-tolerance.md#autonomy-gate-faulting"
+
+  # Containment is measured over turns that reached an end: a cancelled turn says
+  # nothing about the answer, so closing a tab must not read as worse containment.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_turns_total{channel="sse",outcome="answered"}'
+        values: '0+80x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="escalated"}'
+        values: '0+20x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="cancelled"}'
+        values: '0+100x90'
+    promql_expr_test:
+      - expr: round(ura:chat_turns:containment_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 80
+
+  # A corpus last read 39 days ago is stale, whatever its own index says.
+  - interval: 1m
+    input_series:
+      - series: 'ura_crawl_last_full_run_timestamp_seconds'
+        values: '-3369600x180'   # 39 days before the epoch this test starts from
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: UraCrawlCorpusStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+            exp_annotations:
+              summary: "The corpus in production has not been checked against ura.go.ug for over 38 days"
+              description: "The crawl is failing, a proposal is waiting for a person, or no release has shipped one. Taxpayers may be getting superseded guidance."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/crawl-operations.md#the-corpus-is-stale"
+
+  # A crawl from 30 days ago is on time: the alert must stay quiet.
+  - interval: 1m
+    input_series:
+      - series: 'ura_crawl_last_full_run_timestamp_seconds'
+        values: '-2592000x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: UraCrawlCorpusStale
+        exp_alerts: []
+
+  # Pages kept for a person to read raise a flag even though taxpayers are safe.
+  - interval: 1m
+    input_series:
+      - series: 'ura_crawl_quarantined_pages'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCrawlPagesQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "A crawled page held instructions aimed at a model"
+              description: "The page was kept out of the corpus. Someone needs to find out whether ura.go.ug was tampered with."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/crawl-operations.md#a-page-was-quarantined"
+
+
+  # The receptionist is switched on and did not start: calls are refused, and
+  # somebody is paged, while the chat keeps answering.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_available'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraReceptionistUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "Phone calls are switched on and cannot be taken"
+              description: "The receptionist is enabled and did not start, so every call is refused. The chat is unaffected. /ready gives the reason under capabilities.voice_receptionist."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # A receptionist that started is not an incident.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_available'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraReceptionistUnavailable
+        exp_alerts: []
+
+  # Ten callers turned away in ten minutes, whatever the reason.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_refused_total{reason="capacity"}'
+        values: '0+1x30'
+      - series: 'ura_receptionist_calls_refused_total{reason="unavailable"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallsRefused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+              reason: capacity
+            exp_annotations:
+              summary: "Callers are being turned away"
+              description: "Calls were refused before they began, for reason capacity: unavailable (the receptionist could not start), not_configured (production is not set up for calls) or capacity (every call slot is taken)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # One refused call is not a pattern.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_refused_total{reason="capacity"}'
+        values: '0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallsRefused
+        exp_alerts: []
+
+  # The recognizer fails on every utterance for a quarter of an hour.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_failures_total{stage="stt"}'
+        values: '0+1x30'
+      - series: 'ura_receptionist_call_failures_total{stage="record"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallSpeechFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+            exp_annotations:
+              summary: "Calls cannot hear or cannot speak"
+              description: "The recognizer or the voice failed on live calls. Callers are asked to repeat themselves and then transferred, to the officers' queue when it is on."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # A failed record write is counted, and is not a speech failure.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_failures_total{stage="stt"}'
+        values: '0x30'
+      - series: 'ura_receptionist_call_failures_total{stage="record"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallSpeechFailing
+        exp_alerts: []
+
+  # Calls ending because the media pipeline stopped, not because anyone hung up.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_ended_total{reason="media_pipeline_stopped"}'
+        values: '0+1x40'
+      - series: 'ura_receptionist_calls_ended_total{reason="caller_hangup"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: UraCallsEndingOnFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+            exp_annotations:
+              summary: "Calls are ending because the service failed"
+              description: "Calls ended on a speech or media failure rather than because the caller or an officer hung up."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # A busy day of ordinary hang-ups is not a failure.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_ended_total{reason="media_pipeline_stopped"}'
+        values: '0x40'
+      - series: 'ura_receptionist_calls_ended_total{reason="caller_hangup"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: UraCallsEndingOnFailure
+        exp_alerts: []
+
+  # nginx sent a call request to the chat process, which refused it: the
+  # routing and the call-path list have drifted apart.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_misrouted_total{kind="http"}'
+        values: '0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+      - series: 'ura_receptionist_misrouted_total{kind="websocket"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: UraCallMisrouted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+              kind: http
+            exp_annotations:
+              summary: "A call request reached the chat process"
+              description: "nginx sent a http call request to the chat process, which refused it: the routing in nginx.conf and the call-path list have drifted (ADR-0043)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # Both kinds declared at 0 and never moving: nothing reached the wrong process.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_misrouted_total{kind="http"}'
+        values: '0x30'
+      - series: 'ura_receptionist_misrouted_total{kind="websocket"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallMisrouted
+        exp_alerts: []
+
+  # The chat process cannot reach the call process for ten minutes: every call
+  # fails while chat, /health and /ready keep answering (G614).
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_process_up'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCallProcessDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "The call process is not answering"
+              description: "The chat process cannot reach the call process's /ready, or gets no usable answer from it, so every call fails while chat keeps answering (G614, ADR-0043)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#call-receptionist"
+
+  # A call process that answers is not an incident.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_process_up'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCallProcessDown
+        exp_alerts: []
+
+  # Luganda abstains 40% against English's 10%: the parity alert names Luganda.
+  # Swahili never abstains, so its ratio is 0, not missing, and it stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'ura_locale_turns_total{locale="en",outcome="answered"}'
+        values: '0+9x200'
+      - series: 'ura_locale_turns_total{locale="en",outcome="abstained"}'
+        values: '0+1x200'
+      - series: 'ura_locale_turns_total{locale="lg",outcome="answered"}'
+        values: '0+6x200'
+      - series: 'ura_locale_turns_total{locale="lg",outcome="abstained"}'
+        values: '0+4x200'
+      - series: 'ura_locale_turns_total{locale="sw",outcome="answered"}'
+        values: '0+1x200'
+      - series: 'ura_locale_escalations_total{locale="lg"}'
+        values: '0+4x200'
+    promql_expr_test:
+      - expr: round(ura:locale_turns:escalation_ratio_1h * 100)
+        eval_time: 90m
+        exp_samples:
+          - labels: '{locale="en"}'
+            value: 0
+          - labels: '{locale="lg"}'
+            value: 40
+          - labels: '{locale="sw"}'
+            value: 0
+      - expr: round(ura:locale_turns:abstention_ratio_1h * 100)
+        eval_time: 90m
+        exp_samples:
+          - labels: '{locale="en"}'
+            value: 10
+          - labels: '{locale="lg"}'
+            value: 40
+          - labels: '{locale="sw"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: UraLanguageAbstentionGap
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: UraLanguageAbstentionGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+              locale: lg
+            exp_annotations:
+              summary: "Abstention in lg is more than 15 points above English"
+              description: "Taxpayers who write in lg get no answer far more often than those who write in English, on at least 20 turns an hour. Look for a retrieval or translation gap in that language."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/MONITORING.md#language-parity"
+
+  # One input token a minute and one turn every 400 minutes: 400 input and 100 output tokens per turn.
+  - interval: 1m
+    input_series:
+      - series: 'ura_llm_tokens_total{provider="sunbird",model="sunflower-9b",operation="chat",type="input"}'
+        values: '0+1x2000'
+      - series: 'ura_llm_tokens_total{provider="sunbird",model="sunflower-9b",operation="chat",type="output"}'
+        values: '0+0.25x2000'
+      - series: 'ura_chat_turns_total{channel="rest",outcome="answered"}'
+        values: '0+0.0025x2000'
+    promql_expr_test:
+      - expr: round(ura:llm_tokens_per_turn:rate1d)
+        eval_time: 1500m
+        exp_samples:
+          - labels: '{provider="sunbird",model="sunflower-9b",type="input"}'
+            value: 400
+          - labels: '{provider="sunbird",model="sunflower-9b",type="output"}'
+            value: 100

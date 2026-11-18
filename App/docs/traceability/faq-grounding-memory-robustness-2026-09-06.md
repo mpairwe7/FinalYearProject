@@ -40,7 +40,7 @@
 
 ## 2. Benchmark & Live Tunnel Evaluation
 
-Evaluation was executed over the public ngrok tunnel (`https://struttingly-nongeological-briella.ngrok-free.dev`) using `scripts/exhaustive_volume_spike_eval.py`:
+Evaluation was executed over the public ngrok tunnel (`https://struttingly-nongeological-briella.ngrok-free.dev`) using `App/scripts/exhaustive_volume_spike_eval.py`:
 
 | Phase | Metric | Value | Status |
 |---|---|:---:|:---:|

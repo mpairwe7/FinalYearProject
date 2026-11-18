@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-from .._root import PROJECT_ROOT as _root
+from .._root import CODE_ROOT as _root
 
 logger = logging.getLogger(__name__)
 

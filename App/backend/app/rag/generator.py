@@ -14,7 +14,7 @@ LLM_BACKEND=vllm is materially faster than LLM_BACKEND=local: vLLM
 auto-selects the Marlin weight-only-FP8 kernel (~42 tok/s measured)
 vs. this module's naive per-layer FP8->bf16 dequant via
 transformers/compressed-tensors (~4.5-5 tok/s). See
-docs/MODEL_SWAP_GUIDE.md for the full comparison.
+App/docs/MODEL_SWAP_GUIDE.md for the full comparison.
 
 Supports both synchronous and streaming (SSE) generation via HuggingFace
 transformers with TextIteratorStreamer, or high-throughput vLLM serving.
@@ -30,7 +30,7 @@ air-gapped or privacy-sensitive deployments.
     - scan_retrieved_text() on every passage before prompt assembly
     - fence_spotlight_body() so a passage cannot close its own marker (ADR-0027)
 
-Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
+Model swap guide: see App/docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
 Environment variables:
     LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-Qwen3.5-9B)

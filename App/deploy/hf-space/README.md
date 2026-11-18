@@ -21,6 +21,6 @@ under supervisord and listens on port 8080 (`app_port` above).
   (`en-US-AriaNeural`) for English.
 - **Translation:** Gemini (`gemini_flash`) via the Cloudflare AI Gateway.
 - **Config:** supplied as Space **secrets**, mirroring the Crane Cloud app's
-  environment (see `App/deploy/hf-space/` and `docs/CRANE_CLOUD_DEPLOYMENT.md` §7).
+  environment (see `App/deploy/hf-space/` and `App/docs/CRANE_CLOUD_DEPLOYMENT.md` §7).
 
 To roll to a newer image, bump the `FROM` tag in `Dockerfile`.

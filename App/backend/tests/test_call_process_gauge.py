@@ -295,7 +295,7 @@ class ChatLifespanLoopTests(unittest.TestCase):
 
 class MonitoringCatalogueTests(unittest.TestCase):
     def test_the_gauge_is_a_literal_set_gauge_min_call(self) -> None:
-        # tests/test_monitoring_config.py reads literal metrics.<kind>("name", ...)
+        # App/tests/test_monitoring_config.py reads literal metrics.<kind>("name", ...)
         # calls under app/ to decide which series an alert may name; a name held
         # in a variable would leave UraCallProcessDown naming a series "never exported".
         text = Path(process_role.__file__).read_text(encoding="utf-8")

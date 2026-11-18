@@ -20,13 +20,13 @@ consumption), NIST SSDF PW.5 / PW.6.
 | P0 — PDF structure | Fail-closed header, encryption, active-content, xref, and page-edge checks before extract/OCR. Index-time export skips a file that fails the same inspector. | `backend/app/guardrails/pdf.py`, `documents.py`, `ingestion/pdf_corpus.py` | `backend/tests/test_pdf_guards.py` |
 | P1 — Office / image | Reject zip-slip, encrypted ZIP, and `vbaProject.bin`; drop `.xlsm`. Pillow pixel cap. OCR sidecar magic-byte reject. | `documents.py`, `ocr_service.py`, `frontend/src/lib/attachments.ts` | Office + filename tests in `test_pdf_guards.py` |
 | P2 — Indirect injection | Scrub extracted text with `scan_retrieved_text`; wrap attachment passages in `<untrusted_user_document>`; system rule that uploads are evidence only. | `documents.py`, `rag/generator.py`, `guardrails.py` | Scrub + wrapper tests in `test_pdf_guards.py` / `test_documents.py` |
-| P3 — Threat model | Living registry T21–T28; document DFD nodes in pytm; LLM06 now mapped. | `threat-model/validate_threats.py`, `threat-model/tm.py` | `python threat-model/validate_threats.py` |
+| P3 — Threat model | Living registry T21–T28; document DFD nodes in pytm; LLM06 now mapped. | `App/threat-model/validate_threats.py`, `App/threat-model/tm.py` | `python App/threat-model/validate_threats.py` |
 
 ## Verification (this session)
 
 | Check | Result |
 | --- | --- |
-| `python threat-model/validate_threats.py` | Re-verified 2026-08-17: PASSED. 28 threats (T01–T28, no duplicate ids), 27 mitigated, 1 accepted (T21). STRIDE 6/6. OWASP LLM 10/10. ATLAS 19 mappings / 10 unique. All evidence paths exist. |
+| `python App/threat-model/validate_threats.py` | Re-verified 2026-08-17: PASSED. 28 threats (T01–T28, no duplicate ids), 27 mitigated, 1 accepted (T21). STRIDE 6/6. OWASP LLM 10/10. ATLAS 19 mappings / 10 unique. All evidence paths exist. |
 | `tests/test_pdf_guards.py tests/test_pdf_corpus.py` | Re-verified 2026-08-17: **41 passed** (Python 3.12.8). Includes live PyMuPDF cases plus slim-profile skip and inspect-warning propagation onto the analysis record. |
 | `tests/test_documents.py` | Still not collected in this environment (`slowapi` missing from the system interpreter). Filename, scrub, wrapper, and `.xlsm` assertions are also in `test_pdf_guards.py`. |
 | ClamAV / malware scan | Not claimed. Application-level parsers still share the API worker. |

@@ -1,6 +1,6 @@
 """The officer's side of a live call: take it, join it, give it back, end it.
 
-The staff console's Call Desk (docs/plans/officer-call-desk-plan.md §6.3)
+The staff console's Call Desk (App/docs/plans/officer-call-desk-plan.md §6.3)
 drives these through ``/v1/admin/calls/{call_id}/…`` routes and the officer
 audio socket. Rules they share:
 

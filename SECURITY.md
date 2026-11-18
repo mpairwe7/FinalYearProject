@@ -47,7 +47,7 @@ Four independent secret scanners run at both pre-commit (local) and CI (remote) 
 | Gitleaks v8 | Regex + entropy + custom rules | 150+ rules + URA custom | `.gitleaks.toml` |
 | detect-secrets (Yelp) | Entropy + baseline comparison | Generic high-entropy | `.secrets.baseline` |
 
-- **Pre-commit hooks**: All 4 scanners run locally before every commit (setup: `bash scripts/setup-secret-scanning.sh`)
+- **Pre-commit hooks**: All 4 scanners run locally before every commit (setup: `bash App/scripts/setup-secret-scanning.sh`)
 - **CI pipeline**: `.github/workflows/secret-scanning.yml` runs all scanners on push, PR, and weekly full-history scan
 - **Summary gate**: All scanners must pass; ggshield gracefully skips on forks without API key
 - **Custom rules** (`.gitleaks.toml`): Uganda PII (TIN, NIN, mobile), ML API keys (HuggingFace, Kaggle, OpenAI, Google AI, W&B), mobile secrets (Firebase, Android keystore)
@@ -72,7 +72,7 @@ Automated threat modelling runs in CI via `.github/workflows/devsecops-sast-dast
 | Component | Tool | Purpose |
 |-----------|------|---------|
 | **Architecture model** | [pytm](https://github.com/OWASP/pytm) | DFD generation, STRIDE per-element threat analysis |
-| **Threat registry** | `threat-model/validate_threats.py` | 34 threats with evidence-based mitigation validation (33 mitigated, T21 accepted) |
+| **Threat registry** | `App/threat-model/validate_threats.py` | 34 threats with evidence-based mitigation validation (33 mitigated, T21 accepted) |
 | **STRIDE coverage** | Automated | 6/6 categories (Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation) |
 | **OWASP LLM mapping** | Registry | 10/10 LLM Top 10 vulnerabilities mapped to mitigations |
 | **MITRE ATLAS** | Registry | 19 mappings / 10 unique AML.T* techniques |
@@ -106,7 +106,7 @@ The May 2026 CI update keeps PRs blocking on actionable security findings while 
 | Checkov | IaC scan runs and uploads artifacts; SARIF upload is reserved for non-PR events |
 | Semgrep | SAST runs and uploads SARIF when available |
 | pip-audit | Root and `App/backend` Python dependency audits run |
-| Threat model | `threat-model/validate_threats.py` remains a blocking PR gate |
+| Threat model | `App/threat-model/validate_threats.py` remains a blocking PR gate |
 | OWASP ZAP | Skips on PR; runs on push, schedule, or manual dispatch against the CI API target on port `8087` with speech and LLM disabled for deterministic DAST startup |
 | OSSF Scorecard | Skips on PR; runs only when default-branch repository context is available, preventing branch manual-dispatch failures |
 | ML image publishing | Skips on PR; Trivy image validation is path-scoped on PRs and full on protected branch, schedule, and manual runs |

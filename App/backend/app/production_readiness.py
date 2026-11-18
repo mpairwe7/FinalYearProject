@@ -157,7 +157,7 @@ FULL_DELIVERY: dict[str, str] = {
         "is wired; the job still exits 2."
     ),
     "G30": (
-        "Apply infra/postgres/rls.sql on the production database, then set "
+        "Apply App/infra/postgres/rls.sql on the production database, then set "
         "MULTI_TENANT_RLS_APPLIED=true. The predicate alone is not RLS."
     ),
     "G31": (
@@ -165,8 +165,8 @@ FULL_DELIVERY: dict[str, str] = {
         "staff corrections. SEED_PROTOTYPE must stay false."
     ),
     "G33": (
-        "Measured p95 is in docs/runbooks/capacity-slo.md "
-        "(2026-08-19, one A6000). Apply infra/k8s/hpa-chat.yaml and "
+        "Measured p95 is in App/docs/runbooks/capacity-slo.md "
+        "(2026-08-19, one A6000). Apply App/infra/k8s/hpa-chat.yaml and "
         "keda-chat.yaml only after agreeing the hybrid vs blended SLI; "
         "do not invent replica counts."
     ),
@@ -265,7 +265,7 @@ def _tenancy_errors() -> list[str]:
     if not _truthy("MULTI_TENANT_RLS_APPLIED"):
         return [
             "G30: MULTI_TENANT_RLS_APPLIED=true is required in production "
-            "(apply infra/postgres/rls.sql; the app predicate is not RLS)."
+            "(apply App/infra/postgres/rls.sql; the app predicate is not RLS)."
         ]
     return []
 

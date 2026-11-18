@@ -1,7 +1,7 @@
 """Staff officer presence tracking for the Call Desk.
 
 Tracks available, busy, away, on_call, wrap_up, and offline states across
-officers (docs/plans/officer-call-desk-plan.md §5, §6.4). An officer's status
+officers (App/docs/plans/officer-call-desk-plan.md §5, §6.4). An officer's status
 is computed as offline on read when their last heartbeat is older than
 ``RECEPTIONIST_PRESENCE_TTL_S`` (60 s).
 

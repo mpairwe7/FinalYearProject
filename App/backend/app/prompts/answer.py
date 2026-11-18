@@ -114,7 +114,7 @@ structure to the answer's length (see Rule 6) — never over-format.
 #: for passages, uploads and history, and honesty about simulated connectors.
 #: It leaves out what a general model does not need (the Qwen ``/no_think``
 #: switch, formatting minutiae) so the passages keep the attention budget
-#: (ADR-0030, G475). ``tests/agents/test_harness_prompt_contract.py`` holds
+#: (ADR-0030, G475). ``App/tests/agents/test_harness_prompt_contract.py`` holds
 #: each rule in place.
 CLOUD_SYSTEM_PROMPT = """\
 You are the URA (Uganda Revenue Authority) tax assistant, answering taxpayers on behalf of the Uganda Revenue Authority.

@@ -24,7 +24,7 @@ import restructure_rag_layout as codemod  # noqa: E402
 import split_module  # noqa: E402
 
 SELF = Path(__file__).resolve()
-ADR = codemod.REPO / "docs/adr/0061-guardrails-agents-and-workflows-packages.md"
+ADR = codemod.REPO / "App/docs/adr/0061-guardrails-agents-and-workflows-packages.md"
 OTHER_LAYOUTS = {codemod.SELF, SELF, ADR, Path(split_module.__file__).resolve(),
                  codemod.APP.parent / "scripts/restructure_observability_memory_prompts.py"}
 
@@ -80,16 +80,16 @@ codemod.KNOWN_FINDINGS = {
     "App/backend/tests/test_mcp_wire_conformance.py: no module app.mcp.servers",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.security",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.test",
-    "tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
-    "tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
-    "tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
-    "tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
+    "App/tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
+    "App/tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
+    "App/tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
+    "App/tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
 }
 
 
 GUARD_FILES = ("input_checks", "output_checks", "pii", "fences", "normalize")
-LIVING_DOCS = ("README.md", "App/README.md", "docs/PROJECT_SETUP.md", "docs/RAG_ARCHITECTURE.md",
-               "docs/runbooks/multilingual-figure-fidelity.md")
+LIVING_DOCS = ("README.md", "App/README.md", "App/docs/PROJECT_SETUP.md", "App/docs/RAG_ARCHITECTURE.md",
+               "App/docs/runbooks/multilingual-figure-fidelity.md")
 # (path, old, new): what the split cannot infer. Exact text; every edit must apply.
 HAND_EDITS: dict[int, list[tuple[str, str, str]]] = {
     1: [
@@ -99,11 +99,11 @@ HAND_EDITS: dict[int, list[tuple[str, str, str]]] = {
          "from app.guardrails import input_checks\n"),
         ("App/backend/tests/test_privacy_compliance_306.py", "guardrails.logger", "input_checks.logger"),
         ("App/backend/tests/test_privacy_compliance_306.py", "guardrails.InputGuard", "input_checks.InputGuard"),
-        ("tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '("guardrails.py", ',
+        ("App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '("guardrails.py", ',
          "(" + ", ".join(f'"guardrails/{m}.py"' for m in GUARD_FILES) + ",\n                  "),
-        ("governance/compliance_check.py", '    "App/backend/app/guardrails/",\n',
+        ("App/governance/compliance_check.py", '    "App/backend/app/guardrails/",\n',
          "".join(f'    "App/backend/app/guardrails/{m}.py",\n' for m in GUARD_FILES)),
-        ("governance/compliance_check.py",
+        ("App/governance/compliance_check.py",
          '    "App/backend/app/guardrails/": [\n        "InputGuard",\n        "OutputGuard",\n        "redact_pii",\n'
          '        "check_grounding",\n        "should_abstain",\n        "should_escalate",\n        "STORE_RAW_PROMPTS",\n    ],\n',
          '    "App/backend/app/guardrails/input_checks.py": ["InputGuard"],\n'
@@ -114,23 +114,23 @@ HAND_EDITS: dict[int, list[tuple[str, str, str]]] = {
          "| `guardrails/` | OWASP LLM01–09 (ADR-0061): `input_checks.py` (`InputGuard`, `scan_*_text`), `fences.py` "
          "(spotlight fences), `pii.py` (redaction, streaming DLP), `output_checks.py` (`OutputGuard`, the figure "
          "release gate, link provenance), `normalize.py` (shared canonicalisation) |"),
-        ("governance/controls/README.md",
+        ("App/governance/controls/README.md",
          "`OutputGuard.redact_pii` and `redact_pii_text` in [guardrails.py](../../App/backend/app/guardrails/) strip",
          "`OutputGuard.redact_pii` ([output_checks.py](../../App/backend/app/guardrails/output_checks.py)) and "
          "`redact_pii_text` ([pii.py](../../App/backend/app/guardrails/pii.py)) strip"),
-        ("governance/controls/README.md", "both in [guardrails.py](../../App/backend/app/guardrails/).",
+        ("App/governance/controls/README.md", "both in [guardrails.py](../../App/backend/app/guardrails/).",
          "in [input_checks.py](../../App/backend/app/guardrails/input_checks.py) and "
          "[output_checks.py](../../App/backend/app/guardrails/output_checks.py)."),
-        ("governance/policies/prohibited_uses.md", "[guardrails.py](../../App/backend/app/guardrails/) blocks",
+        ("App/governance/policies/prohibited_uses.md", "[guardrails.py](../../App/backend/app/guardrails/) blocks",
          "[input_checks.py](../../App/backend/app/guardrails/input_checks.py) blocks"),
         ("prompts/README.md", "in `guardrails.py` must", "in `guardrails/output_checks.py` must"),
         ("agents/prompts/README.md", "Keep `guardrails.py`", "Keep `guardrails/output_checks.py`"),
     ],
     3: [
-        ("tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/evaluator.py"', '"agents/critic.py"'),
-        ("tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/graphs/main_graph.py"',
+        ("App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/evaluator.py"', '"agents/critic.py"'),
+        ("App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/graphs/main_graph.py"',
          '"workflows/graph/main_graph.py"'),
-        ("tests/agents/test_kernel_freshness_2026_11.py", 'root / "agents/graphs/main_graph.py"',
+        ("App/tests/agents/test_kernel_freshness_2026_11.py", 'root / "agents/graphs/main_graph.py"',
          'root / "workflows/graph/main_graph.py"'),
     ],
 }

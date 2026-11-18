@@ -2,7 +2,7 @@
 the prompt/token-parsing contract — the parts that do not need the actual
 ~2GB LLM + BiCodec weights or CUDA (this backend is off by default and has
 not been verified end to end in this project; see the module docstring in
-app.spark_tts_salt and docs/runbooks/salt-speech-backends.md for why).
+app.spark_tts_salt and App/docs/runbooks/salt-speech-backends.md for why).
 """
 
 from __future__ import annotations

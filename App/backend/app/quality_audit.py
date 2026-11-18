@@ -1,6 +1,6 @@
 """Service-quality audit: what taxpayers' 👍/👎 say about the AI's chat answers.
 
-The administrator's audit pages (/admin/quality, docs/plans/
+The administrator's audit pages (/admin/quality, App/docs/plans/
 admin-service-quality-audit-plan.md §B3) read this module. It turns the
 ``feedback`` table into answers to three questions an auditor actually asks:
 

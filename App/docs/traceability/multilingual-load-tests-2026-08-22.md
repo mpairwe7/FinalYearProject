@@ -6,10 +6,10 @@ exposed over ngrok. Continues issue
 envelope + SLOs) and adds the cross-language dimension its predecessor
 lacked. Companions: `capacity-envelope-2026-08-19.md` (English-only, k6),
 `local-gpu-salt-ngrok-2026-08-22.md` (the stack itself),
-`docs/runbooks/salt-speech-backends.md`.
+`App/docs/runbooks/salt-speech-backends.md`.
 
-Harness: `tests/load/ngrok_multilang_suite.py`. Unlike
-`tests/load/k6-chat-slo.js` it asserts on *which tier served each request*
+Harness: `App/tests/load/ngrok_multilang_suite.py`. Unlike
+`App/tests/load/k6-chat-slo.js` it asserts on *which tier served each request*
 (`retrieval_mode`, TTS/ASR `backend`, reported `locale`), not just on a 200.
 
 ## 1. What this run was for
@@ -300,12 +300,12 @@ cd App && GPU_ID=2 docker compose \
   -f docker-compose.yml -f docker-compose.local-sunflower.yml \
   -f docker-compose.gpu-salt.yml up -d --build
 
-python3 tests/load/ngrok_multilang_suite.py --phase subsystems
-python3 tests/load/ngrok_multilang_suite.py --phase functional,ratelimit
+python3 App/tests/load/ngrok_multilang_suite.py --phase subsystems
+python3 App/tests/load/ngrok_multilang_suite.py --phase functional,ratelimit
 
 # capacity phases need the limiter raised, or they measure only the limiter
 docker compose ... up -d --no-deps api   # with RATE_LIMIT=10000/minute
-python3 tests/load/ngrok_multilang_suite.py --phase load,spike,stress,volume \
+python3 App/tests/load/ngrok_multilang_suite.py --phase load,spike,stress,volume \
   --out results.json
 ```
 

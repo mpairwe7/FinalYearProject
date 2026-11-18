@@ -1,4 +1,4 @@
-"""Receptionist audit R1: safety and integrity (docs/plans/receptionist-cx-audit-2026-10-plan.md).
+"""Receptionist audit R1: safety and integrity (App/docs/plans/receptionist-cx-audit-2026-10-plan.md).
 
 Each class pins one gap register row (G175–G182, G192). The defects they describe were all
 reached through the receptionist's real entry points — a caller's turn, the "Talk to an

@@ -12,18 +12,18 @@ Apply this workflow on **every** code, configuration, model, feature-flag, route
 ## 1. Living Documentation via Latest Industry Trends & Standards
 
 1. **Diátaxis Documentation Architecture**:
-   - **Operational Runbooks (How-To)**: Update `docs/runbooks/*.md` whenever runtime behavior, failover order, environment variables, circuit breakers, or SLO recovery procedures change.
-   - **Technical Reference**: Update `docs/RAG_ARCHITECTURE.md`, `docs/API_REFERENCE.md`, `.env.example`, and `config/flags.py` whenever defaults, flags, endpoints, or provider chains change.
-   - **Explanations & Architecture**: Update `docs/AGENT_ARCHITECTURE.md` and `docs/GAPS_AND_AGENTIC_ROADMAP.md` when graphs, state machines, or guardrails change.
-2. **MADR 4.0 Architectural Decision Records (`docs/adr/`)**:
-   - Every architectural, model-routing, security, or failover decision must include `## Context and Problem Statement`, `## Decision Outcome`, `## Consequences`, and `## Confirmation`, and be indexed in `docs/adr/README.md`.
+   - **Operational Runbooks (How-To)**: Update `App/docs/runbooks/*.md` whenever runtime behavior, failover order, environment variables, circuit breakers, or SLO recovery procedures change.
+   - **Technical Reference**: Update `App/docs/RAG_ARCHITECTURE.md`, `App/docs/API_REFERENCE.md`, `.env.example`, and `config/flags.py` whenever defaults, flags, endpoints, or provider chains change.
+   - **Explanations & Architecture**: Update `App/docs/AGENT_ARCHITECTURE.md` and `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` when graphs, state machines, or guardrails change.
+2. **MADR 4.0 Architectural Decision Records (`App/docs/adr/`)**:
+   - Every architectural, model-routing, security, or failover decision must include `## Context and Problem Statement`, `## Decision Outcome`, `## Consequences`, and `## Confirmation`, and be indexed in `App/docs/adr/README.md`.
 3. **AI Governance, Model Cards & AIBOM (ISO/IEC 42001 Clause 7.5, NIST AI RMF `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, CycloneDX 1.6)**:
-   - Update `governance/systems/ura-ai-chatbot/model_card.md` and `governance/systems/ura-ai-chatbot/manifest.yaml` (`aibom_inventory` + `verified_by` pytest pointers) whenever primary or fallback LLM, ASR, TTS, or MT models change.
+   - Update `App/governance/systems/ura-ai-chatbot/model_card.md` and `App/governance/systems/ura-ai-chatbot/manifest.yaml` (`aibom_inventory` + `verified_by` pytest pointers) whenever primary or fallback LLM, ASR, TTS, or MT models change.
 4. **Automated Docs-as-Code Verification**:
    ```bash
    PYTHONPATH=App/backend python3 -m app.freshness --check
-   python3 governance/compliance_check.py
-   python3 threat-model/validate_threats.py
+   python3 App/governance/compliance_check.py
+   python3 App/threat-model/validate_threats.py
    ```
 
 ---

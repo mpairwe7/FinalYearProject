@@ -245,7 +245,7 @@ def vet_new_pdfs(
 ) -> None:
     """Apply the upload checks to what the crawler brought in.
 
-    ``ml/`` may not import these guards, so a crawled PDF was never inspected or
+    ``App/ml/`` may not import these guards, so a crawled PDF was never inspected or
     scanned on its way to the corpus. A rejected file is deleted from the
     candidate and forgotten by the ledger, so the next run looks at it afresh.
     """

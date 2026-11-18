@@ -134,7 +134,7 @@ for normal chat usage.
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
-8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use; given the conversation `history` it flags distress sustained across turns. Every turn also passes `app/turn_guidance.py`: a repeated empathy opener is dropped, sustained distress adds a "Talk to an officer" action, and a "How do I…" answer offers the matching guided journey. A turn that is all feeling and no task gets a clarifying question instead of retrieval, and a message about self-harm gets Uganda crisis lines before any router. See [`docs/runbooks/guided-journey-probes.md`](../docs/runbooks/guided-journey-probes.md)
+8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use; given the conversation `history` it flags distress sustained across turns. Every turn also passes `app/turn_guidance.py`: a repeated empathy opener is dropped, sustained distress adds a "Talk to an officer" action, and a "How do I…" answer offers the matching guided journey. A turn that is all feeling and no task gets a clarifying question instead of retrieval, and a message about self-harm gets Uganda crisis lines before any router. See [`App/docs/runbooks/guided-journey-probes.md`](./docs/runbooks/guided-journey-probes.md)
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
 11. **Cross-MDA Interdependence, Queue-Reduction & New-Taxpayer Onboarding (`tools/mda_interdependence.py`, `ADR-0009`)** — 6 deterministic MCP tools (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) and 2 guided journeys (`mda_ntr_resolution.yaml`, `new_taxpayer_and_relief.yaml`) resolving 3-hop PRN settlement across all 10 high-dependency Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`), `0%` (`UGX 0`) Presumptive Tax onboarding below `UGX 10,000,000`, NIRA NIN-to-TIN pre-flight checks, B2G `IFMS` `6%` WHT / `18%` Deemed VAT / `UNBS` PVoC holds, Day-1 Nil-Return penalty shields (`UGX 200,000/month`), Voluntary Disclosure (`TPC Act s.66(1a)` 100% penalty/interest waiver) / `s.40` TCC-unlocking instalment plans, and FY2026-27 `5%` consumer EFRIS e-receipt refunds (`UGX 2,000,000` threshold)
@@ -1527,7 +1527,7 @@ diagnosis phase.
 6. **Qdrant client-server release compatibility** — use the pinned
    `qdrant-client>=1.18,<1.19` with the v1.19 server image, and upgrade an
    existing persistent Qdrant volume one minor server release at a time.
-   See `docs/runbooks/qdrant-staged-rebuild.md` before upgrading storage.
+   See `App/docs/runbooks/qdrant-staged-rebuild.md` before upgrading storage.
 7. **slowapi `[redis]` extra pins redis<4** — install
    `slowapi>=0.1.9` bare and `limits[redis]>=3.13` (slowapi's
    internal storage layer) for modern `redis>=5` compatibility.
@@ -1581,7 +1581,7 @@ SSE streaming are all proxied through the `/api` rewrite so no ports
 need to be exposed beyond 13000.
 
 **Option B — one-command Docker stack with local Sunflower-14B-FP8 (current
-default LLM, see [docs/MODEL_SWAP_GUIDE.md](../docs/MODEL_SWAP_GUIDE.md)):**
+default LLM, see [App/docs/MODEL_SWAP_GUIDE.md](./docs/MODEL_SWAP_GUIDE.md)):**
 
 ```bash
 # From App/
@@ -1640,7 +1640,7 @@ Both SALT tiers (`Sunbird/asr-whisper-large-v3-salt`,
 uses matched CUDA-12.8 PyTorch wheels, so its SALT tiers run on the selected
 GPU instead of taking the older CUDA-13 wheel's CPU fallback. Full verification
 history, including the original mismatch and request timing:
-[`docs/runbooks/salt-speech-backends.md`](../docs/runbooks/salt-speech-backends.md#full-stack-live-verification--gpu-pinned-ngrok-exposed-2026-08-22),
+[`App/docs/runbooks/salt-speech-backends.md`](./docs/runbooks/salt-speech-backends.md#full-stack-live-verification--gpu-pinned-ngrok-exposed-2026-08-22),
 [`docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`](../docs/traceability/local-gpu-salt-ngrok-2026-08-22.md).
 
 The `bge-m3` dense-retrieval model and reranker are not always present in the
@@ -1749,11 +1749,11 @@ an operator flips a flag.
 - `ticket_id` surfaced in `ChatResponse` so the frontend can show
   "ticket 1234abcd" to the user
 
-**Tests** — 153 pytest tests in `tests/agents/`, fully offline
+**Tests** — 153 pytest tests in `App/tests/agents/`, fully offline
 (in-memory SQLite, no GPU/Qwen/Qdrant), **passing in 2.57 s**:
 
 ```bash
-.venv/bin/python -m pytest tests/agents/ -q
+.venv/bin/python -m pytest App/tests/agents/ -q
 ```
 
 For the full architecture — tool inventory with risk tiers,
@@ -1761,7 +1761,7 @@ supervisor routing table, feature flag matrix, operational
 runbook, safety model, and the 3-step recipe for adding a new
 tool — see:
 
-- [`docs/AGENT_ARCHITECTURE.md`](../docs/AGENT_ARCHITECTURE.md)
+- [`App/docs/AGENT_ARCHITECTURE.md`](./docs/AGENT_ARCHITECTURE.md)
 
 ## Phase 15–20 — Production hardening + UI redesign (April 2026)
 
@@ -1860,10 +1860,10 @@ tool — see:
   `from ml.scripts.asr.infer_asr import AsrTranscriber` raised
   `ModuleNotFoundError`. All speech services (ASR, TTS, MT, lang-ID)
   failed silently on startup.
-- **ASR fix:** `ml/scripts/asr/infer_asr.py` — Transformers backend
+- **ASR fix:** `App/ml/scripts/asr/infer_asr.py` — Transformers backend
   now falls back to `openai/whisper-small` from HuggingFace when the
   local model path doesn't exist (instead of returning `None`).
-- **TTS fix:** `ml/scripts/tts/infer_tts.py` — New `_synth_edge()`
+- **TTS fix:** `App/ml/scripts/tts/infer_tts.py` — New `_synth_edge()`
   backend using Microsoft Edge Neural TTS (0.4s latency, neural voice
   quality). Added `edge` to backend priority chain: sherpa → edge →
   piper → mock. Uses `imageio-ffmpeg` for MP3→WAV decode.
@@ -1912,7 +1912,7 @@ tool — see:
   rewalks the rows in 5 000-row batches, recomputes every hash, names
   sequence gaps and forks, and re-checks each seal, which catches a range
   rewritten with every hash recomputed. `/admin/audit` shows the verdict;
-  see `docs/runbooks/audit-trail.md`.
+  see `App/docs/runbooks/audit-trail.md`.
 - **Schema:** `audit_events` (event_id TEXT PK, event_type, tenant_id,
   user_id, payload JSON, ts REAL, seq INTEGER, prev_hash, payload_hash,
   row_hash, hash_version; unique (tenant_id, seq)). `audit_anchors`
@@ -1996,7 +1996,7 @@ an agentic runtime already in place.  For the broader journey to a
 long-term memory, document uploads, workflow engines, and
 proactive notifications, see the companion roadmap:
 
-- [`docs/GAPS_AND_AGENTIC_ROADMAP.md`](../docs/GAPS_AND_AGENTIC_ROADMAP.md)
+- [`App/docs/GAPS_AND_AGENTIC_ROADMAP.md`](./docs/GAPS_AND_AGENTIC_ROADMAP.md)
 
 That document inventories **34 concrete gaps** across identity,
 memory, actions, knowledge, agentic reasoning, evaluation, and
@@ -2011,7 +2011,7 @@ those with 11 concrete tools + the supervisor); and sketches
 - [GitHub Repository](https://github.com/mpairweLandwind/FinalYearProject)
 - [Hugging Face Space](https://huggingface.co/spaces/mpairweLandwind/ura-chatbot)
 - [URA Official Website](https://www.ura.go.ug)
-- [Gap Analysis & Agentic Roadmap](../docs/GAPS_AND_AGENTIC_ROADMAP.md)
+- [Gap Analysis & Agentic Roadmap](./docs/GAPS_AND_AGENTIC_ROADMAP.md)
 
 
 ### Python API
@@ -2039,7 +2039,7 @@ App/
 
 The project includes a comprehensive MLOps pipeline for data preparation,
 model training, evaluation, and deployment. Configuration lives in
-`ml/configs/training_config.yaml`; orchestration runs via GitHub Actions
+`App/ml/configs/training_config.yaml`; orchestration runs via GitHub Actions
 (`.github/workflows/ci-ml-pipeline.yml`).
 
 ### Data Sources
@@ -2094,7 +2094,7 @@ uv run python -m ml.scripts.data_augmentation \
 
 ### Web Crawler Pipeline
 
-`ml/scripts/data_aug/crawler.py`, run by `.github/workflows/scheduled-crawl.yml` on
+`App/ml/scripts/data_aug/crawler.py`, run by `.github/workflows/scheduled-crawl.yml` on
 weekdays for what changed and on the last day of the month for everything due. It reads
 only the publisher's live site, and it proposes rather than publishes (ADR-0023):
 
@@ -2161,7 +2161,7 @@ uv run python -m fine-tuning.scripts.04_finetune_whisper_luganda
 ### Evaluation Pipeline
 
 The evaluation system runs across 5 dimensions via dedicated scripts in
-`ml/pipelines/`:
+`App/ml/pipelines/`:
 
 | Script | Metrics | Thresholds |
 |--------|---------|------------|
@@ -2196,9 +2196,9 @@ Defined in `.github/workflows/ci-ml-pipeline.yml`:
 
 | Stage | Job | Description |
 |-------|-----|-------------|
-| 1 | `lint-and-test` | Ruff lint + pytest (`tests/` and `App/backend/tests/`, coverage ratchet >= 35%) + corpus round-trip + retrieval ranking gate + corpus coverage gate + NIST/ISO/OWASP governance & CSV/data-aug validation |
+| 1 | `lint-and-test` | Ruff lint + pytest (`App/tests/` and `App/backend/tests/`, coverage ratchet >= 35%) + corpus round-trip + retrieval ranking gate + corpus coverage gate + NIST/ISO/OWASP governance & CSV/data-aug validation |
 | 2 | `evaluate-rag` | RAG evaluation (English `rag_eval.jsonl` + Luganda `rag_eval_lg.jsonl`) |
-| 3 | `production-gates` | Blocking production quality gate against `ml/configs/quality_baseline.json` (`--max-regression 0.03`) |
+| 3 | `production-gates` | Blocking production quality gate against `App/ml/configs/quality_baseline.json` (`--max-regression 0.03`) |
 
 Additional scheduled workflows:
 - `scheduled-crawl.yml` — daily 04:00 UTC crawl of ura.go.ug
@@ -2219,7 +2219,7 @@ Additional scheduled workflows:
 ```bash
 # Export mobile model
 uv run python -m ml.scripts.export_mobile \
-  --config ml/configs/training_config.yaml
+  --config App/ml/configs/training_config.yaml
 ```
 
 ### Document Indexing (RAG Knowledge Base)

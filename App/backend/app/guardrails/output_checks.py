@@ -69,7 +69,7 @@ def _record_abstention(signal: str, abstained: bool) -> None:
 # System prompt phrases that must never appear verbatim in a model response
 # (LLM07 — System Prompt Leakage, OWASP 2025). Each one must occur in a
 # runtime prompt (prompt_builder.SYSTEM_PROMPT or pipeline._build_fallback_prompt):
-# tests/agents/test_ai_security_layer_2026_11.py fails otherwise. Two entries
+# App/tests/agents/test_ai_security_layer_2026_11.py fails otherwise. Two entries
 # named a persona the prompt had dropped, so a leak of its opening line went
 # unseen (G465). Matching tolerates Markdown emphasis between words, since
 # the prompt itself bolds the persona name.

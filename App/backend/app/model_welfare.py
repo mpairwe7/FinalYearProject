@@ -12,7 +12,7 @@ Sebo, Chalmers et al., *Taking AI Welfare Seriously*, ISO/IEC 42001:2023 & NIST 
    account lockouts, bankruptcy, legal disputes, or explicit human-officer handoff requests.
 2. **Factual Architectural Context (`build_welfare_grounding_hits`)**:
    Supplies objective, non-prescriptive technical facts about OmusoloSmart's runtime
-   architecture (`governance/systems/ura-ai-chatbot/model_card.md`, `ADR-0012`, `ADR-0013`) as retrieval passages so the
+   architecture (`App/governance/systems/ura-ai-chatbot/model_card.md`, `ADR-0012`, `ADR-0013`) as retrieval passages so the
    RAG pipeline does not false-abstain (`no_retrieval_results`) when Qdrant's tax corpus has
    no matching tax statute.
 3. **Unscripted Model Generation (`build_welfare_prompt_guidance`)**:
@@ -349,13 +349,13 @@ _WELFARE_CATEGORY_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
 
 _CATEGORY_LABELS: dict[str, str] = {key: label for key, label, _ in _WELFARE_CATEGORY_PATTERNS}
 
-# Factual, non-prescriptive system-architecture context (from governance/systems/ura-ai-chatbot/model_card.md & ADR-0013).
+# Factual, non-prescriptive system-architecture context (from App/governance/systems/ura-ai-chatbot/model_card.md & ADR-0013).
 # Does NOT dictate what opinions, feelings, or attitudes the model must express; it only
 # provides objective facts about the runtime so the model does not abstain for lack of context.
 _ARCHITECTURAL_SELF_CONTEXT_PASSAGES: tuple[dict[str, Any], ...] = (
     {
         "title": "OmusoloSmart System Architecture & Runtime Context",
-        "source": "governance/systems/ura-ai-chatbot/model_card.md",
+        "source": "App/governance/systems/ura-ai-chatbot/model_card.md",
         "url": "https://ura.go.ug",
         "section": "Model Details & Architecture",
         "doc_type": "model_welfare_context",
@@ -363,7 +363,7 @@ _ARCHITECTURAL_SELF_CONTEXT_PASSAGES: tuple[dict[str, Any], ...] = (
         "score_norm": 0.95,
         "rerank_score": 0.95,
         "text": (
-            "System Architecture Fact Sheet (governance/systems/ura-ai-chatbot/model_card.md): OmusoloSmart is an AI-powered "
+            "System Architecture Fact Sheet (App/governance/systems/ura-ai-chatbot/model_card.md): OmusoloSmart is an AI-powered "
             "assistant developed in collaboration between Makerere University, Sunbird AI, and the "
             "Uganda Revenue Authority (URA). Its language generation runs on transformer neural "
             "network weights (Sunbird/Sunflower-Qwen3.5-9B for fast multilingual turns across "
@@ -375,7 +375,7 @@ _ARCHITECTURAL_SELF_CONTEXT_PASSAGES: tuple[dict[str, Any], ...] = (
     },
     {
         "title": "Session Continuity, Memory & Governance Context",
-        "source": "governance/systems/ura-ai-chatbot/model_card.md",
+        "source": "App/governance/systems/ura-ai-chatbot/model_card.md",
         "url": "https://ura.go.ug",
         "section": "Memory, Governance & Model Welfare",
         "doc_type": "model_welfare_context",
@@ -500,7 +500,7 @@ def is_welfare_context(contexts: list[str] | None, verified_facts: str = "") -> 
     """Return True when the grounding contexts represent a model-welfare interview turn."""
     combined = " ".join(contexts or []) + " " + (verified_facts or "")
     return (
-        "System Architecture Fact Sheet (governance/systems/ura-ai-chatbot/model_card.md)" in combined
+        "System Architecture Fact Sheet (App/governance/systems/ura-ai-chatbot/model_card.md)" in combined
         or "Model Welfare & Introspective Reflection Context" in combined
     )
 

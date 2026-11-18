@@ -5,23 +5,23 @@
 [![Security: Trivy](https://img.shields.io/badge/Security-Trivy_Scanning-blue.svg)](.github/workflows/security-trivy.yml)
 [![DevSecOps: SAST/DAST](https://img.shields.io/badge/DevSecOps-SAST%2FDAST-green.svg)](.github/workflows/devsecops-sast-dast.yml)
 
-This repository is a customer-service conversation AI for Uganda Revenue Authority taxpayers. The pipeline uses GitHub Actions for CI/testing/deployment and Docker for containerised deployment. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun. Model training happens outside this repository — `ml/` retains only the production quality gates and corpus tooling `App/backend` and CI depend on (see [ml/README.md](ml/README.md)).
+This repository is a customer-service conversation AI for Uganda Revenue Authority taxpayers. The pipeline uses GitHub Actions for CI/testing/deployment and Docker for containerised deployment. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun. Model training happens outside this repository — `App/ml/` retains only the production quality gates and corpus tooling `App/backend` and CI depend on (see [App/ml/README.md](App/ml/README.md)).
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Documentation Index](docs/README.md) | Getting started and project overview |
-| [API Reference](docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
-| [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
-| [Agent Architecture](docs/AGENT_ARCHITECTURE.md) | Supervisor routing, 72 MCP tools across 18 namespaces, 21 guided workflows, and 85-flag registry |
-| [Architecture Decision Records (MADR 4.0)](docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0013`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`, `ADR-0013`), CI supply chain (`ADR-0011`), and storage parity (`ADR-0012`) |
-| [Model Card](governance/systems/ura-ai-chatbot/model_card.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
-| [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
-| [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
-| [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
+| [Documentation Index](App/docs/README.md) | Getting started and project overview |
+| [API Reference](App/docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
+| [RAG Architecture](App/docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
+| [Agent Architecture](App/docs/AGENT_ARCHITECTURE.md) | Supervisor routing, 72 MCP tools across 18 namespaces, 21 guided workflows, and 85-flag registry |
+| [Architecture Decision Records (MADR 4.0)](App/docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0013`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`, `ADR-0013`), CI supply chain (`ADR-0011`), and storage parity (`ADR-0012`) |
+| [Model Card](App/governance/systems/ura-ai-chatbot/model_card.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
+| [Deployment Guide](App/docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
+| [Monitoring & Observability](App/docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
+| [Data Schema & Evaluation](App/docs/data-schema-and-eval.md) | Database models and evaluation criteria |
 | [Security Policy](SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
-| [Agent repo map](AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `evals/`, `infra/`) |
+| [Agent repo map](AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `App/evals/`, `App/infra/`) |
 
 ## Pipeline Overview
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
@@ -37,9 +37,9 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 FinalYearProject/
 ├── AGENTS.md              # Agent-monorepo router (imports still live under App/)
 ├── CLAUDE.md              # Points coding agents at AGENTS.md
-├── scripts/prototype.sh   # load demo defaults + print seed command
-├── evals/                 # Eval runners + preference export
-├── infra/                 # K8s stubs (not applied)
+├── App/scripts/prototype.sh   # load demo defaults + print seed command
+├── App/evals/                 # Eval runners + preference export
+├── App/infra/                 # K8s stubs (not applied)
 ├── .github/workflows/     # CI/CD, security, frontend, mobile, and MLOps workflows
 ├── App/                   # Application code
 │   ├── backend/          # FastAPI backend
@@ -90,12 +90,12 @@ FinalYearProject/
 │   └── eval/             # RAG evaluation sets
 │       ├── rag_eval.jsonl      # English eval (30 samples, incl. reg-* regression ids)
 │       └── rag_eval_lg.jsonl   # Luganda eval (12 samples)
-├── governance/            # AI governance registry (start at REGISTRY_README.md)
+├── App/governance/            # AI governance registry (start at REGISTRY_README.md)
 │   ├── systems/ura-ai-chatbot/ # manifest.yaml (NIST AI RMF + ISO 42001 + OWASP + EU AI Act), model card, DPIA
-│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
+│   ├── policies/ evidence/ controls/ App/monitoring/ audit/ vendors/
 │   ├── OWNERS.md               # Who answers for what
 │   └── compliance_check.py     # CI gate for governance artifacts
-├── ml/                    # Production quality gates + corpus tooling
+├── App/ml/                    # Production quality gates + corpus tooling
 │   ├── configs/
 │   │   └── training_config.yaml  # RAG + production quality gate thresholds
 │   ├── pipelines/
@@ -103,16 +103,16 @@ FinalYearProject/
 │   │   ├── corpus_coverage.py    # Issue #303 taxpayer-question coverage gate
 │   │   ├── export_feedback.py    # Feedback → retriever tuning sets
 │   │   └── quality_gates.py      # Production quality gates
-│   └── scripts/
+│   └── App/scripts/
 │       ├── lang_id.py            # EN/LG/SW detection (baked into Crane Cloud image)
 │       ├── eval_retrieval.py     # Retrieval ranking gate
 │       ├── asr/, mt/, tts/       # infer_*.py: speech_service.py's local backend tier
 │       └── data_aug/             # Corpus chunking used by App/backend's export tooling
 ├── Model/                 # Trained model artifacts
 ├── Results/               # Metrics and reports
-├── tests/                 # Test suite
+├── App/tests/                 # Test suite
 ├── docker-compose.yml     # Service orchestration (API + frontend + Qdrant + Redis)
-└── docs/                  # Documentation
+└── App/docs/                  # Documentation
 ```
 
 ## End-to-End CI/CD Flow
@@ -131,7 +131,7 @@ FinalYearProject/
 1) **Commit/PR**: CI runs lint/tests + governance compliance check (parallel). Governance verifies NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, and EU AI Act artifacts. Lint/test also runs the retrieval ranking gate, corpus coverage gate (issue #303), and an offline RAG smoke eval against `App/backend`.
 2) **Merge to main**: data validation → **RAG evaluation** (faithfulness, groundedness, citation accuracy, safety probes, abstention precision) → production quality gates → Docker build (with Trivy scan) → deploy.
 3) **Quality gates**: Deployment is gated on `evaluate-rag` and `production-gates` job success.
-4) **Feedback loop**: User thumbs-down feedback → `ml/pipelines/export_feedback.py` → retriever negative judgments + regression test candidates → retriever/reranker tuning.
+4) **Feedback loop**: User thumbs-down feedback → `App/ml/pipelines/export_feedback.py` → retriever negative judgments + regression test candidates → retriever/reranker tuning.
 
 ## URA Chatbot — Advanced 12-Stage RAG & Agentic Pipeline (October 2026)
 
@@ -168,7 +168,7 @@ User Query
 | **Observability** | OpenTelemetry + Prometheus | Per-stage GenAI latency spans, token usage metrics, bounded label series |
 | **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates + 30,000-scenario trilingual (TTT/STT/TTS) stress & fuzzy verification |
 
-- Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
+- Data model, ingestion flow, and evaluation rubric are documented in [App/docs/data-schema-and-eval.md](App/docs/data-schema-and-eval.md).
 
 ## Current App Runtime Baseline (May 2026)
 
@@ -308,7 +308,7 @@ All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). Conta
 
 ## RAG Quality Gates
 
-Deployment is blocked unless both classifier **and** RAG evaluation pass. RAG metrics are evaluated by `ml/pipelines/evaluate_rag.py` and configured in `ml/configs/training_config.yaml`:
+Deployment is blocked unless both classifier **and** RAG evaluation pass. RAG metrics are evaluated by `App/ml/pipelines/evaluate_rag.py` and configured in `App/ml/configs/training_config.yaml`:
 
 | Metric | Minimum Threshold | Description |
 |--------|-------------------|-------------|
@@ -330,11 +330,11 @@ The project implements a comprehensive AI governance framework verified in CI:
 - **OWASP LLM Top 10 (2025)** — all 10 entries (LLM01–LLM10) addressed
 - **EU AI Act** — transparency and human oversight provisions
 
-Run locally: `python governance/compliance_check.py`
+Run locally: `python App/governance/compliance_check.py`
 
 ## ML Quality Gates & Corpus Tooling
 
-Model training happens outside this repository. `ml/` retains only the
+Model training happens outside this repository. `App/ml/` retains only the
 production quality gates and corpus tooling `App/backend` and CI depend on:
 the retrieval ranking gate, the corpus coverage gate (issue #303), RAG
 evaluation, the combined production quality gate, and the corpus
@@ -343,7 +343,7 @@ chunking/cleaning package `App/backend`'s PDF/crawl export tooling imports.
 **Web API inference** uses Qwen3-8B with optional 4-bit local loading and
 locale-specific LoRA adapters (see `App/backend/app/rag/generator.py`).
 
-See [ml/README.md](ml/README.md) for what's there and why.
+See [App/ml/README.md](App/ml/README.md) for what's there and why.
 
 ## Local Development
 - Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
@@ -373,13 +373,13 @@ gh run list --workflow=ci-ml-pipeline.yml
 
 | Script | Description |
 |--------|-------------|
-| `scripts/validate_env.py` | Pre-deployment environment validation (production safety checks) |
-| `scripts/ai_red_team.py` | AI red team evaluation (50 NIST AI 600-1 adversarial prompts) |
-| `scripts/bias_fairness_audit.py` | Bias & fairness audit (language + taxpayer type parity >= 70%) |
-| `scripts/incident_response_sim.py` | Incident response simulation (3 AI-specific playbooks) |
-| `scripts/carbon_tracker.py` | Carbon footprint tracking (CodeCarbon wrapper) |
-| `scripts/dr_test.sh` | Disaster recovery test (Qdrant snapshot + SQLite backup + health) |
-| `tests/load/k6-chat-slo.js` | k6 load test (steady-state + spike, SLO thresholds enforced) |
+| `App/scripts/validate_env.py` | Pre-deployment environment validation (production safety checks) |
+| `App/scripts/ai_red_team.py` | AI red team evaluation (50 NIST AI 600-1 adversarial prompts) |
+| `App/scripts/bias_fairness_audit.py` | Bias & fairness audit (language + taxpayer type parity >= 70%) |
+| `App/scripts/incident_response_sim.py` | Incident response simulation (3 AI-specific playbooks) |
+| `App/scripts/carbon_tracker.py` | Carbon footprint tracking (CodeCarbon wrapper) |
+| `App/scripts/dr_test.sh` | Disaster recovery test (Qdrant snapshot + SQLite backup + health) |
+| `App/tests/load/k6-chat-slo.js` | k6 load test (steady-state + spike, SLO thresholds enforced) |
 
 ## Monitoring Stack
 
@@ -395,11 +395,11 @@ docker compose --profile monitoring up -d
 | Grafana | http://localhost:3001 | Pre-built dashboards (8 panels) |
 | Jaeger | http://localhost:16686 | Distributed tracing (OTel OTLP) |
 
-Dashboards and datasources are auto-provisioned via `monitoring/grafana/provisioning/`.
+Dashboards and datasources are auto-provisioned via `App/monitoring/grafana/provisioning/`.
 
 ## Next Steps
 - Set repository secrets in GitHub settings before running workflows
 - Configure Hugging Face repository at `mpairweLandwind/ura-chatbot`
-- Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment guide
-- Review [docs/MONITORING.md](docs/MONITORING.md) for observability setup
-- Review [governance/systems/ura-ai-chatbot/model_card.md](governance/systems/ura-ai-chatbot/model_card.md) for EU AI Act Article 53 model card
+- Review [App/docs/DEPLOYMENT.md](App/docs/DEPLOYMENT.md) for production deployment guide
+- Review [App/docs/MONITORING.md](App/docs/MONITORING.md) for observability setup
+- Review [App/governance/systems/ura-ai-chatbot/model_card.md](App/governance/systems/ura-ai-chatbot/model_card.md) for EU AI Act Article 53 model card

@@ -7,7 +7,7 @@ TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-60}"
 # What LLM_MODEL the deployment under test is expected to report. Was a bare
 # hardcoded "Qwen/Qwen3-8B" in six places below; drifted the moment the
 # default model changed (Sunbird/Sunflower-14B-FP8 via LLM_BACKEND=vllm — see
-# docs/MODEL_SWAP_GUIDE.md) and would have failed every one of those
+# App/docs/MODEL_SWAP_GUIDE.md) and would have failed every one of those
 # assertions on a correctly-running deployment. Override for any other model.
 EXPECTED_MODEL="${EXPECTED_MODEL:-Sunbird/Sunflower-14B-FP8}"
 RUN_ID="${SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"

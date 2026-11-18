@@ -56,7 +56,7 @@ This release modernizes the enterprise Model Context Protocol (MCP) tool subsyst
 ### 2.5 Saga Distributed Compensation Pattern
 - **Problem**: Multi-step agent flows across simulated connectors (e.g. generating PRN, releasing customs goods, activating digital tax stamps) had no standard rollback mechanism upon intermediate failure.
 - **Architecture Solution**:
-  - Added `compensate()` method signature to `SystemConnector` in `plugins/base.py`.
+  - Added `compensate()` method signature to `SystemConnector` in `App/plugins/base.py`.
   - Orchestrator tracks executed steps and triggers reverse compensation in reverse order of invocation if a sequence aborts.
 
 ### 2.6 Dense Tool RAG Auto-Injection
@@ -72,8 +72,8 @@ This release modernizes the enterprise Model Context Protocol (MCP) tool subsyst
 | Component | Standard / Metric | Verification Result |
 | :--- | :--- | :--- |
 | **MCP Test Suite** | 2026-07-28 Wire Spec & Hardening | **113/113 passed** (`test_mcp_*.py`) |
-| **Agent Suite** | Tool dispatch & policy enforcement | **1023 passed** (`tests/agents/`) |
-| **Chaos Resilience** | Fault injection & circuit breakers | **3/3 passed** (`tests/chaos/`) |
+| **Agent Suite** | Tool dispatch & policy enforcement | **1023 passed** (`App/tests/agents/`) |
+| **Chaos Resilience** | Fault injection & circuit breakers | **3/3 passed** (`App/tests/chaos/`) |
 | **API Endpoints** | Locked 108 HTTP + 7 WS manifest | **26/26 passed** (`test_all_endpoints_e2e.py`) |
 | **Frontend Tests** | Vitest suite | **484/484 passed** (`bun run test`) |
 | **Secret Scanning** | Zero credential leaks | **Passed** (TruffleHog, GitGuardian, Gitleaks, detect-secrets, Semgrep, Bandit) |
@@ -83,4 +83,4 @@ This release modernizes the enterprise Model Context Protocol (MCP) tool subsyst
 ## 4. Operational Sign-off & Pull Requests
 - **PR #533**: Security hardening, token vaulting, transaction ceilings, velocity limits, and Saga compensation.
 - **PR #534**: Client resources & prompts completeness, distributed Redis velocity limiting, strict output schemas, and dense tool RAG auto-injection.
-- **Runbook**: Documented in `docs/runbooks/enterprise-connectors-and-mcp.md`.
+- **Runbook**: Documented in `App/docs/runbooks/enterprise-connectors-and-mcp.md`.

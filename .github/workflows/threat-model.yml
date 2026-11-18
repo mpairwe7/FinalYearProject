@@ -9,12 +9,12 @@ on:
     paths:
       - "App/backend/**"
       - "App/frontend/**"
-      - "docs/security/threat-model/**"
-      - "governance/**"
-      - "plugins/**"
+      - "App/docs/security/threat-model/**"
+      - "App/governance/**"
+      - "App/plugins/**"
       - ".semgrep/**"
-      - "scripts/validate-risk-register.py"
-      - "threat-model/**"
+      - "App/scripts/validate-risk-register.py"
+      - "App/threat-model/**"
       - ".github/workflows/threat-model.yml"
   push:
     branches:
@@ -24,12 +24,12 @@ on:
     paths:
       - "App/backend/**"
       - "App/frontend/**"
-      - "docs/security/threat-model/**"
-      - "governance/**"
-      - "plugins/**"
+      - "App/docs/security/threat-model/**"
+      - "App/governance/**"
+      - "App/plugins/**"
       - ".semgrep/**"
-      - "scripts/validate-risk-register.py"
-      - "threat-model/**"
+      - "App/scripts/validate-risk-register.py"
+      - "App/threat-model/**"
       - ".github/workflows/threat-model.yml"
   # No dispatch inputs on purpose. This workflow carried a `fail_on_elevated`
   # choice that nothing ever read — the risk job computes `elevated_count` and
@@ -52,9 +52,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  THREAGILE_MODEL: docs/security/threat-model/threagile.yaml
-  RISK_REGISTER: docs/security/threat-model/risk-register.yaml
-  ACCEPTED_RISKS: docs/security/threat-model/accepted-risks.yaml
+  THREAGILE_MODEL: App/docs/security/threat-model/threagile.yaml
+  RISK_REGISTER: App/docs/security/threat-model/risk-register.yaml
+  ACCEPTED_RISKS: App/docs/security/threat-model/accepted-risks.yaml
   OUTPUT_DIR: /tmp/threagile-output
 
 jobs:
@@ -89,13 +89,13 @@ jobs:
 
       - name: Validate risk register
         id: validate
-        run: python scripts/validate-risk-register.py --register ${{ env.RISK_REGISTER }} --fail-on-critical 0
+        run: python App/scripts/validate-risk-register.py --register ${{ env.RISK_REGISTER }} --fail-on-critical 0
 
       - name: Gate on critical risks
         if: steps.validate.outputs.open_critical != '0'
         run: |
           echo "::warning::Risk register contains ${{ steps.validate.outputs.open_critical }} open critical risks with mitigation plans."
-          echo "Review docs/security/threat-model.md for roadmap."
+          echo "Review App/docs/security/threat-model.md for roadmap."
           echo "All critical risks must have owner + mitigation_target in the register."
 
       - name: Comment risk register on PR
@@ -116,7 +116,7 @@ jobs:
             | Open Critical | ${critical} |
             | Open High | ${high} |
 
-            Full register: \`docs/security/threat-model/risk-register.yaml\``;
+            Full register: \`App/docs/security/threat-model/risk-register.yaml\``;
 
             const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
@@ -217,7 +217,7 @@ jobs:
           TOTAL="${{ steps.risks.outputs.total_count }}"
           if [ "$CRITICAL" != "0" ]; then
             echo "::warning::Threagile found $CRITICAL critical + $ELEVATED elevated risks out of $TOTAL total."
-            echo "Review the report artifact and docs/security/threat-model.md for mitigation roadmap."
+            echo "Review the report artifact and App/docs/security/threat-model.md for mitigation roadmap."
           fi
 
       - name: Comment on PR with results

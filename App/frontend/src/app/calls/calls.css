@@ -288,7 +288,7 @@
   50% { transform: scale(1.05); opacity: 0.85; }
 }
 
-/* ══ Call Desk (docs/plans/officer-call-desk-plan.md §3.2–3.3, §9) ═══════════
+/* ══ Call Desk (App/docs/plans/officer-call-desk-plan.md §3.2–3.3, §9) ═══════════
    Queue, workspace and brief. Ops tokens only; colour carries state. */
 
 .calls-hints kbd {

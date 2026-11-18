@@ -1,7 +1,7 @@
 """Agentic AI layer — supervisor + specialist pattern.
 
 This package implements the agent runtime described in
-``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §3:
+``App/docs/GAPS_AND_AGENTIC_ROADMAP.md`` §3:
 
     User query
       → Supervisor (classify + route)

@@ -12,7 +12,7 @@
 # means any cu12x build runs on a >=525 driver, and vllm proves it on this
 # very host with torch 2.6.0+cu124. Dockerfile.gpu now pins a matched
 # cu128 torch/torchaudio pair; see its header and
-# docs/runbooks/salt-speech-backends.md.
+# App/docs/runbooks/salt-speech-backends.md.
 #
 #   cd App && GPU_ID=2 docker compose \
 #     -f docker-compose.yml -f docker-compose.local-retrieval.yml \
@@ -171,7 +171,7 @@ services:
   # Orpheus-3B (Sunbird multilingual) — the receptionist's voice (en, sw, lg).
   # Its own vLLM, so its own image (App/backend/orpheus_sidecar); weight-only
   # FP8 because at bf16 an A6000 only just keeps up with real time
-  # (evals/reports/orpheus_tts_2026-09-24_*.json). Needs ~6 GB of weights plus
+  # (App/evals/reports/orpheus_tts_2026-09-24_*.json). Needs ~6 GB of weights plus
   # KV cache: give it a card of its own when one is free (ORPHEUS_GPU_ID) —
   # Sunflower, Whisper-SALT and Orpheus together are too much for one 24 GB
   # card, though they fit one 48 GB A6000.

@@ -1,7 +1,7 @@
 """The answer language as conversation state (app.memory.language_state).
 
 Phrases are the load suite's own Luganda and Swahili questions
-(tests/load/ngrok_multilang_suite.py), not invented ones. Every case passes
+(App/tests/load/ngrok_multilang_suite.py), not invented ones. Every case passes
 what a real client sends: the web client sends ``locale="en"`` until the
 taxpayer touches the picker, which is how auto-detection was lost (PR #529).
 """

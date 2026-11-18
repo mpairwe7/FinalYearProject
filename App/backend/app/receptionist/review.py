@@ -1,7 +1,7 @@
 """The caller's spoken review of the AI: "was this call helpful?"
 
 The administrator audits the AI on calls from what callers say when asked
-(docs/plans/admin-service-quality-audit-plan.md §D1). The AI asks at most once
+(App/docs/plans/admin-service-quality-audit-plan.md §D1). The AI asks at most once
 a call, and only after it has answered something:
 
 * **at goodbye** (``call_ai_review_end``) — "Before you go, was this call

@@ -1,6 +1,6 @@
 """The Prometheus metrics facade (app.observability.analytics).
 
-Pins the failures the in-process store had (docs/GAPS_AND_AGENTIC_ROADMAP.md
+Pins the failures the in-process store had (App/docs/GAPS_AND_AGENTIC_ROADMAP.md
 G99): counters that differed per uvicorn worker, "histogram" buckets that
 went down when latency got worse, raw URL paths as labels, and duplicate
 bare + ``ura_`` series.

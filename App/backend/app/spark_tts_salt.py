@@ -54,7 +54,7 @@ lines of third-party inference code into this repository is a supply-chain
 and license-provenance decision this file does not make unilaterally.
 Instead, exactly like ``WHISPER_ADAPTER_LG`` pointing at a local checkout,
 this tier activates only once an operator has cloned that repository to
-:data:`SPARK_TTS_REPO_DIR` (see ``docs/runbooks/salt-speech-backends.md``
+:data:`SPARK_TTS_REPO_DIR` (see ``App/docs/runbooks/salt-speech-backends.md``
 for the pinned-commit recipe) and installed its own requirements — its
 absence is a normal, expected :class:`SparkTtsUnavailable`, not an error.
 
@@ -257,7 +257,7 @@ def load() -> SparkTtsSalt:
     if not SPARK_TTS_REPO_DIR:
         raise SparkTtsUnavailable(
             "SPARK_TTS_REPO_DIR is not set — clone github.com/SparkAudio/Spark-TTS "
-            "and point this at it; see docs/runbooks/salt-speech-backends.md"
+            "and point this at it; see App/docs/runbooks/salt-speech-backends.md"
         )
     repo_dir = Path(SPARK_TTS_REPO_DIR)
     if not (repo_dir / "sparktts").is_dir():

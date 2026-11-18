@@ -1,10 +1,10 @@
-# Monitoring config — every file in monitoring/ checked by its own tool.
+# Monitoring config — every file in App/monitoring/ checked by its own tool.
 #
 # The alerting pipeline was dark for months because nothing ever loaded these
 # files: a rules file Prometheus never read, a selector on a label that did
 # not exist and an Alertmanager that was never deployed all passed review.
 # This job loads each config the way production does and runs the promtool
-# unit tests in monitoring/tests/. tests/test_monitoring_config.py (root
+# unit tests in App/monitoring/tests/. App/tests/test_monitoring_config.py (root
 # suite) checks the same files against the metrics the code really exports.
 name: Monitoring config
 
@@ -12,13 +12,13 @@ on:
   push:
     branches: [main, dev, develop]
     paths:
-      - "monitoring/**"
+      - "App/monitoring/**"
       - "docker-compose.yml"
       - ".github/workflows/monitoring-config.yml"
   pull_request:
     branches: [main, dev, develop]
     paths:
-      - "monitoring/**"
+      - "App/monitoring/**"
       - "docker-compose.yml"
       - ".github/workflows/monitoring-config.yml"
 

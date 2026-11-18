@@ -3,7 +3,7 @@
  *
  * `onRequestError` turns every error Next.js catches while rendering a route
  * into one JSON log line on stderr, in the field names the API uses
- * (docs/MONITORING.md §9), so the platform's log pipeline can alert on it and
+ * (App/docs/MONITORING.md §9), so the platform's log pipeline can alert on it and
  * the digest shown on the error page can be found in the logs. The error
  * message is not logged: it can quote request data.
  */

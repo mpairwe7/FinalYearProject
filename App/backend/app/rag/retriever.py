@@ -7,7 +7,7 @@ Implements the non-parametric retrieval component of the RAG architecture:
 - Reranking: mxbai-rerank-base-v2 (BEIR 55.6, 500M, Apache-2.0)
 - Grounding: passage-level faithfulness scoring
 
-Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
+Model swap guide: see App/docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
 References:
 - Lewis et al. "Retrieval-Augmented Generation" (nlp.cs.ucl.ac.uk)

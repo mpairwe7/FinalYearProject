@@ -1,0 +1,90 @@
+# ADR-0015: MCP Zero-Trust Context Binding, IETF Idempotency Conflict Detection & ICLR 2026 ToolAthlon Long-Horizon Multi-Server Orchestration
+
+- **Date:** 2026-10-24 (Amended 2026-10-25 — PR #653, PR #655, PR #656, PR #658)
+- **Owner:** URA Capstone Architecture, QA Audit & Security Engineering Team
+- **Builds upon:** [ADR-0003](0003-mcp-tool-integrity-and-2026-statutory-corpus.md), [ADR-0004](0004-mcp-security-threat-model-and-ai-governance-2026.md), and [ADR-0005](0005-mcp-mrtr-transport-hardening-and-csa-aicm-maestro.md)
+- **Technical Story:** Gaps G250, G251, G252
+
+## Status
+
+Accepted
+
+## Context and Problem Statement
+
+A QA and security audit of the Model Context Protocol (`MCP 2026-07-28`) setup and long-horizon tool orchestration against October 2026 standards (**NSA May 2026 `CSI_MCP_SECURITY.PDF`**, **OWASP MCP Top 10 2026**, **IETF `Idempotency-Key` draft**, and **ICLR 2026 ToolAthlon — `hkust-nlp/Toolathlon`, "The Tool Decathlon: Benchmarking Language Agents for Diverse, Realistic, and Long-Horizon Task Execution"**) identified eight structural gaps across three phases:
+
+1. **Unbound `requestState` Replay & Unsigned State Bypass (`mrtr.py`, `client.py`):**
+   `wrap_request_state` signed only the inner `payload` without binding `tool_name`, `namespace`, `tenant_id`, `user_id`, or a TTL (`exp`), allowing a signed `requestState` from one tool or user to be replayed against another tool or user. Furthermore, when `MCP_REQUEST_STATE_SECRET` was unset in development, `MCPClient._call_tool` skipped `unwrap_request_state` whenever the caller omitted `"alg"`/`"sig"` keys.
+2. **Cross-User Idempotency Cache Collision & Argument Mutation Replay (`client.py`, `App/plugins/server.py`):**
+   `MCPClient._replay_key` keyed idempotency entries by `f"{tenant_id}:{name}:{idempotency_key}"` without `user_id` or an argument digest (`arguments_sha256`). Within the shared `"default"` tenant, two users supplying the same `idempotency_key` collided, and reusing an `idempotency_key` with different tool arguments silently returned the stale result from the earlier arguments.
+3. **Missing `_meta` Confirmation & Consent Propagation to `StatelessMCPServer` (`protocol.py`, `wire.py`):**
+   `request_meta()` did not include `ug.go.ura.chatbot/confirmed`, `ug.go.ura.chatbot/idempotencyKey`, or `ug.go.ura.chatbot/grantedPurposes`, and `StatelessMCPServer.handle_tools_call` called `authorize_tool_call` without `confirmed`, `idempotency_key`, or `granted_purposes`, causing confirmed writes and consent-scoped reads to fail over remote HTTP transports.
+4. **ToolAthlon LLM Type-Coercion Friction & Missing Self-Correction Hints (`validation.py`):**
+   As highlighted by the **ICLR 2026 ToolAthlon** benchmark across 604 MCP tools, LLMs frequently emit formatted numeric strings (`"UGX 4,500,000"`, `"1,800,000"`), boolean strings (`"true"`/`"false"`), or differently-cased enum literals (`"Resident"` vs `"resident"`). Strict JSON Schema validation rejected these unambiguous values without coercion and returned raw schema dumps without actionable `repair_hints`.
+5. **Markdown-Image Exfiltration, Extended Secret Leaks & Resource URI Traversal (`validation.py`, `client.py`, `wire.py`):**
+   Descriptor and output screens lacked checks for Markdown image exfiltration links (`![...](https://.../?tin=...)`), PEM private keys, database connection strings with embedded passwords, and `ghp_`/`hf_` tokens, and `read_resource` lacked URI scheme allowlisting and path-traversal (`..`, `%2e%2e`) validation.
+6. **Single-Namespace Crowding in `ToolRAGSelector` & Missing Cross-Server Chain Execution (`tool_rag.py`, `client.py`):**
+   On multi-application ToolAthlon queries (e.g., verify business at URSB $\rightarrow$ convert USD salary $\rightarrow$ calculate PAYE $\rightarrow$ generate payment PRN), `ToolRAGSelector.select` filled top-$k$ slots with `tax_calculator` tools, crowding out `ursb` and `payment_system`, and `MCPClient` lacked a multi-step cross-server chain executor with automatic output-to-input slot binding and fail-closed confirmation halting.
+
+## Decision Outcome
+
+We implemented a 3-phase hardening and optimization architecture across `App/backend/app/mcp/` and `App/plugins/server.py`:
+
+1. **Phase 1 — Zero-Trust `requestState` Binding, User-Scoped Idempotency & `_meta` Parity (`mrtr.py`, `protocol.py`, `client.py`, `wire.py`, `App/plugins/server.py`):**
+   - `wrap_request_state` and `unwrap_request_state` sign and verify optional `_binding` metadata (`tool_name`, `namespace`, `tenant_id`, `user_id`, `iat`, `exp`) inside the canonical HMAC-SHA256 digest, and `MCPClient._call_tool` always validates non-`None` `request_state`.
+   - `MCPClient._replay_key` scopes idempotency entries by `f"{tenant_id}:{user_id or 'anon'}:{name}:{idempotency_key}"` and stores `_mcp_args_sha256` (also enforced in `App/plugins/server.py`), returning `error="idempotency_key_conflict"` when a key is reused with different arguments.
+   - `request_meta()` propagates `ug.go.ura.chatbot/{confirmed,idempotencyKey,grantedPurposes}`, which `StatelessMCPServer.handle_tools_call` honours only when `trusted_identity=True`.
+2. **Phase 2 — ToolAthlon Schema-Guided Coercion, Repair Hints & Output/Resource Security Guards (`validation.py`, `client.py`, `wire.py`):**
+   - `coerce_arguments_to_schema` losslessly coerces unambiguous numeric strings, boolean strings, and case-insensitive enum strings prior to `validate_arguments`, while `build_validation_repair_hints` emits `missing_required`, `unexpected_fields`, `expected_types`, and `allowed_enums` when validation fails.
+   - Extended `_TOOL_POISONING_PATTERNS` and `_CREDENTIAL_LEAK_PATTERNS` with `markdown_exfiltration_link`, `private_key_leak`, `db_connection_secret_leak`, and `vcs_or_hf_token_leak`, and added `validate_resource_uri` (`ALLOWED_RESOURCE_SCHEMES` + path-traversal blocking) and output screening on `MCPClient.read_resource`.
+3. **Phase 3 — Namespace-Diversified `ToolRAGSelector` & Long-Horizon `MCPClient.execute_tool_chain` (`tool_rag.py`, `client.py`):**
+   - `ToolRAGSelector` indexes `schema.namespace` and parameter property names, adds 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) connector synonyms (`risiti`, `stakabadhi`, `sitampu`, `stempu`, `kampuni`, `ebitongole`, `boondi`), computes direct query-token overlap (`has_name_hit`) across both dense and token-overlap scoring modes, and applies 2-pass namespace diversity (`diversify_namespaces=True`) so every strongly matched MCP namespace is represented in top-$k$.
+   - `MCPClient.execute_tool_chain` executes multi-step cross-server tool chains with explicit `bind_from` validation (halting fail-closed with `status="invalid_step"` on unresolved references and never auto-aliasing financial/identity slots `amount_ugx`, `amount`, `tin`, `taxpayer_tin`, `taxpayer_name`, `prn`), multi-turn chain resumption (`resume_from`) from `awaiting_confirmation` / `input_required` checkpoints, and SHA-256 `audit_trail` records for every step.
+4. **Phase 4 — Multi-Turn Conversation Robustness & State Consolidation (`memory/case_facts.py`, `calculator_router.py`, `rag/context_manager.py`):**
+   - Grounded in the **ICLR 2026 Best Paper** (*"LLMs Get Lost In Multi-Turn Conversation"*, Laban et al., 2026), **ACL 2026 Findings** (*"MT-OSC: Path for LLMs that Get Lost in Multi-Turn Conversation"*), and **BFCL v3/v4 Multi-Turn**:
+     - `memory/case_facts.py`: Added multi-turn benefit-in-kind negation/retraction (`_BENEFIT_NEGATION_PRE_RE`), bounded `amounts` history (`20` items), and Redis-indexed `export_user_case_facts` / `forget_user_case_facts` (`case_facts_user_index:{tenant}:{user_id}`, closing `G233(g)`).
+     - `calculator_router.py`: Enhanced `continue_calculation` to handle multi-turn additive/subtractive deltas (*"what if it increases by 1,500,000?"*), percentage deltas (*"what if my salary increases by 25%?"*), and parameter-switch sensitivity follow-ups (*"what if I am a non-resident?"*, *"what if NSSF is included?"*, *"what if VAT inclusive?"*, *"what if corporate landlord?"*).
+     - `rag/context_manager.py`: Added latest-turn taxpayer status override resolution (`Resident` $\leftrightarrow$ `Non-Resident`, `Individual` $\leftrightarrow$ `Company`) and `build_consolidated_turn_spec` (`ConversationContext.consolidated_spec`).
+
+## Consequences
+
+- **Positive:**
+  - Eliminates cross-user/cross-tool `requestState` and `idempotency_key` replay vulnerabilities (`OWASP MCP01`, `MCP02`, `ASI02`, `ASI03`).
+  - Eliminates LLM numeric/boolean/enum formatting failures on single-turn and multi-turn tool calls while keeping strict JSON Schema enforcement for ambiguous inputs.
+  - Multi-application ToolAthlon workflows across `tax_calculator`, `ursb`, `payment_system`, `efris`, `digital_tax_stamps`, `tin_registration`, and `bwims` retrieve balanced tool sets and chain outputs deterministically.
+- **Negative / Trade-offs:**
+  - Callers that intentionally reuse an `idempotency_key` with mutated parameters now receive `ok=False, error="idempotency_key_conflict"` and must mint a new `idempotency_key` for new parameters (matching the IETF `Idempotency-Key` specification).
+
+## Confirmation
+
+Validated by:
+- `PYTHONPATH=App/backend python3 -m pytest App/tests/agents/test_mcp_toolathlon_2026_october.py App/backend/tests/test_mcp*.py App/tests/agents/test_mcp*.py -q`
+- `PYTHONPATH=App/backend python3 -m pytest App/tests/test_monorepo_architecture_governance.py -q`
+- `python3 App/governance/compliance_check.py`
+
+## Amendment 1 (2026-10-25 — PR #653, PR #655, PR #656, PR #658; Gaps G251, G252)
+
+1. **Signed-Deploy CI Gate, MCP Security Telemetry & MT-OSC Prompt Injection (`PR #653`, `G233(a)`, `G251`)**:
+   - Gated `dispatch-deploy` and `dispatch-hf-space-roll` on `needs: [build, sign]` in `.github/workflows/ura-chatbot-build-push.yml`, registered threats `T42`–`T45` and mitigations `M-AGT-10`–`M-AGT-12` in `threat-model/threats.yaml`, wired `record_mcp_security_event` across `MCPClient`, and injected `ConversationContext.consolidated_spec` (`<consolidated_turn_spec>`) into the LLM context summary in `service.py`.
+2. **Multi-Unit Rental Calculation, Claim-Verifier Passage Isolation & Fuzzy Guard (`PR #655`, `PR #658`, `G251`)**:
+   - Added `extract_rental_unit_multiplier` (supporting stacked adjectives such as `"4 commercial rental units each paying UGX 1,500,000 per month"`) and `"show me the figures"` calculator continuation in `calculator_router.py`.
+   - Kept `cited_passage_contexts` in `rag/claim_verifier.py` strictly scoped to cited retrieval passages (`all_contradiction_contexts` used only for contradiction checks), stripped `+256` phone prefixes in `rag/entailment.py`, and protected 4-letter English words (`"City"`) from 3-letter acronym shortening (`"cit"`) in `_fuzzy_correct_word` (`query.py`).
+3. **Local Simulation Connector Account Sign-In, Sign-Up & Cross-Simulator DB Provisioning (`PR #656`, `PR #658`, `G252`)**:
+   - Added `App/backend/app/mcp/connector_accounts.py` and `POST /v1/connectors/{name}/auth` (`login`, `signup`, `disconnect`, fail-closed `409 Conflict` in `APP_ENV=production`, and rate-limited at 25 attempts / 60 s per owner via `_check_connector_auth_rate_limit`).
+   - Used `PBKDF2-HMAC-SHA256` (`200,000` iterations, 16-byte salt), persisted `connector_accounts` and `connector_account_links` through the dual-DB seam (`database.py`), provisioned new accounts across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and `dts_system.db`, injected sanitized `<linked_accounts>` / `<linked_account_data>` blocks in `service.py`, and added the 5-locale **Sign in / Create account** modal sub-view in `ChatInput.tsx`.
+4. **Error Understanding, Detection & Self-Healing Resolution (`PR #658`, `G254`)**:
+   - Added separator-tolerant TIN/PRN/`CM`/`CF`/`CR`-NIN normalization (`100-001-0001` $\rightarrow$ `1000010001`) and cross-field identifier mix-up diagnostics (NIN-in-TIN, TIN-in-PRN, TIN-in-NIN, digit-count mismatch) across `portal_copilot.py`, `connector_accounts.py`, `workflows/slots.py`, and `mcp/validation.py`.
+   - Added `diagnose_ura_error` in `portal_copilot.py` mapping 8 statutory URA/EFRIS/e-Tax/PRN/NIRA/BWIMS error families to root causes, statutory citations, step-by-step resolution plans, and `remediation_task_id`s, wired into `analyze_portal_context`, `build_portal_task_card`, and fail-closed `handle_portal_task_decision`.
+   - Added `suggested_renames` (`_PARAM_ALIAS_GROUPS` + `difflib.SequenceMatcher`) in `build_validation_repair_hints` (`mcp/validation.py`) so LLM tool-retry loops self-heal parameter name mismatches in a single turn.
+5. **MCP `tax_calculator` Server Completeness, Expanded URA Portal Tax Calculators, 5-Locale `empathy`/`tax_calculator` Tool-RAG, Hardship Relief Co-Routing & Structuring/Paragraphing Parity (`G257`)**:
+   - Explicitly imported both `app.tools.calculators` and `app.tools.mda_interdependence` in `app/mcp/servers/tax_calculator/server.py` so standalone `mcp_tax_calculator` instances expose all `28` `tax_calculator` tools and `4` prompts (`vat_calculation_guide`, `paye_withholding_guide`, `rental_tax_guide`, `tax_relief_and_instalment_guide`).
+   - Expanded `tools/calculators.py` and `calculator_router.py` across all URA Portal Tax Calculators and broader statutory gaps: Second Schedule Presumptive Tax computation (`with_records` vs `without_records` across all 5 turnover brackets up to UGX 150M), Secondary Employment PAYE (`30%`/`40%`), Employer `10%` NSSF + Local Service Tax (`LST`) + PWD disability exemption (`UGX 1.46M/mo`), Non-Resident Branch Profit Repatriation Tax (`15%`, `ITA s.82`), Customs `1.5%` Infrastructure Levy + motor-vehicle age auto-routing (`5–8 yrs` `35%`, `9–15 yrs` `50%`, `>15 yrs` prohibited), FY2026-27 Excise Duty items (`cement_50kg`, `sugar_kg`, `cooking_oil_litre`, `cooking_fat_kg`, `motorcycle_first_registration`), Insurance Agent & Payment Service Provider `10%` WHT, and `TPCA s.39(5)` *in duplum* interest capping.
+   - Added 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) emotional distress and financial hardship synonyms to `_MULTILINGUAL_TAX_SYNONYMS` in `mcp/tool_rag.py` and expanded Runyankole/Acholi hardship patterns in `text_signals.py` (`_HARDSHIP_RE`) so `ToolRAGSelector` co-selects `assess_emotional_tone` (`empathy`) and `simulate_tax_relief_and_instalments` (`tax_calculator`) across all 5 languages, while `fuse_multimodal_affect` propagates `locale` and `localized_acknowledgement`.
+   - Wired `_HARDSHIP_CALC_RELIEF_NOTE` (`TPCA Cap. 343 s. 40` instalment plans & `s. 66(1a)` voluntary disclosure waiver) into distressed calculator turns in `service.py`, and hardened `_SENTENCE_BREAK_RE` / `_GLUED_STEP_RE` / `normalize_structure` in `guardrails.py` and `conversational.py` across all 5 locales.
+6. **Call Receptionist Structuring, Inline Step Numbering, Breadcrumb Transitions, Dynamic Language Detection & 5-Locale Spoken Digit Verbalization (`G258`) + 55,000-Scenario Multimodal & Live Ngrok Benchmark**:
+   - Hardened `_split_into_sentences` and `_join_structured_sentences` in `receptionist/brain.py` so unpunctuated markdown bullet/heading lines split into discrete spoken sentences and numbered step newlines are preserved on screen.
+   - Added `_format_numbered_steps` (line-start and inline `1. ... 2. ... 3. ...` step headers `Step`/`Odaala`/`Hatua`/`Idaara`/`Rwom` with automatic `.` boundary injection), `_BREADCRUMB_ARROW_RE` (5-locale `", then"` navigation transitions while preserving numeric `>`/`<` comparisons), 2-7/3-3-3 Ugandan phone grouping (`+256 41 4334000`, `041 4334000`), compound government portal hostnames (`askura`, `singlewindow`, `webportal`, `eservices`, `helpdesk`, `mygov`), and `verbalize_digits_for_tts(text, locale)` wired into `UraSpeechTTS._stream_orpheus` and `SpeechModel._synthesize_uncached` so `Sunbird/orpheus-3b-tts-multilingual` speaks phone numbers, toll-free numbers, USSD codes, TINs, PRNs, and P.O. Box digits in the active language (`en`, `lg`, `sw`, `nyn`, `ach`) while keeping readable digits on the caller's live caption.
+   - Validated across **55,000 complex URA CX scenarios** (`11,000` per locale across `en`, `lg`, `sw`, `nyn`, `ach`; `27,500 TTT`, `16,500 STT`, `11,000 TTS` -> `55,000 / 55,000` `100.00%` accuracy) and **180 live ngrok stress, fuzzy, screenshot OCR, TTS+ASR round-trip, Call Receptionist WebSocket, and concurrent load probes** (`180 / 180` `100.0%`; `App/docs/Reports/MULTILINGUAL_55000_CX_MULTIMODAL_NGROK_REPORT_2026-10-25.md`).
+7. **Just-In-Time Voice Consent Receipt Persistence & 5-Locale Natural Language Auto-Detection Disambiguation (`G259`)**:
+   - Fixed `grant_voice_consent` (`voice_consent.py`) to upsert the user via `db.upsert_user` and call `db.grant_consent(target_uid, purpose, version)`, and wired Just-In-Time consent receipt persistence across `receptionist/ws.py`, `voice_ws.py`, `voice_ws_v2.py`, `_require_voice_processing_consent` (`main.py`), and `useCall.ts` so authenticated callers who accept the pre-call consent pop-up proceed immediately without a `4403` rejection.
+   - Unified 5-locale function-word vocabularies across `query.py` and `receptionist/language.py`, gated cross-language homographs (`an`, `in`, `ki`, `ku`) on core language evidence in `lexical_hits` and `detect_language`, and enabled clean switch-back to `"en"` in `detect_language` and `_switch_target` (`memory/language_state.py`).

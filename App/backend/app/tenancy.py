@@ -59,6 +59,6 @@ def qdrant_payload_filter(tenant_id: str | None = None) -> dict[str, Any] | None
 
 
 def rls_set_local_sql(tenant_id: str | None = None) -> str:
-    """Session variable for ``infra/postgres/rls.sql``. Caller must apply it."""
+    """Session variable for ``App/infra/postgres/rls.sql``. Caller must apply it."""
     tid = (tenant_id or DEFAULT_TENANT).replace("'", "")
     return f"SET LOCAL app.current_tenant = '{tid}'"

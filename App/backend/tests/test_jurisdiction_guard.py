@@ -1,7 +1,7 @@
 """URA administers taxes in Uganda; a question about elsewhere must be declined.
 
 Measured against a live Sunflower-14B-FP8 + hybrid-Qdrant stack on 2026-09-02
-(``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G41):
+(``App/docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G41):
 
     "What is the corporate income tax rate in Kenya for 2026?"
         -> "**The corporation tax rate in Uganda is 30%** (FY2026-27) …

@@ -219,10 +219,10 @@ rules:
       exclude:
         - "*.test.*"
         - "*test_*"
-        - "tests/*"
+        - "App/tests/*"
         - "Data/*"
         - "*.md"
-        - "threat-model/*"
+        - "App/threat-model/*"
     message: >
       Potential Uganda TIN (Tax Identification Number) detected.
       Ensure PII is not hardcoded in source files.
@@ -241,10 +241,10 @@ rules:
       exclude:
         - "*.test.*"
         - "*test_*"
-        - "tests/*"
+        - "App/tests/*"
         - "Data/*"
         - "*.md"
-        - "threat-model/*"
+        - "App/threat-model/*"
     message: >
       Potential Uganda National ID (NIN) detected.
       Ensure PII is not hardcoded in source files.

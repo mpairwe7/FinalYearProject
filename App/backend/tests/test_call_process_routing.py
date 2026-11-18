@@ -1,6 +1,6 @@
 """One call process: which role this process has and which paths are call paths.
 
-G306 (docs/plans/receptionist-call-process-2026-11-12.md): the Space runs the
+G306 (App/docs/plans/receptionist-call-process-2026-11-12.md): the Space runs the
 API as two processes, and nginx sends every call path to the one that owns the
 in-memory call state. These tests cover the vocabulary that routing is built on.
 """

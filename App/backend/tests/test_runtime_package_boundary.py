@@ -1,7 +1,7 @@
 """The runtime's dependency on the training tree is frozen, and visible.
 
-Issue #308. `app/` imports from `ml/` — the training package — and the image
-does not ship `ml/` wholesale. That combination is how the language detector
+Issue #308. `app/` imports from `App/ml/` — the training package — and the image
+does not ship `App/ml/` wholesale. That combination is how the language detector
 came to be missing in production for the life of the deployment: the import
 failed, the code fell back to a character heuristic, the fallback logged at
 debug, and every Luganda question was read as English. Nothing crashed and
@@ -9,7 +9,7 @@ nothing said anything.
 
 Two guards, neither of which pretends the coupling is fixed:
 
-* the import inventory is pinned, so a *new* runtime dependency on `ml/`
+* the import inventory is pinned, so a *new* runtime dependency on `App/ml/`
   is a deliberate act with a test to update rather than something that
   quietly rides along and breaks a deploy months later; and
 * optional capabilities must report the backend they actually resolved to,
@@ -27,7 +27,7 @@ from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
-# Modules under app/ that import from ml/, and why they are tolerated today.
+# Modules under app/ that import from App/ml/, and why they are tolerated today.
 # Each is debt: the runtime should not need the training tree.
 KNOWN_ML_IMPORTERS: dict[str, str] = {
     "rag/query.py": "lang_id — lingua language detection; shipped explicitly in the image",
@@ -52,18 +52,18 @@ class RuntimeImportBoundaryTest(unittest.TestCase):
         self.assertEqual(
             added,
             set(),
-            "new runtime import of ml/ in "
-            f"{sorted(added)} — the image ships ml/ file-by-file, so an import "
+            "new runtime import of App/ml/ in "
+            f"{sorted(added)} — the image ships App/ml/ file-by-file, so an import "
             "that is not copied will fail at runtime and degrade silently. "
             "Either move the code into app/, or copy it in Dockerfile.cranecloud "
             "and add it to KNOWN_ML_IMPORTERS with the reason.",
         )
 
     def test_the_inventory_does_not_list_modules_that_have_been_cleaned_up(self) -> None:
-        """Keeps the debt list honest as modules are migrated off ml/."""
+        """Keeps the debt list honest as modules are migrated off App/ml/."""
         stale = set(KNOWN_ML_IMPORTERS) - self._actual_importers()
         self.assertEqual(
-            stale, set(), f"KNOWN_ML_IMPORTERS lists {sorted(stale)}, which no longer import ml/"
+            stale, set(), f"KNOWN_ML_IMPORTERS lists {sorted(stale)}, which no longer import App/ml/"
         )
 
 

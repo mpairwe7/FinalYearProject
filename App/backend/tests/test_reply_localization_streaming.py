@@ -240,7 +240,7 @@ class ReplyCacheTest(unittest.TestCase):
             pipeline.localize_reply(english, "lg")
         # A figure-bearing reply costs two round trips per turn once the
         # protected pass fails — one masked, one unprotected retry (see
-        # docs/runbooks/multilingual-figure-fidelity.md). The count itself is
+        # App/docs/runbooks/multilingual-figure-fidelity.md). The count itself is
         # not the property under test: what matters is that the second turn
         # paid a backend again rather than being served a rejected
         # translation out of the memo.

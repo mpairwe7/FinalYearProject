@@ -7,8 +7,8 @@ reached over the project's live reserved ngrok domain (`struttingly-nongeologica
 
 ## 1. Test Harnesses & Configuration
 
-- **Language Switching Suite**: `scripts/verify_language_switching.py`
-- **Concurrency & Capacity Suite**: `tests/load/ngrok_multilang_suite.py`
+- **Language Switching Suite**: `App/scripts/verify_language_switching.py`
+- **Concurrency & Capacity Suite**: `App/tests/load/ngrok_multilang_suite.py`
 - **Target Endpoint**: `https://struttingly-nongeological-briella.ngrok-free.dev/api`
 - **GPU Resource Isolation**: GPU 7 exclusively (GPU 0 remains completely untouched at 0 MB allocation).
 

@@ -1,7 +1,7 @@
 """Handoff and caller safety: a caller is never stranded, misrouted or left unheard.
 
 Regressions from the November 2026 call-receptionist audit
-(docs/plans/receptionist-assurance-2026-11-11.md, ADR-0039). Each test names
+(App/docs/plans/receptionist-assurance-2026-11-11.md, ADR-0039). Each test names
 the failure a taxpayer or an officer would have met.
 """
 

@@ -60,7 +60,7 @@ function writeUrl(tab: CallTab, call: string | null): void {
 }
 
 /**
- * The officer's Call Desk (docs/plans/officer-call-desk-plan.md §3.2): the
+ * The officer's Call Desk (App/docs/plans/officer-call-desk-plan.md §3.2): the
  * live queue and one call in the workspace, plus callbacks, history and performance.
  * `?tab=` and `?call=` make any view a link.
  */

@@ -1,7 +1,7 @@
 # Retrieval + agentic serving-path upgrade — 2026-08-17
 
 Traceability record for the retrieval work landed on this date. Pair with
-`docs/RAG_ARCHITECTURE.md` (pipeline) and `docs/GAPS_AND_AGENTIC_ROADMAP.md`
+`App/docs/RAG_ARCHITECTURE.md` (pipeline) and `App/docs/GAPS_AND_AGENTIC_ROADMAP.md`
 (G16, G17, G27). This file is the audit trail: what changed, why, how to
 re-verify, and what is still open.
 
@@ -124,7 +124,7 @@ Do not delete these ids. Add new regressions as new ids; do not recycle.
 
 **Not all agentic RAG gaps are shipped.** The 2026-08-17 slice closed the
 serving-path retrieval gaps it named. Canonical status is
-`docs/GAPS_AND_AGENTIC_ROADMAP.md` (this file is the decision log).
+`App/docs/GAPS_AND_AGENTIC_ROADMAP.md` (this file is the decision log).
 
 | ID / practice | Code | Default | Docs agree | Justification (why this state) |
 |---------------|------|---------|------------|--------------------------------|

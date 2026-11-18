@@ -1,0 +1,252 @@
+"""Unconditional Monorepo Architecture, Layer-Boundary & Sovereign AI Governance Gate (2026).
+
+Enforces the repository's structural invariants in CI (`pytest App/tests/`):
+1. Hierarchical `AGENTS.md` Router Integrity: every path and nested guide in the
+   root `AGENTS.md` layout table exists on disk and is non-empty.
+2. Unidirectional Layer DAG (Strict Package Boundaries):
+   - `App/ml/` never imports `app.*` or `plugins.*`
+   - `App/plugins/` never imports `app.*`
+   - `App/governance/` and `App/threat-model/` never import `app.*`
+   - `App/backend/app/` -> `App/ml/` imports are frozen to `KNOWN_ML_IMPORTERS`
+3. Workspace & Git Index Hygiene:
+   - Retired `MobileApp/` / `.dart_tool/` build artifacts are absent
+   - No case-colliding symlinks exist under `App/plugins/`
+4. OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`), 5-Locale (`en`, `lg`, `sw`, `nyn`, `ach`)
+   & CycloneDX AIBOM (`aibom_inventory`) completeness in `App/governance/systems/ura-ai-chatbot/manifest.yaml`,
+   plus full `App/governance/compliance_check.py` pass.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+APP_DIR = REPO_ROOT / "App" / "backend" / "app"
+
+KNOWN_ML_IMPORTERS = {
+    "rag/query.py",
+    "speech_service.py",
+    "ingestion/pdf_corpus.py",
+    "ingestion/crawl_corpus.py",
+}
+
+
+def _top_level_imports(py_file: Path) -> set[str]:
+    """Return top-level package names imported by *py_file*."""
+    tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+    packages: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                packages.add(alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            packages.add(node.module.split(".", 1)[0])
+    return packages
+
+
+def test_root_agents_md_router_table_resolves_every_path_and_guide() -> None:
+    """Every row in root AGENTS.md Layout table must point to an existing path and guide."""
+    agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    row_re = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|$", re.M)
+    rows = row_re.findall(agents_md)
+    # 13 since the README-only pointer folders (agents/, apps/, packages/, prompts/, skills/) were removed.
+    assert len(rows) >= 13, f"Expected >= 13 layout rows in AGENTS.md, got {len(rows)}"
+    for owned_path, guide_path in rows:
+        target = REPO_ROOT / owned_path.rstrip("/")
+        guide = REPO_ROOT / guide_path
+        assert target.exists(), f"AGENTS.md layout path missing on disk: {owned_path}"
+        assert guide.is_file(), f"AGENTS.md nested guide missing on disk: {guide_path}"
+        assert guide.stat().st_size > 40, f"AGENTS.md nested guide is empty: {guide_path}"
+
+
+def test_unidirectional_layer_dag_across_monorepo_packages() -> None:
+    """App/ml/, App/plugins/, App/governance/, and App/threat-model/ must never import from app.*."""
+    # 1. Connector subpackages under App/plugins/ never import app.* (only base.py / orchestrator.py bridge app.tools)
+    allowed_plugin_bridges = {"App/plugins/base.py", "App/plugins/orchestrator.py"}
+    for py_path in (REPO_ROOT / "App" / "plugins").rglob("*.py"):
+        rel_str = str(py_path.relative_to(REPO_ROOT))
+        if rel_str in allowed_plugin_bridges:
+            continue
+        imports = _top_level_imports(py_path)
+        assert "app" not in imports, f"{rel_str} must not import runtime package 'app'"
+
+    # 2. App/ml/ never imports plugins.*, and App/ml/ -> app.* is frozen to the 3 evaluation/MT bridges
+    allowed_ml_app_bridges = {
+        "App/ml/pipelines/corpus_coverage.py",
+        "App/ml/scripts/eval_retrieval.py",
+        "App/ml/scripts/mt/infer_mt.py",
+    }
+    for py_path in (REPO_ROOT / "App" / "ml").rglob("*.py"):
+        imports = _top_level_imports(py_path)
+        rel_str = str(py_path.relative_to(REPO_ROOT))
+        assert "plugins" not in imports, f"{rel_str} must not import 'plugins'"
+        if rel_str not in allowed_ml_app_bridges:
+            assert "app" not in imports, f"{rel_str} must not import runtime package 'app'"
+
+    # 3. App/governance/ and App/threat-model/ never import app.*
+    for folder in ("governance", "threat-model"):
+        for py_path in (REPO_ROOT / folder).rglob("*.py"):
+            imports = _top_level_imports(py_path)
+            rel = py_path.relative_to(REPO_ROOT)
+            assert "app" not in imports, f"{rel} must not import runtime package 'app'"
+
+    # 4. App/backend/app -> App/ml/ imports stay frozen to KNOWN_ML_IMPORTERS
+    actual_ml_importers: set[str] = set()
+    for py_path in APP_DIR.rglob("*.py"):
+        if "ml" in _top_level_imports(py_path):
+            actual_ml_importers.add(str(py_path.relative_to(APP_DIR)))
+    assert actual_ml_importers == KNOWN_ML_IMPORTERS, (
+        f"Runtime App/ml/ import boundary drifted: expected {sorted(KNOWN_ML_IMPORTERS)}, "
+        f"got {sorted(actual_ml_importers)}"
+    )
+
+
+def test_workspace_hygiene_no_retired_mobile_or_case_colliding_plugin_symlinks() -> None:
+    """Retired MobileApp/.dart_tool cache, superseded root docs, and case-colliding plugin symlinks stay absent."""
+    retired_paths = (
+        "MobileApp",
+        ".antigravitycli",
+        ".agents",
+        "MIGRATION-PLAN.md",
+        "UI-MIGRATION-NOTES.md",
+        "QUICKSTART.md",
+        "docs/MOBILE_ARCHITECTURE.md",
+        "docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md",
+        "docs/URA_Chatbot_Roadmap_2026_Enhanced.md",
+    )
+    for rel in retired_paths:
+        assert not (REPO_ROOT / rel).exists(), f"Retired/superseded path must not exist: {rel}"
+    canonical_plugins = {
+        "__init__.py",
+        "__pycache__",
+        "README.md",
+        "AGENTS.md",
+        "base.py",
+        "orchestrator.py",
+        "server.py",
+        "apps",
+        "efris",
+        "digital_tax_stamps",
+        "ursb",
+        "bwims",
+        "tin_registration",
+        "payment_system",
+    }
+    actual_entries = {p.name for p in (REPO_ROOT / "App" / "plugins").iterdir()}
+    unexpected = actual_entries - canonical_plugins
+    assert not unexpected, f"Unexpected or case-colliding entries in App/plugins/: {sorted(unexpected)}"
+
+
+def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
+    """App/governance/systems/ura-ai-chatbot/manifest.yaml covers all 5 locales, ASI01-ASI10, AIBOM, and passes compliance_check."""
+    from governance.compliance_check import check as run_compliance_check
+
+    manifest = yaml.safe_load((REPO_ROOT / "App" / "governance" / "systems" / "ura-ai-chatbot" / "manifest.yaml").read_text(encoding="utf-8"))
+    assert set(manifest["system"]["languages"]) == {"en", "lg", "sw", "nyn", "ach"}
+
+    asi_risks = manifest["owasp_agentic_2026"]["risks"]
+    asi_ids = [r["id"] for r in asi_risks]
+    assert asi_ids == [f"ASI{i:02d}" for i in range(1, 11)]
+    assert all(r.get("status") == "mitigated" and r.get("verified_by") for r in asi_risks)
+
+    aibom_models = {m["id"] for m in manifest["aibom_inventory"]["models"]}
+    assert {
+        "Sunbird/Sunflower-Qwen3.5-9B",
+        "Sunbird/orpheus-3b-tts-multilingual",
+        "Sunbird/SunflowerASR-51-african-languages",
+        "BAAI/bge-m3",
+        "mixedbread-ai/mxbai-rerank-base-v2",
+    } <= aibom_models
+
+    mcp_risks = manifest["owasp_mcp_top10_2026"]["risks"]
+    assert [r["id"] for r in mcp_risks] == [f"MCP{i:02d}" for i in range(1, 11)]
+    assert all(r.get("status") == "mitigated" and r.get("verified_by") for r in mcp_risks)
+
+    maestro_layers = manifest["csa_aicm_maestro_2026"]["layers"]
+    assert [l["id"] for l in maestro_layers] == [f"MAESTRO-L{i}" for i in range(1, 8)]
+    assert all(l.get("status") == "mitigated" and l.get("verified_by") for l in maestro_layers)
+
+    import json
+
+    sbom = json.loads((REPO_ROOT / "App" / "docs" / "capstone" / "sbom-cyclonedx.json").read_text(encoding="utf-8"))
+    comp_refs = {c["bom-ref"] for c in sbom["components"]} | {sbom["metadata"]["component"]["bom-ref"]}
+    for dep in sbom.get("dependencies", []):
+        assert dep["ref"] in comp_refs
+        for target in dep.get("dependsOn", []):
+            assert target in comp_refs, f"Broken CycloneDX bom-ref dependency: {target}"
+
+    assert run_compliance_check() is True
+
+    import importlib.util
+
+    tm_spec = importlib.util.spec_from_file_location("validate_threats", REPO_ROOT / "App" / "threat-model" / "validate_threats.py")
+    assert tm_spec and tm_spec.loader
+    tm_mod = importlib.util.module_from_spec(tm_spec)
+    tm_spec.loader.exec_module(tm_mod)
+    assert tm_mod.validate() is True
+    assert len(tm_mod.THREAT_REGISTRY) >= 38
+
+    rr_spec = importlib.util.spec_from_file_location("validate_rr", REPO_ROOT / "App" / "scripts" / "validate-risk-register.py")
+    assert rr_spec and rr_spec.loader
+    rr_mod = importlib.util.module_from_spec(rr_spec)
+    rr_spec.loader.exec_module(rr_mod)
+    risks = rr_mod.load_register(REPO_ROOT / "App" / "docs" / "security" / "threat-model" / "risk-register.yaml")
+    assert rr_mod.validate(risks) == []
+    assert rr_mod.check_expired_reviews(risks) == []
+
+
+def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
+    """Every ADR in App/docs/adr/README.md exists and follows MADR 4.0 structure, and the living-docs skill is present."""
+    adr_readme = (REPO_ROOT / "App" / "docs" / "adr" / "README.md").read_text(encoding="utf-8")
+    adr_links = re.findall(r"\[ADR-\d+\]\(([^)]+\.md)\)", adr_readme)
+    assert len(adr_links) >= 2, f"Expected >= 2 ADRs in App/docs/adr/README.md, found {adr_links}"
+    required_sections = (
+        "## Context and Problem Statement",
+        "## Decision Outcome",
+        "## Consequences",
+        "## Confirmation",
+    )
+    for rel_link in adr_links:
+        adr_file = REPO_ROOT / "App" / "docs" / "adr" / rel_link
+        assert adr_file.is_file(), f"ADR file missing: {adr_file}"
+        body = adr_file.read_text(encoding="utf-8")
+        for section in required_sections:
+            assert section in body, f"{rel_link} missing MADR 4.0 section: {section}"
+
+    skill_file = REPO_ROOT / ".claude" / "skills" / "living-docs-adr-runbooks-traceability" / "SKILL.md"
+    assert skill_file.is_file()
+    assert skill_file.stat().st_size > 200
+
+
+def test_storage_backend_api_parity_and_flag_lifecycle_taxonomy() -> None:
+    """db/database.py and db/postgres.py must expose 100% identical public functions, and all 85 flags must classify cleanly."""
+    from app.db import database, postgres
+    from app.config.flags import _REGISTRY, flags
+    from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
+
+    parity = verify_storage_backend_parity(APP_DIR)
+    assert parity["ok"] is True, f"Storage backend parity drift: {parity}"
+    assert parity["sqlite_function_count"] >= 103
+    assert parity["sqlite_function_count"] == parity["postgres_function_count"]
+    assert isinstance(database, StorageBackendProtocol)
+    assert isinstance(postgres, StorageBackendProtocol)
+
+    summary = flags.lifecycle_summary()
+    assert set(summary.keys()) >= {
+        "compliance_invariant",
+        "kill_switch",
+        "release_rollout",
+        "experimental_rag",
+    }
+    assert sum(len(v) for v in summary.values()) == len(_REGISTRY)
+    assert set(summary["compliance_invariant"]) == {
+        "audit_ledger",
+        "auth_required",
+        "multi_tenant",
+        "ticket_queue",
+        "voice_consent",
+    }

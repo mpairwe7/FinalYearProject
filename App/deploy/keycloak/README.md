@@ -71,5 +71,5 @@ Keycloak opens its registration form when *User registration* is enabled and
 falls back to the login form when it is not. Nothing else differs between the two
 entry points.
 
-See `docs/PROJECT_SETUP.md` → *Sign-In and Sign-Up (OIDC)* for the full
+See `App/docs/PROJECT_SETUP.md` → *Sign-In and Sign-Up (OIDC)* for the full
 walkthrough and the dev-token fallback.

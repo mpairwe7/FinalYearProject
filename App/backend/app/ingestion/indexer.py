@@ -11,7 +11,7 @@ silently indexed. Three corpora feed it:
 
 Evaluation and red-team JSONL are never indexed.
 
-The two chunk corpora need an offline export first (they depend on ``ml/`` and,
+The two chunk corpora need an offline export first (they depend on ``App/ml/`` and,
 for PDFs, ``pymupdf4llm`` — neither ships in the serving image). Without one
 they are skipped, so a FAQ-only deployment is unaffected.
 
@@ -580,12 +580,12 @@ def main() -> None:
     parser.add_argument(
         "--export-pdf-jsonl",
         action="store_true",
-        help="Chunk every PDF into canonical JSONL (offline; needs ml/ + pymupdf4llm)",
+        help="Chunk every PDF into canonical JSONL (offline; needs App/ml/ + pymupdf4llm)",
     )
     parser.add_argument(
         "--export-crawl-jsonl",
         action="store_true",
-        help="Chunk the newest capture of every substantive crawled page (offline; needs ml/)",
+        help="Chunk the newest capture of every substantive crawled page (offline; needs App/ml/)",
     )
     parser.add_argument(
         "--download-pdfs",

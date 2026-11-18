@@ -295,11 +295,11 @@ TRUST_MANIFEST = os.getenv("CORPUS_TRUST_MANIFEST", "false").lower() in ("1", "t
 
 #: One honest identity for every fetch that feeds the corpus, equal to
 #: ``ml.scripts.data_aug.crawl_policy.USER_AGENT`` (the runtime may not import it,
-#: so tests/test_crawl_policy.py holds the two together). A browser string here
+#: so App/tests/test_crawl_policy.py holds the two together). A browser string here
 #: would be a public service impersonating a person (ADR-0023).
 CORPUS_FETCH_USER_AGENT = (
     "URA-Taxpayer-Assistant-Crawler/2.0 "
-    "(+https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md)"
+    "(+https://github.com/mpairwe7/FinalYearProject/blob/dev/App/docs/runbooks/crawl-operations.md)"
 )
 
 # Chunk sizing. The defaults mirror ``ml.scripts.data_aug.chunkers.chunk_pdf``
@@ -318,7 +318,7 @@ PDF_CORPUS_MAX_BYTES = int(os.getenv("PDF_CORPUS_MAX_BYTES", str(100 * 1024 * 10
 # leaders as "� � �" runs. ``text_utils._DOT_LEADER_RE`` only
 # matches literal "..." and therefore misses both. Normalising here keeps the
 # fix scoped to the retrieval corpus; the training pipeline shares the same
-# latent gap in ``ml/scripts/data_aug/text_utils.py``.
+# latent gap in ``App/ml/scripts/data_aug/text_utils.py``.
 #
 # A leader run is 3+ dot-ish glyphs separated only by whitespace, optionally
 # trailed by a page number. Legitimate prose ("1.2.3", "a. b. c.") never
@@ -503,7 +503,7 @@ def _has_pdf_header(path: Path) -> bool:
 def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str, Any]]:
     """Yield canonical JSONL records for one PDF.
 
-    The hierarchical chunker lives in ``ml/``, which is deliberately absent
+    The hierarchical chunker lives in ``App/ml/``, which is deliberately absent
     from the serving image — this is an offline-only code path, so the import
     is lazy and a missing dependency raises rather than silently yielding an
     empty corpus.
@@ -513,7 +513,7 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise CorpusValidationError(
             "PDF export needs ml.scripts.data_aug.chunkers (and pymupdf4llm). "
-            "Run the exporter from a source checkout with the ml/ package importable."
+            "Run the exporter from a source checkout with the App/ml/ package importable."
         ) from exc
 
     try:

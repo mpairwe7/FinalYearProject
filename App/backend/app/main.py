@@ -4593,7 +4593,7 @@ def review_call_endpoint(
     return {"ok": ok, "call_id": call_id, "rating": rating}
 
 
-# -- Officer Call Desk (docs/plans/officer-call-desk-plan.md §6.2–6.3) -------
+# -- Officer Call Desk (App/docs/plans/officer-call-desk-plan.md §6.2–6.3) -------
 # Per-call routes, staff-only and audited; the lobby channel never carries
 # what these return.
 

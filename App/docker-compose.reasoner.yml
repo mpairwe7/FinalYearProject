@@ -1,7 +1,7 @@
 # Local GPU overlay — Qwen/Qwen3.8-27B-FP8 reasoning tier (T3) via vLLM on GPU 7.
 #
 # Serves the sovereign local reasoning model selected in Phase B
-# (docs/Reports/reasoner-bakeoff-2026-10.md) alongside the T1 Sunflower-9B
+# (App/docs/Reports/reasoner-bakeoff-2026-10.md) alongside the T1 Sunflower-9B
 # service from docker-compose.local-sunflower.yml.
 #
 #   cd App && docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \

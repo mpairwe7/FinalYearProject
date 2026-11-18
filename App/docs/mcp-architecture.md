@@ -225,7 +225,7 @@ MCP_CLIENT_KEY_EFRIS=/etc/ssl/certs/mcp-client.key
 A server with no credential configured is locked, not open. For production
 the link uses OAuth 2.1: the server validates an audience-bound RS256 token
 and the API obtains one with the client-credentials grant
-(`docs/runbooks/enterprise-connectors-and-mcp.md` §2.1).
+(`App/docs/runbooks/enterprise-connectors-and-mcp.md` §2.1).
 
 ### Connectors in taxpayer chat
 
@@ -244,7 +244,7 @@ accounts are hashed with `PBKDF2-HMAC-SHA256` (200,000 iterations) and
 provisioned across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and
 `dts_system.db`, and connected profiles are injected into chat turns inside
 sanitized `<linked_accounts>` / `<linked_account_data>` blocks (`rag/pipeline.py`).
-See `docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
+See `App/docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
 
 ## Enterprise Security Controls (2026 Standards)
 
