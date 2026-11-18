@@ -3,7 +3,7 @@
 
 Pipeline:
 
-    1. Load the student (from ``distill_mt.py`` output or any HF seq2seq).
+    1. Load any Hugging Face seq2seq checkpoint.
     2. ``optimum.exporters.onnx`` → fp32 encoder/decoder graphs.
     3. ``optimum.onnxruntime.ORTQuantizer`` → INT8 dynamic quant.
     4. Write a sherpa-onnx-compatible layout under ``artifacts/mt/onnx/``.
@@ -66,7 +66,7 @@ def run(*, checkpoint: Path, output_dir: Path, quantize: bool, dry_run: bool) ->
         return result
 
     if not checkpoint.exists():
-        result.error = f"checkpoint missing: {checkpoint} — run distill_mt.py first"
+        result.error = f"checkpoint missing: {checkpoint} (pass a Hugging Face seq2seq checkpoint)"
         log.error(result.error)
         return result
 

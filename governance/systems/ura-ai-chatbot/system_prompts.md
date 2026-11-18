@@ -24,7 +24,7 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 
 - **Change control.** A prompt change edits the text in `app/prompts/`, adds a
   row to the [change log](change_log.md), and updates the guardrails' signature
-  phrases when a signature line changes ([prompts/README.md](../../../prompts/README.md)).
+  phrases in [output_checks.py](../../../App/backend/app/guardrails/output_checks.py) when a signature line changes.
 - **Only current, enforced facts.** A prompt states no rule the code does not
   enforce and no figure: ADR-0030, and G662, where a hard-coded example once put
   stale rates into every answer.

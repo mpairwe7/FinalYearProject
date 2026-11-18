@@ -165,13 +165,22 @@ WHISPER_ADAPTER_ACH=/app/adapters/whisper-ach
 
 ### Model and adapter mounts
 
-The App compose stack mounts LoRA artifacts read-only from the repository:
+The App compose stack mounts LoRA artifacts read-only from `Model/adapters/`, which
+is git-ignored: git tracks no adapter weights, so a deployment supplies its own.
 
 ```yaml
 services:
   api:
     volumes:
-      - ../fine-tuning/adapters:/app/adapters:ro
+      - ../Model/adapters:/app/adapters:ro
+```
+
+Upgrading from a checkout that kept weights under `fine-tuning/adapters/` (removed by
+ADR-0064): move them before restarting the stack, or the loaders log each missing
+adapter and answer without it.
+
+```bash
+mkdir -p Model/adapters && mv fine-tuning/adapters/* Model/adapters/ && rmdir fine-tuning/adapters
 ```
 
 For GPU-constrained hosts, keep `LLM_LOAD_IN_4BIT=true`. The local Transformers path loads Qwen3-8B with BitsAndBytes NF4 quantization and then attaches the per-locale PEFT adapters for `lg`, `sw`, `nyn`, and `ach`. Whisper ASR should remain on CPU with `WHISPER_DEVICE=cpu` unless the deployment has a separate GPU budget for ASR.

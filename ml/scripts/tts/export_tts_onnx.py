@@ -152,8 +152,9 @@ def _package_piper(voice_id: str, source_dir: Path, dest_dir: Path) -> TtsPackag
 def _package_vits_checkpoint(voice_id: str, checkpoint: Path, dest_dir: Path) -> TtsPackage:
     """Placeholder for custom VITS → ONNX export.
 
-    Full export happens in train_luganda_vits.py once voice data has been
-    collected. This function is scaffolding so the top-level CLI works.
+    No Luganda VITS checkpoint is trained in this repository (the training
+    script was removed with the other fine-tuning code, ADR-0064). This function
+    is scaffolding so the top-level CLI works.
     """
     pkg = TtsPackage(
         voice_id=voice_id,
@@ -162,7 +163,7 @@ def _package_vits_checkpoint(voice_id: str, checkpoint: Path, dest_dir: Path) ->
     )
     pkg.error = (
         f"VITS ONNX export not yet implemented — checkpoint {checkpoint} "
-        f"must first be trained via ml/scripts/tts/train_luganda_vits.py"
+        f"needs a VITS voice trained outside this repository"
     )
     log.warning(pkg.error)
     return pkg

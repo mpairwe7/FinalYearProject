@@ -21,9 +21,6 @@ been recorded.
 download_models.py           # fetch Piper/Kokoro under artifacts/speech/tts/
       |
       v
-train_luganda_vits.py        # (Luganda only) custom VITS training
-      |
-      v
 export_tts_onnx.py           # package into sherpa-onnx layout
       |
       v

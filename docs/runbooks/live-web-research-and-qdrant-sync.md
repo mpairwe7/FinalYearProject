@@ -40,7 +40,7 @@ When enabled, the Phase 41 Live Web Research and Self-Updating Qdrant subsystem 
 | `PDF_ARCHIVE_DIR` | `App/Data/archive` | Archive directory where superseded `.jsonl` files are moved on `replaced_outdated`. |
 | `WEB_SYNC_TTL_SECONDS` | `604800` | TTL (7 days) for verified/synced entries in `web_sync_ledger` before re-checking `ura.go.ug`. |
 
-To enable at runtime via environment variables (in `.env` or `configs/prototype.env`):
+To enable at runtime via environment variables (in `.env` or `App/configs/prototype.env`):
 ```bash
 export FLAG_LIVE_WEB_RESEARCH=true
 export FLAG_AUTO_QDRANT_WEB_SYNC=true

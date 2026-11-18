@@ -19,9 +19,6 @@ Commercial-safe speech recognition pipeline for URA Chatbot.
 download_models.py           # fetch HF snapshots into artifacts/speech/asr/
       |
       v
-train_luganda.py             # (optional) LoRA fine-tune Whisper-small on CV-lg
-      |
-      v
 export_asr_onnx.py           # optimum ONNX export + INT8 quantisation
       |
       v

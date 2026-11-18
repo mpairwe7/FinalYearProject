@@ -57,6 +57,7 @@ Model/*.pt
 Model/*.onnx
 Model/*.tflite
 Model/faiss_index/
+Model/adapters/
 App/Model/
 
 # Downloaded LLM checkpoints (16GB+ safetensors shards + HF cache locks —
