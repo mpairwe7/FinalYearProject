@@ -1,8 +1,10 @@
-"""Outside development and test, a development token cannot make anyone staff.
+"""A development token makes no one staff where anyone could have made it.
 
 Any ``APP_ENV`` other than ``production`` used to mint and accept HS256
 development tokens, and ``POST /v1/auth/dev-token`` handed out ``ura_admin`` to
-an unauthenticated request. The HF Space runs with such an ``APP_ENV``.
+an unauthenticated request. The HF Space runs as ``development`` with no
+``AUTH_DEV_SECRET``, so a token signed with the public default is just as open.
+The suite signs with its own secret (``tests/conftest.py``).
 """
 
 from __future__ import annotations
@@ -55,10 +57,11 @@ def test_in_development_a_staff_dev_token_is_still_minted(monkeypatch, client):
     assert response.status_code == 200 and response.json()["role"] == "ura_admin"
 
 
-def _signed(claims: dict) -> str:
+def _signed(claims: dict, secret: str | None = None) -> str:
     header = jwt_auth._b64url_encode(b'{"alg":"HS256","typ":"JWT"}')
     payload = jwt_auth._b64url_encode(json.dumps(claims).encode())
-    return f"{header}.{payload}.{jwt_auth._hs256_sign(header, payload, jwt_auth.AUTH_DEV_SECRET)}"
+    key = jwt_auth.AUTH_DEV_SECRET if secret is None else secret
+    return f"{header}.{payload}.{jwt_auth._hs256_sign(header, payload, key)}"
 
 
 def test_outside_development_a_dev_signed_staff_token_is_refused(staging):
@@ -114,3 +117,26 @@ def test_in_development_a_dev_signed_staff_token_is_accepted(monkeypatch):
     monkeypatch.setattr(jwt_auth, "APP_ENV", "development")
     staff = jwt_auth.make_dev_token(user_id="u1", role="ura_admin")
     assert jwt_auth._hs256_verify(staff, jwt_auth.AUTH_DEV_SECRET)["sub"] == "u1"
+
+
+@pytest.mark.parametrize("which", ["public default", "empty"])
+def test_in_development_a_token_on_a_public_or_empty_secret_names_no_staff(which):
+    """Anyone can sign with these, so a token on one names the demo taxpayer at most."""
+    key = {"public default": jwt_auth.PUBLIC_DEV_SECRET, "empty": ""}[which]
+    now = int(time.time())
+    staff = _signed({"sub": "u1", "iat": now, "exp": now + 600, "role": "ura_admin"}, key)
+    with pytest.raises(jwt_auth.JWTAuthError):
+        jwt_auth._hs256_verify(staff, key)
+    demo = _signed({"sub": DEMO["user_id"], "iat": now, "exp": now + 600, "role": "verified_taxpayer"}, key)
+    assert jwt_auth._hs256_verify(demo, key)["role"] == "verified_taxpayer"
+
+
+def test_in_development_on_the_public_secret_the_endpoint_mints_no_staff_token(monkeypatch, client):
+    monkeypatch.setattr(jwt_auth, "AUTH_DEV_SECRET", jwt_auth.PUBLIC_DEV_SECRET)
+    assert client.post("/v1/auth/dev-token", json={"role": "ura_admin"}).status_code == 403
+    assert client.post("/v1/auth/dev-token", json=DEMO).status_code == 200
+
+
+def test_the_suite_signs_with_a_private_secret():
+    """Every other staff test here relies on it (tests/conftest.py)."""
+    assert jwt_auth.AUTH_DEV_SECRET not in ("", jwt_auth.PUBLIC_DEV_SECRET)

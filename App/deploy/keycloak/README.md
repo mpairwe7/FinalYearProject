@@ -2,8 +2,8 @@
 
 The staff dashboards (`/admin`, `/agent`) authenticate against an OIDC provider —
 the backend **verifies** tokens but never issues them, so a real identity
-provider is required (there is no password form to fall back on except the
-opt-in dev-token panel, which is not authentication).
+provider is required (there is no password form to fall back on; the
+`/v1/auth/dev-token` endpoint is for local development and is not authentication).
 
 `ura-realm.json` is a reference realm, verified end-to-end against **Keycloak 26**
 with OAuth 2.1 authorization-code + PKCE S256 and RS256 tokens. It defines the

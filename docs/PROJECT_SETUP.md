@@ -242,7 +242,7 @@ your identity provider (public client, no secret in the bundle).
 
 | Route | What it does |
 | --- | --- |
-| `/signin` | Starts the redirect. Also hosts the opt-in dev-token panel. |
+| `/signin` | Starts the redirect. |
 | `/signup` | The same redirect with a registration hint, so "create an account" reaches the provider's own registration screen. |
 | `/signin/callback` | Completes the code exchange for both, then routes by role. |
 
@@ -384,11 +384,12 @@ AUTH_ALG=HS256                # backend
 AUTH_DEV_SECRET=<shared secret>
 ```
 
-Non-IT staff, tax officers, and evaluators can simply click the 1-Click Role buttons on `/signin` (or register on `/signup`), which automatically fetches a token via `POST /v1/auth/dev-token`:
-- **Tax Agent / Staff**: Work the escalation queue & view query flows
-- **Administrator**: Full operations overview
-- **Auditor**: Read-only oversight
-- **Taxpayer**: Citizen profile with multi-turn memory
+For local development without a provider, mint a token with `POST /v1/auth/dev-token`,
+for example `{"role": "ura_admin"}`. The roles are `ura_staff` (the escalation queue),
+`ura_admin` (operations), `ura_auditor` (read-only oversight) and `verified_taxpayer`.
+A staff role is minted only under `APP_ENV` development or test and with
+`AUTH_DEV_SECRET` set to a random value; on the public default secret, or anywhere
+else, the endpoint mints only the portal demo taxpayer (ADR-0062).
 
 ## Settings
 
