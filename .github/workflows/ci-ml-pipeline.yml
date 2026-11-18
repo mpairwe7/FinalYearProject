@@ -288,6 +288,8 @@ jobs:
         run: python App/ml/pipelines/validate_data.py
 
       - name: Data augmentation import & schema smoke check
+        env:
+          PYTHONPATH: ${{ github.workspace }}/App
         run: |
           uv pip install --system 'datasketch==1.6.5' ftfy
           python - <<'PY'

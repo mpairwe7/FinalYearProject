@@ -139,7 +139,7 @@ class PluginOrchestrator:
         try:
             healthy = p.connector.is_healthy()
         except Exception:
-            logger.exception("Connector health check failed for %s", name_clean)
+            logger.exception("Connector health check failed for %s", name_clean.replace("\r", " ").replace("\n", " "))
             return {
                 "ok": False,
                 "healthy": False,

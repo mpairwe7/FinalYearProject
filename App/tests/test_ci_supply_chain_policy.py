@@ -201,7 +201,11 @@ def test_dockerfile_images_are_digest_pinned(path: Path):
     text = path.read_text(encoding="utf-8")
     stages = {s.lower() for s in re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", text, re.M | re.I)}
     images = re.findall(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", text, re.M | re.I)
-    images += re.findall(r"^COPY\s+(?:--(?!from=)\S+\s+)*--from=(\S+)", text, re.M | re.I)
+    images += [
+        line.split("--from=", 1)[1].split()[0]
+        for line in text.splitlines()
+        if line.lstrip().upper().startswith("COPY") and "--from=" in line
+    ]
     assert images, f"{name}: no base image found"
     for image in images:
         if image.lower() in stages or image.isdigit():
