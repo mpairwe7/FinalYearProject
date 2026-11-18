@@ -435,9 +435,9 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip().lower() or "cpu"
 # Sunbird/asr-whisper-large-v3-salt — a full fine-tune (not a LoRA) of
 # whisper-large-v3 covering all five locales this deployment offers, plus
 # Ateso and Lugbara. Unlike WHISPER_ADAPTERS above, which is per-language and
-# has real weights checked in for Luganda only (Model/adapters/ is
-# otherwise empty — English and Kiswahili silently ran through the
-# Luganda-merged model), this is one model that covers the whole set:
+# had local weights for Luganda only (no adapter weights are tracked in git; a
+# deployment supplies them under Model/adapters/ — English and Kiswahili
+# silently ran through the Luganda-merged model), this is one model that covers the whole set:
 # published WER eng 0.018, lug 0.142. Enabled by default, same as
 # LLM_MODEL — an HF repo id that is pulled on first use whenever the class of
 # dependency (torch + transformers) is importable; set WHISPER_SALT_ENABLED=false
