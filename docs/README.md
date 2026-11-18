@@ -17,7 +17,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0013`) governing monorepo layer boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`, session binding & resume codes `ADR-0013`), Node.js 24 CI & Actions supply chain (`ADR-0011`), and storage parity (`ADR-0012`) |
 | [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
-| [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
+| [Agent repo map](../AGENTS.md) | Where each part of the repo lives, and the guide that owns it |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
 | [500-Scenario Complex CX, Cross-MDA & Journey Copilot Benchmark](Reports/CX_500_COMPLEX_NGROK_REPORT_2026-10-23.md) | 500 complex multi-turn CX scenarios (`1,452` turns across 10 pillars, `500/500 = 100.0%` accuracy, `p50 = 335.81 ms`, `p95 = 455.83 ms`) evaluated live over Docker GPU + ngrok (`ADR-0008`–`ADR-0012`) |

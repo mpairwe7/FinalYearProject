@@ -2,13 +2,13 @@
 """Step 11: Evaluate Whisper LoRA adapters per language (WER metric).
 
 Compares base Whisper-small vs fine-tuned adapter on synthesized speech.
-Uses existing synthesized audio from fine-tuning/data/cv_{lang}/audio/.
+Uses existing synthesized audio from ml/fine-tuning/data/cv_{lang}/audio/.
 
 Metrics: Word Error Rate (WER), Character Error Rate (CER).
 
 Usage:
-    python fine-tuning/scripts/11_evaluate_lora_whisper.py --languages lg sw nyn
-    python fine-tuning/scripts/11_evaluate_lora_whisper.py --languages sw --max-samples 20
+    python ml/fine-tuning/scripts/11_evaluate_lora_whisper.py --languages lg sw nyn
+    python ml/fine-tuning/scripts/11_evaluate_lora_whisper.py --languages sw --max-samples 20
 """
 
 import argparse
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_DIR = PROJECT_ROOT / "Results"
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "openai/whisper-small")

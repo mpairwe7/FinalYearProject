@@ -5,8 +5,8 @@ Compares base model vs fine-tuned adapter on held-out test prompts.
 Metrics: ROUGE-L, BLEU, response quality scoring.
 
 Usage:
-    python fine-tuning/scripts/10_evaluate_lora_qwen.py --languages lg sw nyn ach
-    python fine-tuning/scripts/10_evaluate_lora_qwen.py --languages sw --max-samples 20
+    python ml/fine-tuning/scripts/10_evaluate_lora_qwen.py --languages lg sw nyn ach
+    python ml/fine-tuning/scripts/10_evaluate_lora_qwen.py --languages sw --max-samples 20
 """
 
 import argparse
@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_DIR = PROJECT_ROOT / "Results"
 
 FINETUNE_MODEL = os.getenv("FINETUNE_MODEL")

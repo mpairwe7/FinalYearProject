@@ -140,6 +140,8 @@ def _hand_edits(phase: int, apply: bool) -> None:
     applied = 0
     for rel, old, new in HAND_EDITS.get(phase, []):
         path = codemod.REPO / rel
+        if not path.exists():
+            continue  # removed since (the root pointer folders)
         text = path.read_text()
         if new in text and old not in text:
             continue  # already applied

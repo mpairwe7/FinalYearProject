@@ -132,7 +132,7 @@ services:
       - ../Data/pdfs:/app/Data/pdfs:ro
       - ../Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
-      - ../fine-tuning/adapters:/app/adapters:ro
+      - ../ml/fine-tuning/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
       - ../plugins:/app/plugins:ro
       - ./backend/app:/app/app

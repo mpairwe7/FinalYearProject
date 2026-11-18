@@ -37,17 +37,9 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 FinalYearProject/
 ├── AGENTS.md              # Agent-monorepo router (imports still live under App/)
 ├── CLAUDE.md              # Points coding agents at AGENTS.md
-├── agents/                # graphs / tools / mcp / prompts pointers
-├── apps/api               # FastAPI entry → App/backend
-├── apps/web               # Next.js entry → App/frontend
-├── packages/              # Why this is not a split package monorepo
-├── prompts/               # Pointer to runtime prompts
-├── skills/                # Pointer to Cursor/Claude skills
-├── configs/               # prototype.env
 ├── scripts/prototype.sh   # load demo defaults + print seed command
 ├── evals/                 # Eval runners + preference export
 ├── infra/                 # K8s stubs (not applied)
-├── .agents/               # layout, testing, prototype notes
 ├── .github/workflows/     # CI/CD, security, frontend, mobile, and MLOps workflows
 ├── App/                   # Application code
 │   ├── backend/          # FastAPI backend
@@ -165,7 +157,7 @@ User Query
 | **Semantic Cache** | `rag/cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `rag/corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
 | **Generation** | `Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8` | vLLM HTTP (T1 9B FP8 with native 256K / 262,144 context window across 67 African languages; T2/T3 27.8B FP8 Sovereign Reasoning Tier for multi-hop statutory & dispute queries per `ADR-0007`); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the fallback and what the lg/sw/nyn/ach LoRA adapters target |
-| **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `fine-tuning/adapters/` and selected with `set_adapter()` |
+| **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `ml/fine-tuning/adapters/` and selected with `set_adapter()` |
 | **Deterministic Tax, Cross-MDA & Relief Tools** | `tools/` (`72` MCP `2026-07-28` tools across `18` namespaces) + `scenario_planner.py` | `28` `tax_calculator` tools including 6 Cross-MDA & Queue-Reduction tools in `tools/mda_interdependence.py` (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery` — `ADR-0009`) |
 | **Statutory & 10-MDA Corpus + Self-Updating Qdrant** | `ingestion/pdf_corpus.py` + `web_research.py` + `ephemeral_pdf_sandbox.py` + `vectorstore/corpus_sync.py` | `186` PDF sources (`175` unique, `5,639` structure-aware statutory chunks across URA, Parliament of Uganda, ULII, and all 10 high-dependency Ugandan MDAs) → `7,251` Qdrant hybrid vectors (`ADR-0008`, `ADR-0009`) |
 | **Guided Taxpayer & Cross-Agency Journeys** | `workflows/` (`21` YAML state machines) + `journey_copilot.py` | `21` guided workflows (including `mda_ntr_resolution.yaml` and `new_taxpayer_and_relief.yaml`) with Prerequisite DAGs, A2UI interactive forms, pushdown `goal_stack`, and Step-Up Auth session migration (`ADR-0010`) |
@@ -187,7 +179,7 @@ The App deployment is designed for public anonymous chat while keeping private/a
 | Public chat | `/v1/chat`, `/v1/chat/stream`, frontend `/api/v1/chat`, speech health, TTS, translation, and consented voice processing work without login |
 | Private routes | `/v1/me/*`, admin tickets, metrics, analytics dashboards, evaluation exports, offline bundle APIs, and URA account/action tools require bearer auth and/or staff roles |
 | LLM memory footprint | `LLM_LOAD_IN_4BIT=true` enables BitsAndBytes NF4 4-bit loading for Qwen3-8B, keeping GPU headroom for the agentic stack |
-| Language adapters | `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH` mount from `fine-tuning/adapters` into `/app/adapters` |
+| Language adapters | `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH` mount from `ml/fine-tuning/adapters` into `/app/adapters` |
 | Speech | Whisper LoRA adapters for Luganda, Swahili, and Runyankole are mounted from the same adapter volume; `WHISPER_DEVICE=cpu` keeps ASR off GPU 0 |
 | Mobile chat UX | The Next.js PWA keeps the composer docked above the safe area/keyboard, auto-scrolls while the user is near the latest turn, renders markdown/citations, and exposes a scroll-to-latest affordance when the user scrolls away |
 | Live smoke | `scripts/live_smoke.sh` and `scripts/deploy_preflight.sh` verify health, anonymous TIN workflow responses, speech health, protected admin denial, and ngrok proxy routing |
@@ -215,7 +207,7 @@ The App deployment is designed for public anonymous chat while keeping private/a
 | Data Validation | Schema validation, quality checks |
 | **RAG Evaluation** | Faithfulness, groundedness, citation accuracy, safety probes, Luganda eval |
 | Production Gates | Combined pass/fail quality gate scored on RAG metrics |
-| Adapter Evaluation | Multilingual LoRA adapter eval scripts under `fine-tuning/` |
+| Adapter Evaluation | Multilingual LoRA adapter eval scripts under `ml/fine-tuning/` |
 | Build Docker | Multi-stage build, Trivy scan, push to DockerHub |
 | Deploy Backend | Production API deployment |
 
