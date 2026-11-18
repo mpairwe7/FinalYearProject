@@ -26,7 +26,7 @@ from ...graph.schema import NodeKind
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
 from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
-from ..state import AgentRoute
+from ...agents.state import AgentRoute
 from .compactor import compact_tool_observation, node_context_compactor
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
@@ -45,7 +45,7 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
     from ...config.flags import flags
-    from ..supervisor import supervisor as _supervisor
+    from ...agents.supervisor import supervisor as _supervisor
 
     if not flags.is_enabled("agentic_mode"):
         return NodeResult(next_node="retrieve")

@@ -14,8 +14,8 @@ import datetime as _dt
 import time
 
 import pytest
-from app.agents.graphs.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
-from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
+from app.workflows.graph.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
+from app.workflows.graph.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
 from app.graph.build import (
     _legacy_tax_for_key,
     all_table_keys,
@@ -340,7 +340,7 @@ def test_an_approval_cannot_resume_under_another_kernel_release(monkeypatch: pyt
     paused = runtime.run(state, thread_id=thread_id)
     assert paused.outcome == GraphOutcome.WAITING_USER
     assert paused.kernel_version == release.current().version
-    import app.agents.graphs.runtime as runtime_module
+    import app.workflows.graph.runtime as runtime_module
 
     monkeypatch.setattr(runtime_module, "_current_kernel_version", lambda: "9.9.9")
     with pytest.raises(PermissionError, match="kernel release changed"):
@@ -357,7 +357,7 @@ def test_the_contract_names_undeclared_steps() -> None:
 
 
 def test_the_act_node_reports_an_undeclared_tool_as_such() -> None:
-    from app.agents.graphs.main_graph import node_act
+    from app.workflows.graph.main_graph import node_act
 
     state = AgentGraphState(query="Refund me", plan=["invent_a_refund"])
     node_act(state)

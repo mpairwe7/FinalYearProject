@@ -23,7 +23,7 @@ Implements architectural enhancements closing identified gaps across three core 
 - **Solution**: Enhanced `/ready` in `App/backend/app/main.py` to introspect `_retriever._reranker` (`active`/`disabled`), `_dense_device` (`cuda:0`/`cpu`), `procedural_memory` (`active`), and detect local prompted MT backends (`prompted_local`).
 
 ### 4. Context Compaction & Token Budgeting
-- **Solution**: Exposed `compact_prompt_context()` in `App/backend/app/agents/graphs/compactor.py`, enabling prompt construction to dynamically compact history older than `MAX_VERBATIM_TURNS` and monitor token utilization and context rot risk against the YaRN RoPE 131k window.
+- **Solution**: Exposed `compact_prompt_context()` in `App/backend/app/workflows/graph/compactor.py`, enabling prompt construction to dynamically compact history older than `MAX_VERBATIM_TURNS` and monitor token utilization and context rot risk against the YaRN RoPE 131k window.
 
 ## Verification & Test Results
 - **Backend Unit Tests**: 52 passed (`test_procedural_memory_and_tools.py`, `test_readiness_retrieval_mode.py`, `test_query_spelling.py`, `test_deterministic_streaming_parity.py`, `test_empathy_fallback.py`, `test_rolling_context.py`).

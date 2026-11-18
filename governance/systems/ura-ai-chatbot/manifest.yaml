@@ -636,7 +636,7 @@ owasp_agentic_2026:
     - id: "ASI07"
       name: "Insecure Inter-Agent Communication"
       status: "mitigated"
-      evidence: "App/backend/app/agents/graphs/main_graph.py, App/backend/app/memory/resolution_ledger.py, App/backend/app/mcp/auth.py, App/backend/app/mcp/transport.py"
+      evidence: "App/backend/app/workflows/graph/main_graph.py, App/backend/app/memory/resolution_ledger.py, App/backend/app/mcp/auth.py, App/backend/app/mcp/transport.py"
       controls: "Typed AgentGraphState and HandoffEnvelope v2.1 schema validation across specialist nodes (CUSTOMS_SPECIALIST, TAX_SPECIALIST, TOOLS), failed-observation pruning across specialist handoffs, and RFC 8693 OBO + RFC 8707 audience-bound Mcp-Actor-Assertion headers (ADR-0024)"
       verified_by:
         - "tests/agents/test_phase38_cx.py"

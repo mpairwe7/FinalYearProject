@@ -18,8 +18,8 @@ from unittest import mock
 
 import pytest
 from app.db import database as db
-from app.agents.graphs.main_graph import node_act, node_observe, node_reflect
-from app.agents.graphs.state import AgentGraphState, GraphOutcome
+from app.workflows.graph.main_graph import node_act, node_observe, node_reflect
+from app.workflows.graph.state import AgentGraphState, GraphOutcome
 from app.rag.context_manager import extract_conversation_entities
 from app.rag.corrective_rag import build_reflection_query
 from app.document_worker import _apply_child_sandbox_limits, try_isolated
@@ -572,7 +572,7 @@ def test_mcp_wire_server_enforces_actor_assertion_header_alignment() -> None:
 
 
 def test_graph_waiting_user_surfaces_pending_action_in_turn_result() -> None:
-    from app.agents.graphs.state import TaxpayerActionRequest
+    from app.workflows.graph.state import TaxpayerActionRequest
     from app.rag.pipeline import ChatModel
 
     model = ChatModel()

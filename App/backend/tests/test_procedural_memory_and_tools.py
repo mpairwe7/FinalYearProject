@@ -4,8 +4,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.agents.graphs.compactor import analyze_context_window
-from app.agents.graphs.state import AgentGraphState
+from app.workflows.graph.compactor import analyze_context_window
+from app.workflows.graph.state import AgentGraphState
 from app.memory import (
     EvidenceCard,
     HandoffEnvelope,
@@ -152,7 +152,7 @@ class TestContextRotAnalytics(unittest.TestCase):
         self.assertIn(analysis["rot_risk"], ("medium", "high"))
 
     def test_compact_prompt_context(self) -> None:
-        from app.agents.graphs import compact_prompt_context
+        from app.workflows.graph import compact_prompt_context
 
         history = [{"user_message": f"turn {i}", "bot_reply": f"answer {i}"} for i in range(10)]
         compacted_hist, summary, analytics = compact_prompt_context("What is PAYE?", history, max_verbatim_turns=4)

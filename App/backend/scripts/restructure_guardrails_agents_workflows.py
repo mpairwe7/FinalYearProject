@@ -126,16 +126,25 @@ HAND_EDITS: dict[int, list[tuple[str, str, str]]] = {
         ("prompts/README.md", "in `guardrails.py` must", "in `guardrails/output_checks.py` must"),
         ("agents/prompts/README.md", "Keep `guardrails.py`", "Keep `guardrails/output_checks.py`"),
     ],
+    3: [
+        ("tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/evaluator.py"', '"agents/critic.py"'),
+        ("tests/agents/test_agentic_rag_context_sandbox_2026_11.py", '"agents/graphs/main_graph.py"',
+         '"workflows/graph/main_graph.py"'),
+        ("tests/agents/test_kernel_freshness_2026_11.py", 'root / "agents/graphs/main_graph.py"',
+         'root / "workflows/graph/main_graph.py"'),
+    ],
 }
 
 
 def _hand_edits(phase: int, apply: bool) -> None:
+    applied = 0
     for rel, old, new in HAND_EDITS.get(phase, []):
         path = codemod.REPO / rel
         text = path.read_text()
         if new in text and old not in text:
             continue  # already applied
         assert old in text, f"{rel}: {old[:60]!r} not found"
+        applied += 1
         if apply:
             path.write_text(text.replace(old, new))
     if phase == 1 and apply:
@@ -144,7 +153,7 @@ def _hand_edits(phase: int, apply: bool) -> None:
         for rel in LIVING_DOCS:
             path = codemod.REPO / rel
             path.write_text(path.read_text().replace("guardrails.py", "guardrails/"))
-    print(f"hand edits: {len(HAND_EDITS.get(phase, []))} applied")
+    print(f"hand edits: {applied} applied")
 
 
 def _rewrite_guardrails_paths(apply: bool) -> None:
@@ -182,6 +191,8 @@ def main() -> int:
         _hand_edits(1, apply=args.apply)
     if codemod.MOVES:
         codemod.run(apply=args.apply)
+    if args.phase == 3:
+        _hand_edits(3, apply=args.apply)
     return 0
 
 

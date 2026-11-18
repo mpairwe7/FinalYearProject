@@ -466,7 +466,7 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("![logo](https://ura.go.ug/logo.png)", clean)
 
     def test_compactor_scrubs_tool_observations_and_replayed_summaries(self) -> None:
-        from app.agents.graphs.compactor import compact_messages, compact_tool_observation
+        from app.workflows.graph.compactor import compact_messages, compact_tool_observation
 
         compacted_obs = compact_tool_observation(
             {

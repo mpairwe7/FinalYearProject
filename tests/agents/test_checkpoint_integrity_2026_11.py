@@ -22,14 +22,14 @@ import threading
 import time
 
 import pytest
-from app.agents.graphs.runtime import (
+from app.workflows.graph.runtime import (
     END,
     DurableCheckpointStore,
     GraphRuntime,
     InMemoryCheckpointStore,
     NodeResult,
 )
-from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
+from app.workflows.graph.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
 from app.db.database import init_db, list_agent_checkpoints
 
 
@@ -215,7 +215,7 @@ def test_a_decline_needs_no_digest(store) -> None:
 
 
 def test_an_approval_expires(store, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.agents.graphs.runtime as runtime_module
+    import app.workflows.graph.runtime as runtime_module
 
     effects: list[int] = []
     runtime = _graph(store, effects)
@@ -437,7 +437,7 @@ def test_a_later_completed_turn_retires_an_earlier_approval(store) -> None:
 
 
 def test_how_a_resume_ended_is_recorded(store) -> None:
-    from app.agents.graphs.runtime import resume_status
+    from app.workflows.graph.runtime import resume_status
 
     effects: list[int] = []
     runtime = _graph(store, effects)
@@ -454,7 +454,7 @@ def test_how_a_resume_ended_is_recorded(store) -> None:
 
 
 def test_a_claim_with_no_recorded_end_is_reported_for_reconciliation(store) -> None:
-    from app.agents.graphs.runtime import resume_status
+    from app.workflows.graph.runtime import resume_status
 
     effects: list[int] = []
     runtime = _graph(store, effects)
@@ -571,7 +571,7 @@ def test_two_runs_from_one_position_cannot_both_suspend(store) -> None:
 
 
 def test_a_late_end_marker_cannot_answer_for_a_newer_claim(store) -> None:
-    from app.agents.graphs.runtime import RESUME_DONE_NODE, resume_status
+    from app.workflows.graph.runtime import RESUME_DONE_NODE, resume_status
 
     effects: list[int] = []
     runtime = _graph(store, effects)

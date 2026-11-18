@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.agents.graphs.main_graph import node_act, node_observe, node_reflect  # noqa: E402
-from app.agents.graphs.state import AgentGraphState  # noqa: E402
+from app.workflows.graph.main_graph import node_act, node_observe, node_reflect  # noqa: E402
+from app.workflows.graph.state import AgentGraphState  # noqa: E402
 from app.prompts.agents import detail_level_prompt  # noqa: E402
 from app.rag.query import english_retrieval_query  # noqa: E402
 from app.rag.retriever import HybridRetriever, _provenance_fields  # noqa: E402

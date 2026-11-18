@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from app.agents.evaluator import (
+from app.agents.critic import (
     evaluate,
     strip_unverified_figure_sentences,
     verify_figure_lock,

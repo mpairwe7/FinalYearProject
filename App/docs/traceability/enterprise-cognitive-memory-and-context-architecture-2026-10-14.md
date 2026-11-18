@@ -20,7 +20,7 @@ This release completes the transformation of the repository's memory subsystem i
 3. **Agent Memory Tools (`app/tools/memory_tools.py`)**:
    - Exposes memory operations directly to agents via self-registering tools: `memory_recall`, `memory_store`, and `memory_discard`.
    - Enforces a $\ge 0.70$ confidence floor and explicit user consent gating.
-4. **Context Rot & Token Budget Analytics (`app/agents/graphs/compactor.py`)**:
+4. **Context Rot & Token Budget Analytics (`app/workflows/graph/compactor.py`)**:
    - Added `analyze_context_window()` measuring query, summary, history, and observation token distributions against the served window, calculating attention dilution and context rot risk levels (`low`, `medium`, `high`).
 
 ---

@@ -22,9 +22,9 @@ from unittest import mock
 import pytest
 from app.rag import generator
 from app.rag import pipeline as pipeline_module
-from app.agents.evaluator import verify_figure_lock
-from app.agents.graphs import main_graph
-from app.agents.graphs.state import AgentGraphState
+from app.agents.critic import verify_figure_lock
+from app.workflows.graph import main_graph
+from app.workflows.graph.state import AgentGraphState
 from app.agents.state import AgentRoute, RouteDecision
 from app.agents import tiebreak
 from app.agents.tiebreak import _READ_ONLY_TOOLS, cache_clear, refine
@@ -359,7 +359,7 @@ class TestTheFigureLockRunsOnEveryTransport:
 
     def test_an_enforced_lock_that_cannot_run_shows_no_figure(self, monkeypatch) -> None:
         monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
-        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
+        monkeypatch.setattr("app.agents.critic.verify_figure_lock", _raises)
 
         guard = self._guards(
             "The penalty is UGX 7,777,777 [1]. You can register online [1].", model_tier=ModelTier.T3.value
@@ -372,8 +372,8 @@ class TestTheFigureLockRunsOnEveryTransport:
 
     def test_if_figures_cannot_even_be_removed_the_reply_is_withheld(self, monkeypatch) -> None:
         monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
-        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
-        monkeypatch.setattr("app.agents.evaluator.strip_unverified_figure_sentences", _raises)
+        monkeypatch.setattr("app.agents.critic.verify_figure_lock", _raises)
+        monkeypatch.setattr("app.agents.critic.strip_unverified_figure_sentences", _raises)
 
         guard = self._guards("The penalty is UGX 7,777,777 [1].", model_tier=ModelTier.T3.value)
 
@@ -381,7 +381,7 @@ class TestTheFigureLockRunsOnEveryTransport:
 
     def test_a_lock_that_only_measures_changes_nothing_if_it_cannot_run(self, monkeypatch, clean_flags) -> None:
         monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
-        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
+        monkeypatch.setattr("app.agents.critic.verify_figure_lock", _raises)
 
         guard = self._guards("The penalty is UGX 7,777,777 [1].")
 

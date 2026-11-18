@@ -19,8 +19,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
-from app.agents.graphs.main_graph import node_observe, node_route
-from app.agents.graphs.state import AgentGraphState
+from app.workflows.graph.main_graph import node_observe, node_route
+from app.workflows.graph.state import AgentGraphState
 from app.agents.state import AgentRoute
 from app.agents.supervisor import supervisor
 from app.config.flags import flags
@@ -911,7 +911,7 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
 
 def test_phase35_sunflower_v2_native_262k_context_without_yarn():
     from app.rag import generator
-    from app.agents.graphs.compactor import analyze_context_window, compact_prompt_context
+    from app.workflows.graph.compactor import analyze_context_window, compact_prompt_context
 
     assert generator.NATIVE_SUNFLOWER_V2_CONTEXT_WINDOW == 262_144
     assert generator.uses_native_long_context_without_yarn("Sunbird/Sunflower-Qwen3.5-9B") is True
@@ -1000,7 +1000,7 @@ def test_phase35_multimodal_eq_fusion_vernacular_hardship_and_affect_mt():
 def test_phase35_memory_backed_tool_binding_and_workflow_tangent_resume(tmp_db):
     from pathlib import Path
 
-    from app.agents.graphs.main_graph import bind_arguments, node_act
+    from app.workflows.graph.main_graph import bind_arguments, node_act
     from app.workflows.registry import WorkflowRegistry, auto_load_flows
 
     auto_load_flows(Path("App/backend/app/workflows/flows"))
@@ -1895,8 +1895,8 @@ def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrai
 
 
 def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeypatch):
-    from app.agents.graphs.main_graph import _is_reasoning_miss
-    from app.agents.graphs.state import AgentGraphState
+    from app.workflows.graph.main_graph import _is_reasoning_miss
+    from app.workflows.graph.state import AgentGraphState
     from app.rag.claim_verifier import verify_claims
     from app.guardrails.output_checks import OutputGuard
 

@@ -10,8 +10,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from app.agents.graphs import main_graph
-from app.agents.graphs.state import AgentGraphState
+from app.workflows.graph import main_graph
+from app.workflows.graph.state import AgentGraphState
 from app.memory import service as memory_service
 
 

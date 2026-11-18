@@ -168,7 +168,7 @@ def test_the_rest_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: py
 
 
 def test_the_graph_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.agents.graphs import main_graph
+    from app.workflows.graph import main_graph
     from app.graph import shadow
 
     monkeypatch.setenv("FLAG_TAX_GRAPH", "true")
@@ -213,7 +213,7 @@ def test_a_time_dependent_rule_needs_a_stated_duration(monkeypatch: pytest.Monke
      {"rule": "efris_penal_tax", "amount": 50_000.0}),
 ])
 def test_the_graph_binds_kernel_tools_only_from_what_the_question_states(tool, question, expected) -> None:
-    from app.agents.graphs.main_graph import _bind_kernel_tool
+    from app.workflows.graph.main_graph import _bind_kernel_tool
 
     assert _bind_kernel_tool(tool, question, "") == expected
 
@@ -662,7 +662,7 @@ def test_a_missing_stamp_duty_rate_is_an_error_not_zero(monkeypatch: pytest.Monk
 
 
 def test_a_section_does_not_match_its_lettered_sibling() -> None:
-    from app.agents.graphs.main_graph import _bind_kernel_tool
+    from app.workflows.graph.main_graph import _bind_kernel_tool
 
     bound = _bind_kernel_tool("kernel_explain", "What does section 135 of the Income Tax Act impose?", "")
     assert bound is None or "135b" not in str(bound["provision"]).lower()
@@ -675,7 +675,7 @@ def test_a_section_does_not_match_its_lettered_sibling() -> None:
     ("I failed to issue an EFRIS e-invoice on a sale of UGX 1,000,000", None),
 ])
 def test_the_penalty_binder_respects_period_and_tax_due(question: str, expected) -> None:
-    from app.agents.graphs.main_graph import _bind_kernel_tool
+    from app.workflows.graph.main_graph import _bind_kernel_tool
 
     assert _bind_kernel_tool("kernel_compute_penalty", question, "") == expected
 
@@ -701,7 +701,7 @@ def test_a_stated_change_is_a_conflict_beside_the_old_figure() -> None:
 
 def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.rag import faq_binding
-    from app.agents.graphs import main_graph
+    from app.workflows.graph import main_graph
 
     stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv", "id": "stale"}
     graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}

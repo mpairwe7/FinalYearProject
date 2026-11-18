@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from app.agents.graphs.main_graph import build_main_graph
-from app.agents.graphs.runtime import DurableCheckpointStore, InMemoryCheckpointStore
-from app.agents.graphs.state import AgentGraphState, GraphOutcome
+from app.workflows.graph.main_graph import build_main_graph
+from app.workflows.graph.runtime import DurableCheckpointStore, InMemoryCheckpointStore
+from app.workflows.graph.state import AgentGraphState, GraphOutcome
 from app.db.database import (
     get_agent_checkpoint,
     init_db,

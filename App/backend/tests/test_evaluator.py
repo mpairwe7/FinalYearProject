@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.agents.evaluator import (
+from app.agents.critic import (
     MIN_VERIFIABLE_AMOUNT,
     RevisionBudget,
     Verdict,

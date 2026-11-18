@@ -268,7 +268,7 @@ THREAT_REGISTRY: list[dict] = [
             "the primary key admits exactly one; the claim row ends the thread's waiting state"
         ),
         "evidence": [
-            "App/backend/app/agents/graphs/runtime.py",
+            "App/backend/app/workflows/graph/runtime.py",
             "App/backend/app/db/database.py",
             "tests/agents/test_checkpoint_integrity_2026_11.py",
         ],
@@ -288,8 +288,8 @@ THREAT_REGISTRY: list[dict] = [
             "thread, owner, tenant, time and action and expires after GRAPH_APPROVAL_TTL_S"
         ),
         "evidence": [
-            "App/backend/app/agents/graphs/runtime.py",
-            "App/backend/app/agents/graphs/state.py",
+            "App/backend/app/workflows/graph/runtime.py",
+            "App/backend/app/workflows/graph/state.py",
             "tests/agents/test_checkpoint_integrity_2026_11.py",
         ],
         "status": "mitigated",
@@ -421,7 +421,7 @@ THREAT_REGISTRY: list[dict] = [
         "owasp_llm": "LLM06",
         "mitre_atlas": None,
         "mitigation": "The kernel version is part of the HMAC-sealed graph state; a resume under another release is refused",
-        "evidence": ["App/backend/app/agents/graphs/runtime.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "evidence": ["App/backend/app/workflows/graph/runtime.py", "tests/agents/test_statutory_kernel_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -1375,7 +1375,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0053",
         "mitigation": "Identity slots never bind from tool observations; a calculator slot binds only keys with the same meaning; what was filled from memory is recorded and stated in the reply (ADR-0022, G355). A model-chosen tool route gets a closed read-only list (G357).",
         "evidence": [
-            "App/backend/app/agents/graphs/main_graph.py",
+            "App/backend/app/workflows/graph/main_graph.py",
             "App/backend/app/agents/tiebreak.py",
             "tests/agents/test_reasoner_integrity.py",
         ],
@@ -1420,7 +1420,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "FigureReleaseGate holds a stream from its first figure until verified; every graph answer passes the output guards; the figure lock runs on every transport and enforces on the reasoning tier. Enforcement on other tiers awaits shadow evidence (G360), so this is mitigated in part.",
         "evidence": [
             "App/backend/app/guardrails/",
-            "App/backend/app/agents/evaluator.py",
+            "App/backend/app/agents/critic.py",
             "tests/agents/test_reasoner_integrity.py",
             "tests/agents/test_graph_orchestrator_contract.py",
         ],

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..loop_control import ToolCallBudget
+from ...agents.loop_control import ToolCallBudget
 
 
 class GraphOutcome(str, Enum):
