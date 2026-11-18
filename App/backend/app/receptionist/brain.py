@@ -1593,7 +1593,10 @@ class UraReceptionistBrain(LLMService):
     def _synthesize_luganda_reply(self, context_text: str, question: str) -> str:
         """Single-pass synthesis from English statutory context directly into Luganda."""
         global _VLLM_BRIDGE_DOWN_UNTIL
-        prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=question)
+        from ..guardrails.fences import fence_spotlight_body
+
+        # The caller's words are fenced like the chat path's question (ADR-0027, G668).
+        prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=fence_spotlight_body(question))
 
         # Local Sunflower only (decided 2026-09-30). With vLLM down the caller
         # gets the English answer translated, or the transfer phrase.
@@ -1706,14 +1709,18 @@ class UraReceptionistBrain(LLMService):
                 "locale": "lg",
             }
 
-        # Assemble grounding context
-        passages: list[str] = [english_reply]
+        # Grounding context, each passage in a spotlight fence as on the chat path (ADR-0027, G668).
+        from ..rag import prompt_builder
+
+        passages: list[dict[str, Any]] = [{"text": english_reply, "source": "English answer"}]
         for s in sources:
             if isinstance(s, dict) and s.get("text"):
-                passages.append(s["text"])
-            elif isinstance(s, str) and s:
                 passages.append(s)
-        context_text = "\n\n".join(passages[:3])
+            elif isinstance(s, str) and s:
+                passages.append({"text": s})
+        context_text = "\n\n".join(
+            prompt_builder.spotlight_passage(i, passage, max_chars=800)[0] for i, passage in enumerate(passages[:3], 1)
+        )
 
         # 3. Direct Luganda Generation with Figure & Unit Survival Gate
         from .. import mt
@@ -1729,6 +1736,15 @@ class UraReceptionistBrain(LLMService):
         ):
             logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
             luganda_reply = ""
+        if luganda_reply:
+            # A second model answer goes through the output guard like every chat reply (G668).
+            from ..guardrails.output_checks import OutputGuard
+
+            if OutputGuard.check_prompt_leakage(luganda_reply).flags:
+                logger.info("Direct Luganda call synthesis leaked prompt text; using the guarded _localize_reply")
+                luganda_reply = ""
+            else:
+                luganda_reply = OutputGuard.sanitize(luganda_reply)
         if not luganda_reply:
             luganda_reply = await self._into_luganda(english_reply)
 

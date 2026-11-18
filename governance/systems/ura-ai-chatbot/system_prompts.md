@@ -28,20 +28,19 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 - **Only current, enforced facts.** A prompt states no rule the code does not
   enforce and no figure: ADR-0030, and G662, where a hard-coded example once put
   stale rates into every answer.
-- **Retrieved text is data.** The chat prompt paths fence retrieved passages so a
-  passage cannot close the fence or write a new instruction (ADR-0027). Exception:
-  the call receptionist's direct Luganda synthesis (`receptionist/brain.py`, local
-  vLLM only) joins retrieved passages into its prompt without a fence (G668).
+- **Retrieved text is data.** Every prompt path fences retrieved passages so a
+  passage cannot close the fence or write a new instruction (ADR-0027). The call
+  receptionist's direct Luganda synthesis fences its passages and the caller's words
+  the same way (G668, fixed).
 - **Leak protection.** The output guard checks each chat reply against signature
   phrases and a word 8-gram fingerprint of `SYSTEM_PROMPT` and
   `CLOUD_SYSTEM_PROMPT` (OWASP LLM07, ADR-0029). The fingerprint is rebuilt from
-  the live prompts, so it follows an edit rather than catching one. Exception: the
-  direct Luganda call synthesis is a second model answer no output guard reads;
-  only its figures and units are checked against the English answer (G588, G668).
+  the live prompts, so it follows an edit rather than catching one. The direct
+  Luganda call synthesis also goes through it: a flagged leak falls back to the
+  guarded translation, and the rest is sanitised (G668, fixed).
 
 ## Known gaps
 
-- The direct Luganda call synthesis is neither fenced nor output-guarded (G668).
 - `CLOUD_SYSTEM_PROMPT` carries ADR-0030's governed rules, but production answers
   use `SYSTEM_PROMPT`. Whether `SYSTEM_PROMPT` carries every one of those rules is
   open (G667).
