@@ -6,10 +6,10 @@ deployment — local Docker on one pinned GPU, real Sunflower-14B-FP8 via vLLM,
 real Qdrant, both Sunbird SALT speech tiers, reached over the public ngrok
 tunnel rather than localhost, because that is the path the reports came from.
 
-Companion docs: `docs/RAG_ARCHITECTURE.md` (answer language, withholding),
-`docs/STAFF_AUTH_DEPLOYMENT.md` (RP-initiated logout),
-`docs/API_REFERENCE.md` (`POST /v1/escalate`, SSE phases),
-`docs/OPS_CONSOLE_REDESIGN.md` (the plain-language dashboard pass),
+Companion docs: `App/docs/RAG_ARCHITECTURE.md` (answer language, withholding),
+`App/docs/STAFF_AUTH_DEPLOYMENT.md` (RP-initiated logout),
+`App/docs/API_REFERENCE.md` (`POST /v1/escalate`, SSE phases),
+`App/docs/OPS_CONSOLE_REDESIGN.md` (the plain-language dashboard pass),
 `App/docs/traceability/local-gpu-salt-ngrok-2026-08-22.md` (the stack itself).
 
 ## 1. The reports, and what each turned out to be
@@ -159,7 +159,7 @@ here, and the cu128 pin in `Dockerfile.gpu` has since made the GPU path real.
 
 ### Functional run through the tunnel (2026-08-24, after the API finished loading Whisper-SALT)
 
-`python3 scripts/verify_seven_issues.py` against
+`python3 App/scripts/verify_seven_issues.py` against
 `https://struttingly-nongeological-briella.ngrok-free.dev` — 20 pass, 1 fail,
 4 info. The fail is a harness comparison, not a figure-guard miss; see below.
 

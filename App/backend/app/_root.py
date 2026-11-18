@@ -24,6 +24,9 @@ def _resolve() -> Path:
 
 
 PROJECT_ROOT = _resolve()
+#: The folder holding the ``ml`` and ``plugins`` packages: ``App/`` in a checkout
+#: (ADR-0064), the project root in the image, which copies ``ml`` beside the app.
+CODE_ROOT = PROJECT_ROOT / "App" if (PROJECT_ROOT / "App").is_dir() else PROJECT_ROOT
 
 
 def _resolve_app_data_root() -> Path:

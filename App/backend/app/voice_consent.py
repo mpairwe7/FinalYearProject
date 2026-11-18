@@ -57,7 +57,7 @@ VOICE_EVENT_TYPES = frozenset({
     "call_transferred",
     "officer_joined",
     "call_ended",
-    # Staff reads and call-desk actions (docs/runbooks/audit-trail.md).
+    # Staff reads and call-desk actions (App/docs/runbooks/audit-trail.md).
     "staff_viewed_call",
     "staff_viewed_brief",
     "staff_viewed_caller_history",

@@ -42,7 +42,7 @@ for loc, cases in GOLDEN_SETS.items():
     r = run_routing_eval(cases, locale=loc)
     print(f'routing {loc}: {r.correct}/{r.total}')
 "
-../../.venv/bin/python -m pytest tests/ -q 2>&1 | tail -1
+../../.venv/bin/python -m pytest App/tests/ -q 2>&1 | tail -1
 ```
 
 **Run the suite with the new flags ON as well as off.** Flags default to off,
@@ -52,7 +52,7 @@ catches behaviour that exists only when the feature is live:
 ```bash
 FLAG_MULTILINGUAL_ROUTING=true FLAG_MODEL_TIERING=true \
 FLAG_EVALUATOR_OPTIMIZER=true FLAG_SUPERVISOR_LLM_TIEBREAK=true \
-  ../../.venv/bin/python -m pytest tests/ -q 2>&1 | tail -3
+  ../../.venv/bin/python -m pytest App/tests/ -q 2>&1 | tail -3
 ```
 
 Watch the **runtime**, not only the pass count. A suite that jumps from 37s to
@@ -72,13 +72,13 @@ affected — this is a targeted pass, not a rewrite of the doc tree.
 | Doc | Claims it makes |
 |---|---|
 | `App/docs/mcp-architecture.md` | Namespace table, tool counts, protocol version, deployment column |
-| `docs/AGENT_ARCHITECTURE.md` | Route list, supervisor behaviour, tool-loop bounds |
-| `docs/RAG_ARCHITECTURE.md` | Pipeline stages, module map, **feature-flag list** |
-| `docs/GAPS_AND_AGENTIC_ROADMAP.md` | Gap statuses (⚪ 🟡 🟢) — flip a gap when it ships |
+| `App/docs/AGENT_ARCHITECTURE.md` | Route list, supervisor behaviour, tool-loop bounds |
+| `App/docs/RAG_ARCHITECTURE.md` | Pipeline stages, module map, **feature-flag list** |
+| `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` | Gap statuses (⚪ 🟡 🟢) — flip a gap when it ships |
 | `docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md` | Appendix C implementation status, test counts |
 | `App/README.md`, `README.md` | Model ids, module tree, phase list |
 | `.env.example` | Every new env var and flag must appear here |
-| `docs/MODEL_SWAP_GUIDE.md`, `docs/DEPLOYMENT.md` | Model ids, tiers, deployment topology |
+| `App/docs/MODEL_SWAP_GUIDE.md`, `App/docs/DEPLOYMENT.md` | Model ids, tiers, deployment topology |
 | `docs/EVALUATION_REPORT.md` | Metric values — update only alongside a real re-run |
 
 Search rather than guess:
@@ -92,7 +92,7 @@ grep -rn "<old fact>" --include="*.md" . | grep -v node_modules
 - **Correct the claim, keep the prose.** Do not restructure a doc while
   fixing a number in it.
 - **A new feature flag must land in three places**: the `config/flags.py` registry,
-  the flag table in `docs/RAG_ARCHITECTURE.md`, and `.env.example`. Two out of
+  the flag table in `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`. Two out of
   three is the usual failure.
 - **A shipped gap flips its status** in `GAPS_AND_AGENTIC_ROADMAP.md` and gets
   struck through, matching the existing 🟢 entries. Do not delete the row —

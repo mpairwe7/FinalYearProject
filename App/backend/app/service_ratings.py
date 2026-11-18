@@ -1,6 +1,6 @@
 """Satisfaction ratings of the service a taxpayer got — one table for every stream.
 
-The administrator's service-quality audit (docs/plans/
+The administrator's service-quality audit (App/docs/plans/
 admin-service-quality-audit-plan.md §C3) reads four kinds of rating, all here:
 
 * ``chat_officer_csat`` — the taxpayer rates an officer chat on a 5-level scale

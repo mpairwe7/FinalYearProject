@@ -22,7 +22,7 @@
 # unavailable — so `docker compose down` and friends still work without it.
 #
 # The six-container form of this, one server per system, is
-# ../docker-compose.mcp.yml. See docs/runbooks/enterprise-connectors-and-mcp.md.
+# ../docker-compose.mcp.yml. See App/docs/runbooks/enterprise-connectors-and-mcp.md.
 # ===========================================================================
 
 services:
@@ -66,7 +66,7 @@ services:
       # The same code and fixture databases the API mounts, so the two cannot
       # run different versions of the wire rules or see different fixtures.
       - ./backend/app:/app/app:ro
-      - ../plugins:/app/plugins:ro
+      - ./plugins:/app/plugins:ro
       - ../data_store:/app/data_store
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8930/health', timeout=4).status == 200 else 1)"]

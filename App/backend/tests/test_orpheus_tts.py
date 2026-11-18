@@ -1,7 +1,7 @@
 """The Orpheus Luganda voice: client, place in the TTS chain, and the call's TTS.
 
 No sidecar runs here — httpx is faked. Latency and quality of the real model
-are measured by scripts/bench_orpheus_tts.py (evals/reports/orpheus_tts_*).
+are measured by App/scripts/bench_orpheus_tts.py (App/evals/reports/orpheus_tts_*).
 """
 
 from __future__ import annotations

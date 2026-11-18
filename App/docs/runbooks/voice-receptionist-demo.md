@@ -1,0 +1,1209 @@
+# Runbook — Simulated AI Phone Receptionist ("Call URA")
+
+Operator and deployment runbook for the browser voice receptionist powered by
+Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
+ClarifyGate terminology disambiguation, and staff takeover.
+
+### Assurance update — 2026-11-13, an officer's takeover silences the AI (ADR-0055)
+
+Found on the Space with the test officer (G657). The AI's speech is queued on the
+server and played out in real time, and its "transferring" status and queue place wait
+behind it. An officer who joined while the AI was still talking was heard over the rest
+of the AI's greeting and its "I'm connecting you" line, and the caller's screen then went
+back to the queue for the rest of the call. What changed:
+
+- **The officer joining clears the AI's queued output on the server** before the joining
+  line, then the caller's player. A log line `The pipeline did not confirm clearing the AI's
+  output on call … within 1.0 s` means the pipeline was slow; the officer joined anyway.
+- **The AI's speech, captions and stale waiting screen never reach a caller who is with an
+  officer**, or whose call ended. This is checked at the output gate and again as each frame
+  is written to the caller's socket.
+- **Asking for an officer stops the AI at once**, as a typed question does, and the waiting
+  screen shows at once.
+- **An officer's `{"type": "hangup"}` on the audio socket is End.** It plays the closing
+  line, tells the caller, and owes a wrap-up; the call ends as `officer_ended`. It used to
+  leave the caller connected to an ended call.
+- **The server closes the caller's socket when it ends a call** on the WebSocket transport,
+  as it does on LiveKit.
+- **`POST /v1/admin/users/{id}/revoke` takes either id `/v1/me` shows.** The answer's
+  `user_id` is the token `sub` that was revoked. Revoking by the internal id used to do
+  nothing.
+
+#### Checking an officer handoff end to end
+
+Use the test officer account (its credentials are in the operator's `.env` as
+`STAFF_TEST_OFFICER_*`, never in the repo). Sign in through the real login page: the
+browser app's Auth0 client does not allow the password grant. The scripted check plays a
+caller over `wss://<space>/api/v1/calls/stream`:
+
+1. **Set up the officer.** Mark them available
+   (`PUT /v1/admin/officers/me/presence {"status": "available"}`).
+2. **Start the call.** The caller sends `call_start`, waits about 4 s into the greeting,
+   then sends `request_officer`. The caller should get the AI's `interrupt` and the
+   handoff line at once, and `status: transferring` and `queue` within about a
+   second (G659), not after the line.
+3. **Take the call.** The officer claims it (`POST /v1/admin/calls/{id}/claim`), opens
+   `/api/v1/admin/calls/{id}/audio`, sends `authenticate`, and stays on for 30 s or more.
+   The caller should get `status: bridged`, then no AI audio, no caption from the AI, and
+   no `transferring` or `queue` until the end. The X-URA-Process header on the claim reads
+   `calls`.
+4. **End the call**, once with End (`POST /v1/admin/calls/{id}/end`) and once, on another
+   call, with `{"type": "hangup"}` on the officer's audio socket. Either way the caller
+   should get the closing line, then `status: ended`, and its socket should close. The
+   presence heartbeat should then return `wrap_up_call_id` for the call, and the row
+   should read `ended` / `officer_ended`.
+5. **Save the wrap-up** (`POST /v1/admin/calls/{id}/wrapup`) so the officer is available
+   again.
+6. **Optionally, drop the officer.** Steps 4 and 5 ended their calls, so start a
+   new call and bridge it as in steps 2 and 3. Then close the officer's audio socket
+   without a hang-up. After the reconnect grace (30 s) the caller should get
+   `status: transferring` and, at once, `queue` (G659), then the AI's hold line
+   about 30 s later; the officer owes a wrap-up.
+
+### Assurance update — 2026-11-13, sessions can be revoked (ADR-0053)
+
+Phase 8 part D of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+A token used to work until it expired, whatever happened to its owner. Now:
+
+- **Signing out signs you out everywhere.** The console's and the chat's sign-out
+  call `POST /v1/me/logout` before dropping the token. Every token the person
+  holds stops working, on every device. They sign in again to carry on.
+- **Open sockets follow within about 10 s.** The lobby, the live transcript, the
+  officer's audio socket, a listener, and a signed-in chat or voice socket close
+  4401. An officer on a call goes into the reconnect grace, as at expiry, but
+  their LiveKit media leaves the room at once. A signed-in caller's call ends
+  with `session_revoked`. The bound is about 5 s on the process that took the
+  revocation; on the other one it is up to 5 s for that process's sync plus up
+  to 5 s for the socket's own check.
+- **Each process reads `revoked_sessions` before it serves, then every 5 s.** In
+  production a process that cannot read it at start refuses to start. A failed
+  read later keeps the revocations it has, logs `Session revocations could not be
+  read` at ERROR once, and counts `ura_session_revocation_sync_failures_total`.
+
+#### Revoke a session (lost device, leaked token, an officer leaving)
+
+1. Find the person's user id: the token's `sub`, as `GET /v1/me` shows it
+   (`external_id`), or the `user_id` on their rows in `/admin/audit`.
+2. As a `ura_admin` (or with the operator key):
+
+   ```bash
+   curl -sS -X POST "$API/v1/admin/users/$USER_ID/revoke" \
+     -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+     -d '{"reason": "laptop reported stolen"}'
+   ```
+
+   A 200 returns `revoked_before`. A 503 means it was not stored and nothing
+   changed: try again.
+3. Check it took: a request with the old token gets 401 `session revoked`. Within
+   about 10 s (5 s for the other process's sync, 5 s for the socket's check)
+   their console shows the sign-in again, and an officer on a call is put in the
+   reconnect grace.
+4. To keep them out, also disable the account at the identity provider (Auth0).
+   This service only refuses tokens issued before the revocation; a new sign-in
+   works.
+5. It is in the audit trail as `staff.session_revoked`.
+
+Limits: a token with no usable `iat` is refused outright (401), since it could
+not be revoked. An open live ticket stream stays open (it checks only at
+sign-in), and the MCP server's bearer check does not read the revocation list
+(G656). On the Space the database, and so every revocation, is wiped on restart;
+revoke again after a restart if the old token may still be in use.
+
+### Assurance update — 2026-11-12, one call process (ADR-0043)
+
+Phase 5 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+In this image, officer handoffs and live call transcripts no longer depend on
+which worker answers (on the Space since 2026-11-12, `sha-4609a1c`; run the
+probes below after every roll). What an operator needs to know:
+
+- **The container runs two API programs, one per role.** supervisord starts
+  both through `uvicorn-role.sh` (`App/deploy/cranecloud/`):
+
+  | Program | Port | `URA_PROCESS_ROLE` | Workers | Takes |
+  | --- | --- | --- | --- | --- |
+  | `uvicorn-chat` | 127.0.0.1:8081 | `chat` | `max(1, UVICORN_WORKERS − 1)` | Chat and the rest of the API; refuses a call request |
+  | `uvicorn-calls` | 127.0.0.1:8082 | `calls` | 1 (`UVICORN_WORKERS=1` in its environment) | Every call path, and chat too |
+
+  With the Space's `UVICORN_WORKERS=2` that is one process each, the same two
+  processes as before. A blank, non-numeric or zero `UVICORN_WORKERS` counts as 2.
+  **Keep `UVICORN_WORKERS=2` on the Space.** nginx's `api` upstream lists both
+  programs and splits chat between them one to one, whatever their worker
+  counts, so raising it only adds workers to the chat program: the one-worker
+  call process would still carry half of all chat, more than its share. The
+  launcher sets `UVICORN_WORKERS`, `WORKERS` and `WEB_CONCURRENCY` to 1 in the
+  call process's own environment, whatever the container passes in, because
+  the receptionist reads all three.
+  The receptionist starts, sweeps the rows a previous run left and takes calls
+  in the call process only.
+- **nginx sends every call path to the call process**: `/v1/calls/stream`, the
+  staff lobby and everything under `/v1/admin/calls` (the per-call audio
+  socket, claim, release, transfer, end, hold, wrap-up, review, brief,
+  callback-done, caller history, metrics) and `/v1/admin/officers/presence` and
+  `/v1/admin/officers/me/presence`, each with or without the `/api` prefix. All
+  get 3600 s timeouts. `/calls` is the frontend's page, and ticket presence
+  (`/v1/admin/tickets/{id}/presence`) stays with the rest of the API.
+- **A call request that reaches the chat process is refused**: HTTP 421, or a
+  WebSocket accepted, sent `{"type": "error", "code": "unavailable"}` and
+  closed 1013. It is counted in `ura_receptionist_misrouted_total` (alert
+  `UraCallMisrouted`, where that is scraped; nothing scrapes the Space, G614)
+  and logged at ERROR in the chat process, which is the signal on the Space:
+  `misrouted http request for '/v1/admin/calls' reached the chat process; nginx
+  should have sent it to the call process`. The quoted path is the one nginx no
+  longer routes. See [MONITORING.md](../MONITORING.md#call-receptionist).
+- **The call process restarting ends its calls**, as a dead worker did before.
+  Until supervisord brings it back nginx answers call paths with 502; callers
+  are told the call could not connect or was cut off and can call again, and
+  the consoles show "Live call updates paused" and reconnect. On start the
+  process ends the rows its previous run left and flags the callers owed a callback
+  (`service_interrupted`), as in the ADR-0041 update below. A chat restart
+  ends nothing. Chat requests in flight on the call process can fail once.
+- **`GET /ready` shows the call process's own state on the chat process.**
+  `capabilities.voice_receptionist` is read from the call process's `/ready`
+  (1 s timeout, 10 s cache): `ready`, `off`, `unavailable: <why>`, or
+  `unavailable: the call process is not answering` / `… is not ready`. nginx
+  sends `/ready` to either process; the field is the call process's state
+  whichever answers (the call process reports its own, the chat process reads
+  it), and `X-URA-Process` on the response says which one answered.
+  A dead call process leaves chat, `/health` and `/ready` answering, so the
+  chat process also exports it: `ura_receptionist_call_process_up` is 0 while
+  the call process does not answer or answers with nothing usable, and
+  `UraCallProcessDown` pages after 5 minutes at 0 (G614, ADR-0045). It fires
+  only where the API is scraped. Nothing scrapes the Space yet, so there the
+  roll workflow and the hourly keepalive workflow, which read the same `/ready`
+  field, are the signal.
+- **Every response names its process**: `X-URA-Process: chat` or
+  `X-URA-Process: calls`. It is absent on Starlette's own 500 error responses
+  and on a WebSocket closed before it was accepted (a foreign origin). Each
+  process also logs `Process role: chat` or `Process role: calls` once at
+  startup.
+
+**Kill switch: the console's `voice_receptionist` switch** (Feature flags page,
+or `PATCH /v1/admin/flags/voice_receptionist?enabled=false`, `ura_admin`). The
+change is stored and applied at once in the process that answered. Every other
+process applies it within `FLAG_SYNC_INTERVAL_SECONDS`, 5 s by default (ADR-0044;
+before it, the change reached one process of two, G612). From then on, new call
+sockets are refused: a caller's, the staff call stream and an officer's audio.
+Sockets already open carry on.
+
+1. Switch it off. The Feature flags page's note shows the configured sync
+   interval; it is how often each process reads the store, not a confirmation.
+2. Read `/ready` until `capabilities.voice_receptionist` says `off`. It is the
+   call process's own value whichever process answers. The chat process caches
+   it for 10 s, so allow about 15 s.
+   - `off`: done.
+   - Still `ready` after 30 s: the call process has not applied the change. Its
+     log says `Flag overrides could not be read` when it cannot read the store.
+     Use the Space secret below.
+   - `unavailable: the call process is not answering` or `… is not ready`: the
+     chat process could not read the call process. Read `/ready` again in a
+     minute.
+
+**Fallback: set `FLAG_VOICE_RECEPTIONIST=false` as a Space secret**, when the
+console or the database is unavailable. Change the existing value if the Space
+already has one. It restarts the Space and reaches both processes. A stored
+override beats the secret, at a process's start and on every sync while it runs,
+so:
+
+1. Set the secret to `false`. The Space restarts.
+2. When the Space is back, read `/ready`:
+   - `off`: done.
+   - `ready`, or `unavailable: <why>`: a stored `true` override won. Go to step 3.
+   - `unavailable: the call process is not answering` or `… is not ready`: its
+     state is unknown; read `/ready` again in a minute.
+3. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
+   `ura_admin`). Every process clears it within one sync interval and follows
+   the secret. Read `/ready` again after about 15 s: it says `off`. If the sync
+   is off (`FLAG_SYNC_INTERVAL_SECONDS=0`), restart the Space instead.
+4. If the `DELETE` fails because the database rejects writes, the stored
+   override cannot be removed while the API runs, and it keeps beating the
+   secret.
+   - **On the Space**, restart it (`hf spaces restart landwind22/ura-chatbot`).
+     Its database is `/app/data_store/analytics.db` on the container's own disk,
+     and the Space has no persistent storage. A Space's disk is lost when it
+     restarts (Hugging Face, "Disk usage on Spaces"), so it starts with no
+     stored overrides and the secret applies. Read `/ready` again. The restart
+     loses the rest of that database too: conversations, tickets and the audit
+     trail. That is true of every restart and roll of the Space, the secret
+     change in step 1 included. The Space offers this runbook no shell to copy
+     the file first.
+   - **On a deployment whose database survives a restart**, nothing in the app
+     can stop calls until the store accepts writes again. Stop the API (scale
+     it to zero). Fix the write failure, then delete the row out of band:
+     `psql "$POSTGRES_DSN" -c "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`,
+     or for SQLite
+     `sqlite3 "${ANALYTICS_DB_DIR:?set to the API's value}/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
+     Set `ANALYTICS_DB_DIR` to the value the API runs with first. When the API
+     has none, it uses `data_store/` under the project root (`/app/data_store`
+     in the image; `App/backend/app/db/database.py`). With the variable unset, the
+     command refuses to run rather than open the wrong file. Then start the API
+     and read `/ready`.
+
+The 1001 close and the `off` field show whether the switch took (the ADR-0042
+update below).
+
+**Turning calls back on.** Delete the stored override
+(`DELETE /v1/admin/flags/voice_receptionist`, or Reset on the Feature flags
+page). The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
+(`App/deploy/hf-space/Dockerfile`), so every process then follows it within one
+sync interval. If you used the secret, delete it, or set it to `true`; that
+restarts the Space. Then confirm that `/ready` says `ready`:
+- `off`: delete any stored `false` override. With the sync off
+  (`FLAG_SYNC_INTERVAL_SECONDS=0`) the call process does not apply the deletion
+  until it restarts, so restart the Space (`hf spaces restart landwind22/ura-chatbot`).
+- `unavailable: switched on after the API started`: the call process started
+  with calls off. Restart the Space (`hf spaces restart landwind22/ura-chatbot`).
+
+**Live probes after a roll** (the Space is `https://landwind22-ura-chatbot.hf.space`):
+
+1. *Each call path is answered by the call process.* An unauthenticated request
+   still gets the header:
+
+   ```bash
+   S=https://landwind22-ura-chatbot.hf.space
+   for p in api/v1/admin/calls api/v1/admin/calls/metrics api/v1/admin/officers/presence api/v1/admin/calls/probe; do
+     printf '%s  ' "$p"; curl -sS -o /dev/null -D - "$S/$p" | grep -i -E '^x-ura-process' || echo "NO HEADER"
+   done
+   ```
+
+   Every line must read `x-ura-process: calls` (the status behind it is the
+   app's own: 401 without a login, never 421; before G615 it was 503 when
+   `INDEX_API_KEY` was unset). `NO HEADER` comes with
+   three causes; print the status (`curl -sS -o /dev/null -w '%{http_code}\n'`)
+   to tell them apart: a 502 means the call process is down or restarting
+   (nginx answered for it; see the troubleshooting row and `/ready`); a 500 is
+   the app's own error response, which carries no header; any other status
+   means the Space is not running this change. `x-ura-process: chat` on a call
+   path means nginx's call location is not first or not matching.
+2. *The call socket opens.* An upgrade request with the Space's own `Origin`
+   gets `101 Switching Protocols` and `x-ura-process: calls`; calls being off
+   shows as a close with 1001 after the handshake, not as a failed handshake:
+
+   ```bash
+   curl -sS -i --http1.1 --max-time 5 "$S/api/v1/calls/stream" \
+     -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" \
+     -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -H "Origin: $S" | head -8
+   ```
+3. *`/ready`*: `capabilities.voice_receptionist` is `ready` (or `off` if the
+   flag is off). `unavailable: the call process is not answering` once the call
+   process's start has finished means nothing listens on 8082: read the
+   container log for the `uvicorn-calls` program (the troubleshooting row below
+   explains why a cold start is slow).
+4. *The log*: each program logs its role once at startup, at the default
+   `LOG_LEVEL=info`: `Process role: chat` and `Process role: calls`, one of
+   each. There is no line beginning `Voice receptionist is on with` (the
+   more-than-one-worker warning; the call process has one worker). As a second
+   check, uvicorn's own lines name the ports: `Uvicorn running on
+   http://127.0.0.1:8081` and `…:8082`.
+5. *The counter*: `ura_receptionist_misrouted_total` is 0 for both kinds.
+
+A real officer handoff (a caller asks for an officer, an officer takes the
+call) needs a staff account: place one test call and take it.
+
+**Rollback.** Roll the Space to the image that runs one two-worker uvicorn and
+needs nothing from this change:
+
+```bash
+gh workflow run ura-chatbot-roll-hf-space.yml -f image_tag=sha-f5d79b7
+```
+
+Handoffs on the Space are then unreliable again, as in the ADR-0041 update below.
+
+The roll commits the old pin to `dev` (the workflow moves the
+`FROM landwind/ura-chatbot:sha-*` line in `App/deploy/hf-space/Dockerfile` and
+pushes it back), so the rollback lasts only until the next `dev` build that
+touches the build paths: its roll moves the pin forward again, automatically,
+to an image that has this change. Hold such merges to `dev` until the fix is in.
+
+### Assurance update — 2026-11-11, the call screens (ADR-0042)
+
+- **A refused call says why.** "Calls are not available", "All our lines are
+  busy" or "The call was cut off", in the caller's language, with a button to
+  call again. "Thank you for calling URA" appears only when the call ended
+  normally.
+- **Checking whether calls are taken, from outside.** A call socket is now
+  accepted before it is refused, so the HTTP status no longer tells: a probe
+  gets 101 either way. A close with **1001** (after an `error` frame with
+  `code: "unavailable"`) means calls are not being taken: switched off, or
+  switched on and unable to start or not configured. `GET /ready`
+  (`capabilities.voice_receptionist`: `off`, `ready` or `unavailable: <why>`)
+  and the API log say which. A socket that stays open waiting for
+  `call_start` is taking calls.
+- **The time limit is announced** a minute before it (halfway through a limit
+  of a minute or less), on the caller's screen and in the officer's call
+  workspace, and the call ends at it on every transport, even if the caller's
+  connection stalls.
+- **The console shows when it is not live.** "Live call updates paused —
+  reconnecting" on every staff page while the lobby is down; "Live transcript
+  paused — reconnecting…" in a call while its transcript is.
+- **A refused microphone keeps the call**: the caller listens and types, and
+  can press the microphone to try again.
+- **New strings need a first-language check.** The Luganda, Runyankole, Acholi
+  and Swahili call messages and the tone notice added on 11 November were
+  written from the existing strings and have not been reviewed by speakers.
+
+### Assurance update — 2026-11-11, starts safely and fails visibly (ADR-0041)
+
+What an operator sees differently after phase 3 of the 11 November review:
+
+- **A receptionist that cannot start no longer stops the API.** The chat
+  serves, calls are refused, and `GET /ready` gives the reason under
+  `capabilities.voice_receptionist` (`off`, `ready`, or `unavailable: <why>`).
+  The same reason is in the API log at error, once. Fix it and restart; there
+  is no hot reload of the receptionist.
+- **One worker means every worker variable says 1.** The gate reads `WORKERS`,
+  `UVICORN_WORKERS` and `WEB_CONCURRENCY`. Under the supervisord image
+  (`Dockerfile.cranecloud`, the HF Space) uvicorn starts from
+  `UVICORN_WORKERS`, default 2: set it to 1. With more than one worker an
+  officer's console and a caller's call reach different processes about half
+  the time, and the API log says so at every start. (On that image the call
+  process has its own single worker since 2026-11-12, ADR-0043: see the update
+  above, and leave `UVICORN_WORKERS` at its default there.)
+- **Durations are checked.** A `RECEPTIONIST_*_S` value that is not a finite
+  number inside its range makes calls unavailable at startup and names the
+  variable. A call already running reads the default instead of the bad value.
+- **A call that cannot hear or speak goes to an officer.** After a recognizer
+  failure the caller is asked to say it again; after two in a row, or two lines
+  the voice could not say, the call is transferred (to the queue when it is on). Expect more transfers
+  while a speech backend is failing, and the `UraCallSpeechFailing` alert.
+- **After a restart, look at the callback list.** Calls the previous process
+  left live are ended (`end_reason = process_lost`). The ones that were with
+  or waiting for an officer are flagged for a callback with reason
+  `service_interrupted`. All live rows are ended only where one worker and one
+  replica are declared; elsewhere only rows older than a call may last.
+- **Alerts and metrics**: see
+  [MONITORING.md, Call receptionist](../MONITORING.md#call-receptionist).
+- **Call-drop resume needs its own secret in production.** With
+  `FLAG_CALL_DROP_RESUME` on and no `RECEPTIONIST_RESUME_SECRET`, no ticket is
+  issued and the API log says so at startup.
+
+### Assurance update — 2026-11-11, records and accountability (ADR-0040)
+
+Phase 2 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+What an operator, an officer or an auditor will see differently:
+
+- **Every call turn is in the audit ledger.** With `audit_ledger` on, each
+  caller turn the AI handles writes one `generate` row with `channel: "call"`:
+  crisis turns, requests for an officer, repeats and goodbyes included. The
+  reply digest is of what the caller was told, in the call's language. A turn
+  the caller talked over is `cancelled`, a slow one `deadline_exceeded`, a
+  failed one `failed`. A turn while an officer has the call writes no AI row.
+- **Wrap-up belongs to the officers who handled the call.** An officer who was
+  never on a call gets 403; the officer still on it gets 409 until they end or
+  pass it on. On a transferred call both officers' notes are kept
+  (`wrapups` on the call record) and the call's outcome is the last officer's.
+  A call nobody reached can be wrapped up by any officer.
+- **Officers see their own tenant's colleagues.** The presence board, the
+  "is anyone on shift" check and the presence events are per tenant when
+  `multi_tenant` is on. A transfer to a named officer of another tenant is
+  refused as "not available".
+- **A staff socket ends with the session.** The officer's audio socket and a
+  listener's close with 4401 when the token expires. An officer on a call then
+  shows as reconnecting to the caller and has the reconnect grace to sign in
+  again. Staff sockets are capped per user (`STAFF_STREAMS_PER_USER` 8,
+  `STAFF_AUDIO_PER_USER` 3, in `receptionist/ws.py`); over the cap the socket
+  closes with 1013. A call has at most five listeners.
+- **A call socket limits what it takes in (G304, ADR-0045).** The officer's
+  audio socket and the caller's call socket drop a binary frame over 16 KiB,
+  an odd-length one (PCM16 needs whole samples; mu-law is exempt) and any frame
+  past 64 000 B/s with a 128 000 B burst, or 200 frames/s with a burst of 200;
+  the officer's text frames are held to 15 per 10 s. A browser sends 50 frames/s
+  and 32 KB/s, so a normal call never drops one. Each drop is counted in
+  `ura_receptionist_frames_dropped_total{side,reason}` and a flood is logged at
+  WARNING once. A socket that keeps dropping frames for 5 s is closed with 1008
+  `too many frames`. A single frame over 64 KiB closes the socket at once with
+  1009 `frame too large` (ADR-0047). Either way, an officer's close then takes
+  the reconnect grace like any other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
+  never below 32000).
+- **A LiveKit call's control sockets are limited too (G304, ADR-0047).** On a
+  LiveKit call the audio is WebRTC and these sockets carry text only: the
+  caller's call socket, the officer's audio socket and a listener's. Each
+  holds text frames to 15 per 10 s (16 KiB each); the caller's 16th control
+  message in that window, a typed question included, is dropped, not
+  answered. A binary frame on them is dropped and counted as `malformed`;
+  before, it ended the caller's call, put the officer into the reconnect grace
+  or cut the listener off. Drops are counted under `side="caller"` or
+  `side="officer"` (a listener counts as `officer`). A flood that lasts 5 s
+  closes the socket 1008: the caller's call then ends and its media pipeline
+  stops, the officer goes into the reconnect grace, and a listener is
+  removed from the room.
+- **An officer owes the wrap-up of a call that ended under them (G610,
+  ADR-0045).** However the call ended (the caller, its time limit, a media
+  failure, during their reconnect grace) the officer who had it goes to
+  `wrap_up`, unless they already saved it or took another call. Until they save
+  it, a heartbeat asking for `available` keeps `wrap_up` and names the call
+  (`wrap_up_call_id`); the console then shows "Wrap-up pending · Finish
+  wrap-up", after a reload too. `busy`, `away` and `offline` still apply. This
+  covers calls that began in the last 24 hours, one at a time, newest first. An
+  officer stuck in `wrap_up` after a demo has an unsaved wrap-up: save it.
+- **A call the officer left while it still runs is owed too (G610,
+  ADR-0047).** After **Transfer**, or when their reconnect grace lapses and the
+  call goes back to the queue, the officer stays in `wrap_up` until they save
+  it, through a reload as well; before, a reload reported `available` and they
+  could be offered the next caller or named in a transfer. The wrap-up shows
+  only **Keep ticket open with note** while the call runs (the server refuses
+  to resolve a live call's ticket). While their media is reconnecting, or while
+  they hold a claim on the call, a save is refused (409): rejoin, or join or
+  release the claim, first.
+- **The call summary no longer touches a ticket's SLA.** It adds its note only
+  when the ticket has none and never stamps a first response.
+- **Retention on Postgres.** Resolved tickets are purged whether or not the
+  call tables exist. If `TTL cleanup failed for voice_call_turns` appears, only
+  that table's purge was skipped.
+
+### Assurance update — 2026-11-11 (ADR-0039)
+
+Handoff and caller safety, phase 1 of
+[the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+What an operator will see differently:
+
+- **A dropped officer no longer strands the caller.** When the reconnect grace
+  lapses the call is back in the queue on the row as well as on screen, and the
+  next officer's **Take call** succeeds. Before, it answered "Another officer
+  took this call" until the wait timed out.
+- **Requeue, End and the urgent alert do not depend on the database.** If a
+  transcript notice, the row or presence cannot be written, the lobby event,
+  the caller's countdown and the hang-up still happen. Look for
+  `Could not record …` warnings: each one is a record to reconcile by hand
+  until the startup sweep exists (G306).
+- **Transfer to a named officer is a reservation.** The named officer must be
+  Available; otherwise the transfer is refused and the call stays with the
+  officer who has it. The call is theirs to take for
+  `RECEPTIONIST_CLAIM_TIMEOUT_S` (other consoles show *Reserved for Officer …*
+  and get 409), then `call.unreserved` opens it to everyone.
+- **The AI no longer promises an officer it cannot produce.** After a failed or
+  slow lookup it apologises; the transfer then says "I'm connecting you…",
+  "No officer is available…" or, with `ticket_queue` off, "I can't transfer you
+  right now…". With the queue off no officer is offered at all; a crisis still
+  gets the helplines.
+- **A goodbye is a goodbye.** A hang-up phrase ends the call only at the end of
+  a short turn that is not a question, so "How do I disconnect my EFRIS
+  device?" is answered. A caller who speaks during the closing line is not
+  hung up on.
+- **The officer gets the wrap-up when the caller hangs up first.** The server
+  tells the officer's console the call ended before closing its socket.
+- **The at-risk watch is quieter.** `call.risk` is published when the level or
+  the signals change, not on every turn.
+
+Still required before production: everything under "Phases 2–4" in the review,
+in particular the worker-count gate (G593) before the receptionist is switched
+back on where the image runs more than one uvicorn worker.
+
+### Assurance update — 2026-10-30 (ADR-0020)
+
+Reconnect expiry revokes the previous officer's media before releasing the
+claim. Revocation failure ends the call with `media_revocation_failed` and
+attempts room deletion; it does not advertise another transfer. Check SFU
+room state if deletion fails, suspend new calls and investigate before
+restoring service. Self-hosted LiveKit tokens cannot be invalidated by
+participant removal alone. See [the review and outstanding release gates](../plans/receptionist-assurance-2026-10-30.md).
+
+Call termination precedes callback/review/metrics/audit reporting. Each failed
+report is logged independently; registry/admission cleanup still runs. A
+database outage can leave a stale row requiring reconciliation. Timers do
+not cancel their own teardown; cancellation and media-close awaits have
+cooperative five-second deadlines. This is not process-loss recovery.
+
+Install `requirements-cranecloud.txt` and `requirements-receptionist.txt`
+together. Pipecat is pinned to 1.15.0 (released 2026-10-29); the old 1.12.0
+pin required Pillow below 13 and could not resolve with the backend's Pillow
+13 floor. The combined profiles and pipeline tests were verified with Pillow
+13.0.0. Do not install the old profile separately and silently downgrade Pillow.
+
+---
+
+## 1. Overview & Architecture
+
+The URA receptionist simulates a toll-free customer support line (`0800 117 000`)
+inside the web platform. In production, LiveKit carries caller, agent and officer
+media; authenticated application WebSockets carry only call setup and control:
+
+```
+Taxpayer browser ─┐                                         ┌─ Staff browser
+ mic + speaker   │      LiveKit WebRTC room (encrypted)    │ mic + speaker
+ call controls ──┼───────────────┬─────────────────────────┼─ call controls
+                 │               │ agent audio/data        │
+                 └───────────────┴─────────────────────────┘
+                                 │
+FastAPI (one worker and one replica; process-local call actor)
+  /v1/calls/stream: auth, consent, rate limits, room token + JSON controls
+  /v1/admin/calls/{id}/audio: staff role/claim checks + short-lived room token
+   Pipecat LiveKitTransport:
+     room audio → CallerAudioTap (only caller reaches AI; officer turns are captioned)
+     → VADProcessor          (Silero; broadcasts VADUser{Started,Stopped}SpeakingFrame)
+     → LivePartialTranscriptTap (re-decodes the utterance-so-far every 0.8 s → `final:false` captions)
+     → UraWhisperSTT         (SegmentedSTTService → SpeechModel.transcribe(with_words=True))
+     → TranscriptTap         (stash word probs in CallState, `final:true` caption events)
+     → user_aggregator       (LLMContextAggregatorPair; turns.py: VAD opens a turn while the assistant
+                              is quiet, 2 transcribed words barge in while it talks; the turn closes
+                              RECEPTIONIST_TURN_TIMEOUT_S after VAD's 0.5 s stop — Smart Turn v3
+                              covers neither Luganda nor Swahili)
+     → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer;
+                              integrates GPU dense BGE-M3 + DBSF fusion + GPU mxbai-rerank with clean
+                              single-sigmoid probabilities, G126–G132)
+     → UraSpeechTTS          (TTSService with push_start_frame=True, push_stop_frames=True →
+                              SpeechModel.synthesize → PCM16 16k; streams from the local Orpheus
+                              sidecar for the languages in ORPHEUS_TTS_LANGUAGES, applies
+                              clean_text_for_speech + apply_tts_engine_phonetics for Tin/Nin/Vat/
+                              Payee/Efris/Runyankole/Acholi parity with Main Chat (G439/G440), and emits
+                              TTSStartedFrame/TTSStoppedFrame so BotStoppedSpeakingFrame fires
+                              immediately without the 3.0s BOT_VAD_STOP_FALLBACK_SECS delay, G249)
+     → LiveKit audio/data output
+   Observers: CallMetricsObserver (turn latency, barge-ins)
+   On end: summary.py (always English; local Sunflower, or a deterministic summary if vLLM is down)
+           + metrics.py → store.py (voice_calls / voice_call_turns)
+```
+
+This is still a browser simulation, not a carrier-connected telephone service.
+The LiveKit media path is production-capable, but active call coordination,
+staff ownership and reconnect timers remain process-local. Production therefore
+requires exactly one API worker and replica plus the explicit single-replica
+acknowledgement. A process restart or node loss ends active calls; this is not
+HA and sticky routing does not make it HA. Horizontal scaling stays blocked until
+call actors/events move to shared durable state and failover is exercised.
+
+The backend mints five-minute, room- and identity-scoped LiveKit JWTs only after
+taxpayer authentication/consent or staff role/claim checks. The API secret never
+leaves the backend. Browser media does not traverse the application WebSocket.
+Browser participant grants allow only microphone tracks and no client-published
+data (observers cannot publish); the backend agent alone publishes call events.
+Officer transfer removes the old participant and revokes live media permissions
+before requeueing, and the room is closed during call teardown. Stale or unissued
+identities are removed as soon as the server reports a reconnect. The allowlist
+is only consulted when a participant joins, so the backend also removes
+participants whose access ends while they are connected: a supervisor listener
+when their console closes, an officer whose reconnect grace lapses (which also
+frees the call's officer media seat for the next claimant — before this, the
+lapsed identity refused the next officer's audio with 4409), and an officer
+whose claim lapsed or whose caller hung up while their media was still joining.
+Those removals are best effort and logged by a digest of the identity; a
+transfer instead refuses to proceed (503) if removal fails. Self-hosted
+LiveKit does not invalidate already issued JWTs: the five-minute TTL is an
+additional exposure bound, not immediate revocation. If the threat model
+requires strict pre-join revocation, use LiveKit Cloud or do not enable the
+receptionist until an equivalent self-hosted token-revocation control is in
+place.
+Production readiness checks for a secure LiveKit URL, credentials, the LiveKit
+transport selection, one worker/replica and the operator acknowledgement — and,
+since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
+`LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
+`RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
+`python -m app.production_readiness --as-production` reports those G36 checks.
+Run in a shell inside the supervisord image's container, it reads that image's
+`UVICORN_WORKERS=2` and reports a G36 worker-count error that does not apply to
+the Space: the call process, the only one that starts the receptionist, runs one
+worker and sets all three worker variables to 1 itself (ADR-0043). Read that line
+as expected there, and the other lines as real.
+Since ADR-0041 a production deployment that fails them still starts and serves
+the chat; calls are refused and `GET /ready` names the failed check under
+`capabilities.voice_receptionist`.
+Browser sockets send credentials in their first application message (never in
+the URL), and staff/audio sockets validate browser `Origin` against
+`CORS_ORIGINS`. Neither protects the credential in transit: that is TLS's job,
+so in production the application's own WebSockets must be `wss://` end to end
+as well as LiveKit's (see the rollout checklist below). The browser accepts a
+`ws://` LiveKit URL only when the page itself is plain `http:` (a local demo);
+on an HTTPS page it refuses, and it takes call events over the data channel
+only from the backend agent's identity (`ura-agent-…`).
+
+That is the whole engine, and every call language runs on it: Whisper-SALT,
+Sunflower on vLLM against Qdrant, and the Orpheus voice, all from locally cached
+Hugging Face weights on the GPU stack. `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` adds a
+language sentinel that moves a call between English, Luganda and Swahili on this same
+engine — see **§6 Multilingual calls**. The Gemini Live speech-to-speech engine was
+removed on 2026-09-30. Since G122 (2026-10) **no hosted model is used anywhere on a
+call**. The officer brief, the call summary, the Luganda query bridge and the Luganda
+answer run on Sunflower only, with deterministic fallbacks when vLLM is down. A call
+turn's English or Swahili answer comes from the chat service (`top_k=6`), which is held
+to local models by default (`app/providers/scope.py`); on CPU-only deployments such as
+the Hugging Face Space, `RECEPTIONIST_ALLOW_CLOUD_LLM=true` opts Call Receptionist into
+the same Gemini LLM as Main Chat under a 20.0s turn deadline (`G415`).
+
+---
+
+## 2. Configuration & Environment Variables
+
+All switches and thresholds are configured via environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FLAG_VOICE_RECEPTIONIST` | `false` | Master feature flag for call socket, audio bridge, and staff Calls page |
+| `RECEPTIONIST_MEDIA_TRANSPORT` | `websocket` | Local/demo default; production requires `livekit` |
+| `LIVEKIT_URL` | unset | Public `wss://` endpoint for the self-hosted LiveKit deployment |
+| `LIVEKIT_API_KEY` | unset | Server-only LiveKit API key; store in the deployment secret manager |
+| `LIVEKIT_API_SECRET` | unset | Server-only LiveKit API secret; never expose to browser/build args |
+| `VOICE_RECEPTIONIST_REPLICAS` | unset (`1` in the Space Dockerfile) | Must be `1` until shared call actor state is implemented (G613). Declares the call process the deployment's only one, so its start ends every row a previous run left |
+| `URA_PROCESS_ROLE` | unset | `calls` or `chat`, set per program by `uvicorn-role.sh`. Unset keeps one process serving everything; any other value is logged as an error and treated as unset (ADR-0043) |
+| `URA_CALLS_PROCESS_URL` | `http://127.0.0.1:8082` | Where the chat role reads the call process's `/ready` (set by `uvicorn-role.sh` for the chat program) |
+| `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK` | `false` | Explicitly acknowledge active calls end if the API process is lost |
+| `FLAG_VOICE_CONSENT` | `true` | Enforces explicit voice consent dialog prior to audio processing |
+| `FLAG_TICKET_QUEUE` | `true` | Enforces human queue oversight; transfers fail safely if disabled |
+| `WORKERS` | `4` in the Docker image | Explicitly set `1` for the receptionist — active call state is process-local |
+| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The image's worker budget: the chat program gets `max(1, N − 1)` and the call program always 1 (ADR-0043); keep it at 2 on the Space (nginx splits chat one to one between the two programs, so a larger N overloads the one-worker call process). Outside the supervisord image, set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
+| `WEB_CONCURRENCY` | unset | Read by the gate as well: if set, it must be `1` (the supervisord image's call process exports `1` itself) |
+| `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
+| `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
+| `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
+| `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer, and between reassurances while an officer has them on hold; `0` turns them off |
+| `CXP_TIMEZONE` | `Africa/Kampala` | Time zone of the officers' working hours (`app/officer_hours.py`) |
+| `CXP_OPEN_HOUR` / `CXP_CLOSE_HOUR` | `7` / `23` | Whole hours the desk opens and closes (the CXP desk closes at 11 PM). A close at or before the open runs past midnight; `0`/`24` never closes |
+| `CXP_WORKING_DAYS` | every day | Days a shift starts on, e.g. `mon,tue,wed,thu,fri` |
+| `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
+| `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
+| `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
+| `RECEPTIONIST_AUDIO_BYTES_PER_S` | `64000` | Audio a call socket (officer or caller) may carry, in bytes a second; the burst is two seconds' worth. A browser sends 32 000. Never below 32 000. Over it, frames are dropped; 5 s of drops closes the socket 1008 (ADR-0045) |
+| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number makes calls unavailable (and fails the G36 gate) instead of falling back |
+| `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
+| `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
+| `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit for plain prose before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn). Structured multi-bullet/multi-step answers (`has_structured_items`) expand up to 15 sentences / 260 words so complete lists and procedures are spoken in full on the first turn (`G415`) |
+| `RECEPTIONIST_ALLOW_CLOUD_LLM` | `false` (`true` on HF Space) | Allows Call Receptionist turns (`channel="call"`) to use the configured cloud LLM (Gemini) under a 20.0s turn deadline on CPU-only deployments (`G415`) |
+| `STT_ALLOW_MULTILINGUAL_GEMINI` | `false` (`true` on HF Space) | Allows `STT_FALLBACK_BACKEND=gemini` to transcribe multilingual (`en`, `lg`, `sw`, `nyn`, `ach`) and `language=None` autodetect audio on CPU-only deployments when Whisper-SALT is absent and Sunbird quota is exhausted (`G415`) |
+| `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
+| `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
+| `ORPHEUS_TTS_LANGUAGES` | `lg` (`lg,sw,en` in the GPU overlay) | Languages Orpheus voices; the rest fall to Spark-TTS-SALT (sw, lg), then edge-tts |
+| `ORPHEUS_TTS_MAX_CHARS` | `120` | Longest text sent to Orpheus in one request; longer text is voiced in pieces cut at sentence, clause, then word breaks. The sidecar stops at 16.98 s of audio (`ORPHEUS_MAX_TOKENS` 1400) and spoken digits run to ~0.12 s a character |
+| `RECEPTIONIST_LOCAL_BARGE_IN` | `true` | The sentinel's VAD stops the assistant when the caller talks over it, before Whisper has transcribed the two words the engine's own rule waits for (turn off on a device whose speaker leaks into the mic) |
+| `RECEPTIONIST_BARGE_IN_MIN_S` | `0.4` | Speech past the VAD onset (itself 0.2 s) that counts as talking over the assistant |
+| `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
+| `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
+| `VOICE_TRANSCRIPT_TTL_DAYS` | `90` | Retention for voice turns and non-ticketed call records |
+| `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes (standard fallback) |
+| `RECEPTIONIST_SLOW_PAUSE_MS` | `600` | Silence after each sentence once the caller has asked the assistant to slow down (the local voices have no speed control) |
+| `RECEPTIONIST_IDLE_REPROMPT_S` | `12` | Caller silence, counted from the end of the assistant's speech, before it asks "Are you still there?"; `0` turns silence handling off |
+| `RECEPTIONIST_IDLE_REPROMPTS` | `1` | How many such checks before a still-silent call is ended (end reason `caller_idle`) and its call slot freed |
+| `RECEPTIONIST_CALL_REVIEW` | `true` | The AI asks "was this call helpful?" — once a call, only after it answered something — at goodbye, or while a caller who asked for an officer is transferred. Audited on `/admin/quality` (AI on calls) |
+| `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` | `10` | How long the AI waits for the answer to its goodbye review question before saying goodbye (recorded as no answer) |
+| `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
+| `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
+| `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
+| `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
+| `FLAG_HYBRID_SPEECH_S2S` | `false` | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`) |
+| `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls. A confirmed action is reported done only when its executor reports success (fail-closed, G177) |
+| `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`). Affect needs the caller's words: loudness or pace alone names nothing (see `conversational-safety-and-eq.md`) |
+| `PROSODY_ACOUSTIC_ONLY_AFFECT` | `false` | Restores affect labels from loudness or pace alone — for a validation study only |
+| `FLAG_SPOKEN_FIGURE_GUARD` | `false` | Dictation pauses & spoken figure verification (`receptionist/spoken_figure_guard.py`) |
+| `FLAG_OFFICER_VOICE_COPILOT` | `false` | Live ASR + English router view assist on the officer console during bridged calls |
+| `FLAG_CONTINUOUS_RELATIONSHIP_MEMORY` | `false` | Longitudinal `ResolutionCase` checkpointing & bidirectional `Voice <-> Web` carryover |
+| `ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS` | unset (`55` when set) | Tighter character cap on the opening clause to reduce Orpheus first-audio TTFB |
+| `VOICE_SEMANTIC_ENDPOINT_MIN_SILENCE_MS` | `320` | Minimum semantic endpointing silence for syntactically complete turns |
+| `VOICE_SEMANTIC_ENDPOINT_NUMERIC_SILENCE_MS` | `1100` | Extended silence tolerance when caller is mid-number (TIN/PRN) or mid-conjunction |
+| `FLAG_LOW_BANDWIDTH_VOICE_CODEC` | `false` | Negotiates 8 kHz μ-law / 12 kbps Opus wire transcoding in `BrowserCallSerializer` (`receptionist/serializer.py`) and caption-first degradation on 2G/3G links (`receptionist/low_bandwidth.py`) |
+| `FLAG_CALL_DROP_RESUME` | `false` | Enables HMAC-signed caller drop-resume ticket (`RECEPTIONIST_CALLER_RECONNECT_GRACE_S=45`) and shared `call_drop_snapshot` recovery |
+| `FLAG_EQ_MULTIMODAL_FUSION` | `false` | Fuses multi-turn lexical distress, native vernacular hardship (`lg`/`sw`/`nyn`/`ach`), and acoustic prosody into `AffectiveState` + affect-attuned 450 ms voice fillers |
+| `FLAG_WORKFLOW_TANGENT_RESUME` | `false` | Answers mid-workflow policy side-questions and resumes the parked workflow step |
+| `FLAG_AUTONOMOUS_OUTCOME_VERIFICATION` | `false` | Binds missing calculator/tool parameters from consented `verified_slot_bank`, `SemanticMemory`, and prior DAG receipts |
+| `FLAG_OFFICER_PREFERENCE_CAPTURE` | `false` | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies for DPO/ORPO export |
+
+Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
+provider session window any more, and Pipecat's own idle cancel (300 s without speech
+or transcripts in the pipeline) is off in both pipelines — while an officer has the
+call its audio bypasses the pipeline, and the single-language one once cut every
+officer call at five minutes, recorded as a caller hang-up (G193). See Pipecat's
+[transport selection guide](https://docs.pipecat.ai/client/concepts/choosing-a-transport)
+before designing a production rollout. The current browser WebSocket audio path
+is demo-only; Pipecat recommends WebRTC for client-to-server voice, while
+WebSockets are suited to server-to-server or text-only use.
+
+Supervisor “AI-only calls” is an operational routing measure (at least one AI
+answer, no officer transfer, and no timeout/error). It does not assert that the
+taxpayer's issue was resolved; resolution needs a separate explicit outcome.
+With multi-tenancy enabled, historical calls are tenant-filtered. Ticket history
+is omitted because the current ticket table has no tenant key and cannot be
+filtered safely by `user_id` alone.
+
+### Production LiveKit rollout
+
+Treat this as a controlled browser-voice deployment, not a telco launch. Before
+enabling the feature:
+
+1. Deploy LiveKit on a supported host/network with a public DNS name and trusted
+   TLS certificate. Put the WebSocket signaling endpoint behind TLS on `443`;
+   permit the documented LiveKit TCP/UDP media ports from client networks. For
+   restrictive networks, configure TURN/TLS and its certificate as well. Use
+   LiveKit's [self-host deployment guide](https://docs.livekit.io/transport/self-hosting/deployment/)
+   and [firewall/port matrix](https://docs.livekit.io/transport/self-hosting/ports-firewall/)
+   as the source of truth for the selected LiveKit release.
+2. Configure LiveKit with Redis on a private network, external-IP discovery that
+   matches the host's routable address, production API credentials, capacity
+   limits, and monitoring. Do not use the development `livekit-server --dev`
+   mode, placeholder keys, or an untrusted/self-signed certificate.
+3. Store `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in the secret manager and
+   inject them only into the backend runtime. Configure `LIVEKIT_URL=wss://…`,
+   `RECEPTIONIST_MEDIA_TRANSPORT=livekit`, `WORKERS=1` (and `UVICORN_WORKERS=1`
+   under the supervisord image, which starts uvicorn from that variable),
+   `VOICE_RECEPTIONIST_REPLICAS=1`, and
+   `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
+   accepts active-call loss on API process failure; it is not a failover control.
+   Run the Orpheus voice sidecar beside the API on its own GPU and set
+   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en,nyn,ach` (every language
+   in `RECEPTIONIST_LANGUAGES`, all five by default); without them the gate
+   makes calls unavailable (the chat still starts; `/ready` gives the reason),
+   because the only other local voice (Spark-TTS-SALT) takes several seconds a
+   sentence.
+4. Serve the web app and API over HTTPS only, and make the ingress refuse or
+   redirect plain HTTP — including the WebSocket upgrades on
+   `/v1/calls/stream`, `/v1/admin/calls/stream` and
+   `/v1/admin/calls/{call_id}/audio`. Each of those sockets carries the user's
+   bearer token in its first message and returns a LiveKit room token; `Origin`
+   checks stop cross-site use, not eavesdropping. Where TLS terminates at a
+   proxy, keep the proxy-to-API hop on a private network. Verify with the
+   browser devtools that every socket opens as `wss://`.
+5. Keep `FLAG_AUTH_REQUIRED`, `FLAG_MULTI_TENANT`, `FLAG_AUDIT_LEDGER`, and
+   `FLAG_TICKET_QUEUE` enabled, and satisfy the remaining global production gates
+   in `App/docs/PRODUCTION_GATES.md`. Confirm tenant RLS and voice consent behavior
+   against the deployed databases and identity provider.
+6. Run the production gate before enabling the feature:
+
+   ```bash
+   APP_ENV=production PYTHONPATH=App/backend python3 -m app.production_readiness
+   PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_receptionist_livekit.py App/backend/tests/test_receptionist_claims.py -q
+   ```
+
+   The gate validates app-side values only. Separately verify TLS trust, DNS,
+   UDP reachability, TURN from a restricted client network, token expiry, caller
+   and officer audio isolation, microphone-only publishing, consent rejection,
+   transfer revocation/hold/end, officer reconnect and a lapsed reconnect
+   (the next officer must be able to take the call), a supervisor listener
+   being removed when their console closes, and audio on iOS Safari (the call
+   screen shows "Tap here to hear the call" when the browser holds audio back)
+   in a browser game day before opening access to taxpayers.
+7. Enable the flag only after those checks and monitor LiveKit room/participant
+   counts, ICE/TURN failures, call setup time, media disconnects, Pipecat pipeline
+   errors, API saturation, and transfer queue outcomes. Keep a tested rollback
+   that turns `FLAG_VOICE_RECEPTIONIST` off.
+
+The current application supports one API process for active calls (under the
+supervisord image that is the call process, which has one worker, ADR-0043; the
+other worker or workers belong to the chat program and serve chat). Do not set
+multiple Kubernetes replicas, multiple ASGI workers, or scale-out autoscaling
+for the receptionist; LiveKit itself can scale independently, but it does not make
+the application's in-memory claims, call state, event hub or timers shared.
+Adding shared actor/event state, restart recovery, and a tested media/session
+reconnect policy is a prerequisite for HA or horizontal API scaling. LiveKit
+tokens are restricted to one room and participant and expire after five minutes;
+they authorize room entry, not an active participant's maximum call duration.
+
+---
+
+## 3. Acoustic & Hardware Requirements
+
+1. **Headsets are mandatory on both machines during live demos.**
+   Bridging caller and officer audio in the same acoustic space without headsets
+   creates microphone feedback loops. Both parties must use headphones with
+   hardware or software echo cancellation.
+2. **GPU host required for Whisper-SALT per-word log-probabilities.**
+   CUDA acceleration computes transition scores via `compute_transition_scores`
+   without CPU stalls.
+
+---
+
+## 4. Starting the Stack on GPU Host
+
+```bash
+cd App && GPU_ID=2 VLLM_GPU_ID=5 ORPHEUS_GPU_ID=4 docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.local-retrieval.yml \
+  -f docker-compose.local-sunflower.yml \
+  -f docker-compose.gpu-salt.yml \
+  --profile multilingual up -d --build
+```
+
+Verify startup in container logs:
+```bash
+docker compose logs api | grep "Voice receptionist"
+# Voice receptionist schema initialized
+```
+
+Expose using ngrok:
+```bash
+./scripts/manage_ngrok.sh start
+# Publishes local frontend (port 3032 -> API :8083 proxy) over the enterprise domain:
+# https://struttingly-nongeological-briella.ngrok-free.dev
+```
+
+### Tearing the stack down — leave no VRAM behind
+
+```bash
+python3 App/scripts/cleanup_gpu_processes.py --dry-run   # list what would be released
+python3 App/scripts/cleanup_gpu_processes.py             # release it, then verify
+```
+
+The script frees everything this project holds on the GPUs and then re-queries
+`nvidia-smi`; it exits non-zero (`STILL_ON_GPU`) if anything of this project is
+still resident, and also when Docker cannot be queried, so a failed lookup is
+never reported as clean. It covers what a plain `docker compose down` misses:
+
+- profile-gated services (`orpheus-tts` needs `--profile multilingual`);
+- orphan containers from other compose chains (`ura-app-connectors`, the dev2 stack);
+- host processes started from agent scratchpad worktrees.
+
+Containers are matched by their compose working-dir label (`~/Mpairwe7`), not by
+the process's path: a container process reports a container-side cwd such as
+`/app`, which a path match would skip as external. Other projects' containers and
+processes on the shared box are never touched. Stopping the stack ends the ngrok
+upstream (`502`) until it is brought up again.
+
+---
+
+## 5. End-to-End Demo Script
+
+### Step 1: Taxpayer Initiates Call
+1. In the taxpayer chat header, click the **Phone** icon ("Call URA").
+2. The consent dialog appears:
+   *"This call will be recorded and transcribed to assist URA officers and improve taxpayer support."*
+3. Click **Accept & Call**.
+4. The synthesizer plays two PBX dialing ring pulses.
+5. The AI answers (always in English, whatever the chat language is — §6):
+   *"Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question in your preferred language — English, Luganda, Swahili, Runyankole or Acholi — and I'll give you the answer in that language. You can ask for an officer at any time. How can I help you today?"*
+   It says it is an AI, and that a person is one request away, before anything else.
+   The recording notice is the consent dialog in step 3; the greeting no longer repeats it.
+
+### Step 2: Knowledge Retrieval (Happy Path)
+1. Caller asks: *"How do I register for an instant TIN?"*
+2. Filler plays after 1 second if retrieval takes longer: *"Let me check that for you."*
+3. Assistant speaks the verified URA statutory guidance within ~3-4 seconds.
+4. Spoken text is trimmed to `RECEPTIONIST_MAX_SPOKEN_SENTENCES` (3 sentences for prose; complete compact calculator breakdowns up to 8 bullets / 75 words are spoken in full so the payable tax or net take-home is never cut off, `G415`), 5-locale written footers/follow-up prompts are stripped before sentence counting, `spoken_figure_guard` verifies figures against the spoken slice, and acronyms are pronounced cleanly ("TIN", "U R A", "Payee", "Efris").
+5. The call screen keeps a running chat transcript of both sides — nothing scrolls away,
+   and it auto-follows the newest line unless the caller has scrolled back to read.
+   Inline paced steps (`Step 1:`, `Odaala emu:`, `Hatua moja:`, `Idaara emwe:`, `Rwom acel:`) and trailing yes/no offer questions are formatted onto their own lines (`formatCallCaptionText` in `CallScreen.tsx` and `CallTranscript.tsx`, `G415`).
+   The whole thread sits in an `aria-live` log region for screen-reader assistance.
+6. The caller's own words appear **while they are still speaking**: Whisper-SALT is a
+   segmented recognizer, so `LivePartialTranscriptTap` re-decodes the growing utterance
+   every `RECEPTIONIST_PARTIAL_INTERVAL_S` and sends each hypothesis as a `final:false`
+   caption (dashed bubble + caret). The turn's real transcript replaces it in place when
+   VAD closes the turn. Partial decodes cost 0.22 s (1 s of speech) to 0.63 s (4 s) on one
+   RTX A6000 with the model resident, and stop the moment the turn closes, so they never
+   contend with the answer behind them.
+
+### Step 3: Clarification ("Did you mean...?")
+1. Caller indistinctly slurs a domain term: *"I want to know about group mid-port."*
+2. Whisper-SALT scores "mid-port" at probability `0.31` (< 0.55 threshold).
+3. `ClarifyGate` matches the Metaphone key against the URA lexicon + "group" bigram boost (`0.925` score).
+   - Words whose top lexicon candidate already matches the transcribed word (`cand_term == clean_target.lower()`, e.g., `"VAT"` with subword probability `< 0.55`) or context-repaired English homophones (`"standard vet rate"` $\rightarrow$ `"standard VAT rate"`, `"for a teen"` $\rightarrow$ `"for a TIN"`) are skipped during low-confidence assessment (`G249`), continuing to any remaining low-confidence words in the utterance.
+4. AI asks: *"Excuse me, did you say **import**?"*
+5. Caller responds: *"Yes, import."*
+6. AI confirms: *"So if I got it right, you're asking about **group import** — is that right?"*
+7. Caller says: *"Yes."*
+8. AI answers the corrected query directly from the knowledge base.
+   - If instead of a short yes/no or 1–4 word replacement term the caller asks a complete new question on the next turn (e.g., *"How do I register if I have no TIN?"*), `UraReceptionistBrain` supersedes the open clarification state and answers the new question directly (`G249`).
+
+### In-call requests the assistant handles itself
+
+Short requests — eight words or fewer, so a question that merely contains one
+of these words is answered, not obeyed — in English, Luganda or Swahili. A
+goodbye is stricter still (G573): the hang-up words must end the turn (thanks
+or a vocative may follow) and the turn must not open like a question.
+
+| The caller says | The assistant |
+|---|---|
+| "Could you repeat that?", "Kiddemu", "Rudia tena" | repeats its last answer |
+| "Speak slower", "Yogera mpola", "Ongea polepole" | says it will slow down; every later sentence is followed by `RECEPTIONIST_SLOW_PAUSE_MS` of silence |
+| "Speak normally", "Normal pace", "Yogera bulijjo", "Ongea kawaida" | restores normal speaking pace (`speech_rate_slow = False`, 5-locale `normal_ack`, `G253`) |
+| "Tell me more", "More detail" (even after a repeat or pace turn) | reads `last_more_detail` saved from the last truncated answer (`G253`) |
+| On-screen quick controls (`CallScreen.tsx`, `G253`) | `Stop speaking` (`interrupt`), `Yes`/`No` (`accept_offer`/`decline_offer`, active across `pending_offer`, `ClarifyState` in `"term"`/`"confirm"`, `pending_confirm_challenge`, and `review_state == "asking_end"`), `Repeat` (`repeat`), `More detail` (`more_detail`), `Slower pace`/`Normal pace` (`slower`/`normal_speed`), and `Type on call` (`CallTextTurnFrame`, EN 301 549 v4.1.1 Clause 6.2 Real-Time Text fallback for typing TIN/PRN/questions while muted or in noisy environments), driven by real-time `OutputTransportMessageUrgentFrame` `call_state` phase events (`listening` / `thinking` / `speaking` with `role="status" aria-live="polite"`), in-flight generation cancellation on barge-in (`_cancel_active_generation`), sliding-window rate limiting (`_allow_control_frame`, 15 frames / 10 s), Stage 2/3 `ClarifyGate` multi-word & inline negative repair (`"No, export"`), and non-Pipecat fallback loop serializer parity in `ws.py` |
+| "Goodbye", "End the call", "Bye", "That's all, thank you", "Weeraba", "Kwaheri" | if the AI has answered something on this call, first asks *"Before you go, was this call helpful to you?"*, stores the answer (helped / partly / didn't help / unclear, with what was said), says *"Thank you for your feedback. Goodbye."* and ends the call; otherwise says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`). Silence after the review question for `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` is recorded as no answer and the call ends with the usual goodbye; a new question instead is answered, and the review is not asked again |
+| nothing, for `RECEPTIONIST_IDLE_REPROMPT_S` | asks "Are you still there?"; after `RECEPTIONIST_IDLE_REPROMPTS` such checks, says goodbye and ends the call (`caller_idle`) |
+| "Yes", "Tell me more", "Weeyongere", "Endelea" after *"Would you like more detail?"* | reads the rest of the answer, three sentences at a time |
+| "No", "That's all" after either question | *"No problem. What else can I help you with?"* |
+
+### When a call reaches an officer
+
+The AI answers every call; officers get only the calls it hands over. On
+LiveKit (production) the AI joins the call's room as the agent participant; on
+the local stack the same pipeline runs over the call socket. Either way the
+caller hears the AI first.
+
+| Trigger | What happens | `transfer_reason` |
+|---|---|---|
+| The caller asks for a person, however it is put: "Can I speak with an agent?", "Put me through to someone", or just "Officer" / "Agent, please" (Luganda *omukozi*, Swahili *afisa*); or taps **Talk to an officer** | Transferred at once | `caller_requested` |
+| …and **no officer is signed in** (presence; a lookup error counts as signed in) | No hold for nobody: *"No officer is available to take your call right now, so an officer will call you back…"*, the reference on screen, the ticket kept for the officers. The screen never shows a wait | callback `no_officer_online` |
+| …**outside the officers' working hours** (`CXP_*`, default 07:00–23:00 EAT) with nobody signed in | *"Our officers are off duty at this hour, so an officer will call you back when they are next on duty…"*; the hours and the reference on screen (times are never spoken). An officer working late still takes the call | callback `outside_working_hours` |
+| A dispute, objection, appeal or legal question | Transferred at once | `tax_dispute` (or the chat's reason) |
+| Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once. After a failed or slow lookup the AI first apologises (*"I'm sorry, checking the database is taking longer than expected."*); it says an officer is coming only once the transfer has checked that one can (G572) | `no_knowledge_match`, `system_error`, `timeout` |
+| Clarification fails `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` times | Transferred | `clarification_failed` |
+| A weakly grounded answer — the chat's response judge rates it `low`, or the result's own confidence is 0.35–0.50 — a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…). How clearly the caller was *heard* is not part of this (the clarify gate and the risk monitor handle that; G181) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
+| The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
+| The same, said **while waiting for an officer** | The crisis lines at once (numbers on screen) and *"I've asked for an officer to come to you first. Please stay on the line."* The call and its ticket go to **urgent**; the lobby gets `call.priority_raised`, which puts the call first and brings back a dismissed alert without touching its wait or an officer's claim, and the call's own channel gets `priority`, so the workspace of whoever takes it shows *"Safety concern: crisis lines given…"*. Before G175 the line was recorded and nothing was said | `safety_concern` |
+
+Nobody takes a call the AI is still handling: the claim API answers 403 and
+the console offers no **Take over**. Only officers (`ura_staff`) work calls at
+all; administrators audit the service and are refused every call-desk action
+(since 2026-10-13, `App/docs/plans/admin-service-quality-audit-plan.md`). Every AI question is the only
+question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
+over an answer, before its question was heard, is a backchannel: the question
+is asked again, and nothing is acted on. An at-risk caller who talked over the
+officer offer and moved on is offered again with the next answer.
+
+A second request for a person while the call is already waiting, or while an officer
+has it, changes nothing: one ticket, one alert, one countdown (G178). The
+spoken-confirmation step behind `FLAG_VOICE_AGENTIC_WORKFLOWS` tells the caller an
+action is done only when the action's executor reported success; otherwise it says it
+could not be completed on the call and offers an officer (G177).
+
+### Step 4: Transfer to Human Officer
+1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
+2. AI announces: *"I'm connecting you to a URA officer, please hold."* If it has answered
+   something on this call, it asks instead: *"I'm connecting you to a URA officer now. While
+   you wait, were my answers helpful so far?"* — the transfer is already under way. An answer
+   before the officer joins is stored (`call_ai_review_transfer`) and thanked (*"Thank you.
+   Please stay on the line; an officer will be with you shortly."*); the officer joining first,
+   or the caller hanging up, records no answer. Never asked on a crisis, safety or failure transfer.
+3. Status changes to **Transferring**, with the reference (`TIC-` and the ticket's first 8 characters) on the caller's screen.
+4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
+   topic and priority come from the handoff packet ("My account balance" → *Account
+   question*, high), and the queue row shows **Waiting for officer**. The brain goes
+   through `receptionist/transfer.py`, which also stores `topic`, `priority` and
+   `transfer_requested_at` on the call.
+5. Every `RECEPTIONIST_HOLD_UPDATE_S` (30 s) the caller hears *"Thank you for holding. An
+   officer will be with you shortly."*, unless an officer has taken the call and is joining.
+   If nobody takes it within `RECEPTIONIST_TRANSFER_TIMEOUT_S` (90 s), the caller hears
+   *"All our officers are busy, so an officer will call you back. Meanwhile, I can still
+   help with other questions."*, their reference appears on screen as `TIC-XXXXXXXX` (never
+   read out: the voice cannot say a ticket id), the call returns to the AI, and it is
+   marked as owed a callback (`needs_callback`, reason `no_officer_available`; lobby
+   `call.transfer_timed_out`) — a **Callback** chip on its row. An officer who takes the
+   call at the last moment is waited for; the caller is not told everyone is busy while
+   an officer is joining. Their **place in the queue** shows on screen from the start
+   (*"Place in queue: 2"*; a `queue` message, never a transcript line), and once they are
+   first they hear *"You're next in line."* with a hold line — said once. A caller who would
+   rather not wait taps **Call me back instead**, or says so ("call me back", Luganda
+   *munkubire essimu*, Swahili *nipigie simu*, Runyankole *onteerere esimu*, Acholi *goy cim
+   bota*): the wait ends as a callback (`caller_requested_callback`) and the AI stays on the
+   line. Replay check: `App/scripts/replay_call_audio.py --only 11_officer`
+   (about 2 minutes).
+   The same countdown runs for **every** wait, not only the AI's transfer: when an officer
+   passes the call on, or their audio drops and does not come back within
+   `RECEPTIONIST_OFFICER_RECONNECT_GRACE_S`, the call goes back in the queue with its topic
+   and priority, and the caller gets the same hold lines and, in the end, the callback.
+   Each wait has its own countdown (`CallState.queue_epoch`): an officer joining stops it,
+   and an old one can never time out a newer wait (G179, G192).
+6. With `FLAG_TICKET_QUEUE` off nothing is promised: the caller is told to call the
+   toll-free line, and the number appears on screen.
+
+### Step 5: Officer Takeover & Live Audio Bridge (the Call Desk)
+1. On **any** staff page the officer gets a transfer alert (bottom right): wait ring,
+   topic, language, reason, ticket — plus a chime (if **Sound on**), the tab title
+   `(1) Caller waiting — …`, and a desktop notification when the tab is hidden. The call
+   bar at the top shows Live / Waiting counts. Run **Check mic** once per shift.
+2. **Preview** opens `/calls?call=…`: the AI brief (why a person is needed, what was asked,
+   what the AI already said, what is open, details given, mood, a suggested first line) —
+   every line links (`↗7`) to the transcript turn it came from. The brief rebuilds every
+   `RECEPTIONIST_BRIEF_EVERY_TURNS` caller turns and on transfer.
+3. **Take call** (or `A`) claims it — first officer wins; a second gets *"Taken by Officer
+   …"*. A call a colleague passed to a named officer shows *Reserved for Officer …* to
+   everyone else and *Passed to you by Officer …* to that officer, until they take it or
+   the claim window runs out (G580). The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
+   asked for, then the audio joins: the caller's player is cleared and they hear *"You're
+   now connected to Officer {Name}."* in the call's language. Officers take the calls the
+   AI hands over; a call the AI is still handling cannot be taken.
+4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
+   still saying is dropped, including what was already queued on the server to play, and
+   its waiting screen (ADR-0055). Officer audio streams directly to the caller socket.
+5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.
+6. The call follows the officer: open a ticket mid-call and a dock at the bottom of every
+   staff page keeps the timer, **Mute** (`M`), **End** (`E`) and **Back to call**. Leaving
+   the page asks first.
+7. **Hold** tells the caller *"Please hold."* in the call's language (their screen also plays
+   a tone), then *"Thank you for holding. Your officer will be back with you shortly."* every
+   `RECEPTIONIST_HOLD_UPDATE_S` until the officer resumes — which says nothing: the officer
+   speaks.
+
+### Step 6: Hang-up & Performance Evaluation
+1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
+   Goodbye."* and then hangs the caller up (it hangs up even if the line cannot be
+   spoken, and a second press joins the first, G569). A `{"type": "hangup"}` on the
+   officer's audio socket does the same (ADR-0055). The caller can hang up at any
+   time, and the officer's console then opens the wrap-up (G582). Before
+   ending, the officer asks *"Were you satisfied with the help I gave you today?"* (the
+   End-call confirm reminds them).
+2. Background task runs `summary.py`:
+   Generates a redacted structured JSON summary with subject, key facts, and resolution.
+3. Performance metrics are recorded in `voice_calls`:
+   AI-only routing share (not confirmed resolution), turn latencies (p50/p95), ASR word confidence, barge-ins, and officer rating.
+4. The officer's wrap-up records **how satisfied the caller said they were** (required:
+   one of five faces, or "The caller didn't say"), stored as `call_officer_csat` and
+   audited on `/admin/quality` (Officer calls). Rating the AI's handling before the
+   transfer (1-5 stars and a note) is optional and offered only when the AI answered
+   something.
+5. The **Performance Overview** tab updates SLO gauge cards and KPI aggregates.
+
+---
+
+## 6. Multilingual calls (English, Luganda, Swahili)
+
+Behind `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` (needs `FLAG_VOICE_RECEPTIONIST`,
+Whisper-SALT, Sunflower on vLLM, and — for a fast native voice in all three languages —
+the Orpheus sidecar). No cloud API key is needed.
+Taxpayers routinely select English in the chat and then speak Luganda, so a call does
+not trust the selection: it opens in English and follows what the caller *says*.
+
+```
+ transport.input() → CallerAudioTap → LanguageSentinel → VAD → partials → Whisper-SALT → user agg
+                                        │ (own Silero VAD,     → UraReceptionistBrain → UraSpeechTTS/Orpheus
+                                        │  SALT language id,   → assistant agg → ClientEventOutlet → transport.output()
+                                        │  never adds audio latency)
+                                        ▼
+                              LanguagePolicy → LanguageRouter
+                              (lock / switch / claim + re-ask the turn / barge-in / events)
+```
+
+| Language | Hears with | Answers with | Voice (fallbacks) |
+|---|---|---|---|
+| English | Whisper-SALT (`en`) | `ChatModel.generate(locale="en")` → Sunflower on vLLM, Qdrant | Orpheus `salt_eng_0001` (edge-tts) |
+| Swahili | Whisper-SALT (`sw`) | `ChatModel.generate(locale="sw")`, question through `normalize_swahili_tax_query` | Orpheus `waxal_swa_0006` (Spark-TTS-SALT 246, edge-tts) |
+| Luganda | Whisper-SALT (`lg`) | cross-lingual bridge → Sunflower | Orpheus `salt_lug_0001` (Spark-TTS-SALT 248) |
+
+Measured on the GPU stack on 2026-09-30, Orpheus FP8 on its own A6000: first audio
+0.27–0.31 s in all three languages, faster than real time; played back through
+Whisper-SALT the same lines came back with WER 0.00 (en), 0.18 (sw), 0.00 (lg).
+Orpheus reads English acronyms as words ("TIN" was heard as "our team"), which is the
+next thing to fix in the text sent to it.
+
+**Spark-TTS-SALT speakers** (Sunbird's model card and SALT docs): 241 Acholi (F),
+242 Ateso (F), 243 Runyankore (F), 245 Lugbara (F), 246 Swahili (M), 248 Luganda (F);
+prompt `"{speaker_id}: {text}"`, temperature 0.8, top-k 50, top-p 1.0, float32. English
+(Ugandan accent) is in its training data but has no documented speaker id, which is
+why English falls back to edge-tts rather than Spark. `SPARK_TTS_SPEAKER_<LANG>`
+overrides a mapping; keep one utterance under about 8 s, the length it was trained on.
+
+**How the language is decided** (`receptionist/language.py`, all unit-tested):
+
+- Every utterance is scored by `SpeechModel.identify_language` — Whisper-SALT's
+  language token, one encoder pass (tens of ms). Short or unsure utterances are also
+  decoded as text, for explicit requests and code-switching.
+- Utterances under `RECEPTIONIST_LID_MIN_SPEECH_S` (1.5 s) never decide ("Hello",
+  "Gyebale ko", "yes").
+- The first content utterance with a vote of at least
+  `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` (0.70) locks the call — in whichever
+  language, English included; a weaker vote leaves the call open and the next
+  utterance decides.
+- Locked calls switch on one vote ≥ `RECEPTIONIST_LID_SWITCH_CONFIDENCE` (0.90); on one
+  ≥ 0.70 whose text has at least three words of the new language and none of the
+  current one; or when `RECEPTIONIST_LID_HYSTERESIS_TURNS` (2) of the last
+  `RECEPTIONIST_LID_HYSTERESIS_WINDOW` (3) content votes are for the new language at
+  ≥ `RECEPTIONIST_LID_SUPPORT_CONFIDENCE` (0.50) — not "in a row": on a real caller's
+  phone audio every third Luganda utterance came back English, and a strict run
+  never formed.
+- Code-switched Luganda ("Nsaba okumanya ku TIN yange") counts as Luganda when the
+  text has two Luganda words (more than Swahili ones) and the acoustics lean Bantu —
+  P(lg) ≥ 0.35, or P(lg)+P(sw) ≥ 0.5 (SALT often hears mixed Luganda as Swahili), or
+  the call is already in Luganda. Sunflower handles mixed speech.
+- Explicit requests switch at once: "Can we speak Luganda?", "Tuyinza okwogera
+  Oluganda?", "Naomba tuongee Kiswahili", "speak English".
+- The caller can pin the language from the chip on the call screen; after that only a
+  spoken request moves it.
+
+**What the caller experiences:** nothing is held — one engine answers, in the call's
+current language. When a vote moves the call, the switch waits for the end of the
+caller's turn (`RECEPTIONIST_TURN_TIMEOUT_S` of silence — votes are cast on every 0.4 s
+VAD segment, and a long question is several). The router *claims* that turn, so the
+brain drops the transcript it got in the old language instead of answering it; then
+whatever is playing stops, the *whole* turn is transcribed in the new language and
+answered after a filler in that language — the caller never repeats it, and hears one
+answer. A switch interrupts whatever is playing (the browser flushes its player on
+`{"type":"interrupt"}`).
+
+In a Luganda or Swahili call the clarification gate only ever confirms URA acronyms
+("Nsonyiwa, ogambye VAT?"), never the language's own words, and reads a loanword the
+local way: "Vati" and "tiini" are VAT and TIN.
+
+**Protocol additions on `WS /v1/calls/stream`:**
+
+| Direction | Message | Meaning |
+|---|---|---|
+| client → server | `call_start.preferred_locale` | the chat's language — a hint for staff and metrics only |
+| client → server | `call_start.parent_conversation_id`, `call_start.chat_session` | the chat the call was started from, and (signed out) the chat session that owns it — see *Calls started from the chat* below |
+| server → client | `call_ready.language_detection`, `.languages`, `.language` | show the language chip; the opening language |
+| server → client | `{"type":"language","language":"lg","source":"auto"\|"explicit"\|"override","confidence":0.93}` | the call's language is now … |
+| client → server | `{"type":"request_callback"}` | while waiting: end the wait as a callback (the **Call me back instead** button) |
+| server → client | `{"type":"queue","position":2}` | the waiting caller's place in the queue (same tenant, unclaimed, priority then wait) |
+| client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language — any of `RECEPTIONIST_LANGUAGES` (en, sw, lg, nyn, ach by default), on the WebSocket and LiveKit paths alike (`config.call_language`; the LiveKit loop once dropped nyn/ach, G182) |
+
+**Calls started from the chat (G122).** A call started from the chat sends the chat's
+conversation id. The server carries that chat's task and a short English account of it
+into the call only when the caller owns the chat: their account when signed in, or the
+browser's chat session when signed out. A conversation id alone carries nothing. The
+account is coarse, never the taxpayer's own words: the tax topics named, the taxpayer
+type, the figures mentioned, and the current task. The call starts on the chat's task,
+so a short follow-up keeps it. The account is stored on the call
+(`voice_calls.parent_conversation_id`, `chat_context`) and given to the officer's brief
+as context, never as a turn. A Luganda question is turned into its English search query
+together with the call's last two exchanges (in English) and that account, so
+"kiki ekyetaagisa?" ("what is needed?") is read as a follow-up.
+
+Staff see a language badge on the queue row and the case header, "Luganda caller" on
+the handoff brief, the switch as a `Language: Luganda (detected, 93%)` note in the
+transcript, and language tiles on the metrics card. Summaries are always English.
+
+**Bring-up** (a free card for the stack, another for the voice — check `nvidia-smi`
+first; the GPU overlay already sets `ORPHEUS_TTS_LANGUAGES=lg,sw,en`):
+
+```bash
+cd App && GPU_ID=4 ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
+  FLAG_RECEPTIONIST_LANGUAGE_DETECTION=true docker compose \
+  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+  -f docker-compose.local-sunflower.yml -f docker-compose.gpu-salt.yml \
+  --profile multilingual up -d --build
+docker logs ura-app-orpheus-tts 2>&1 | grep "sidecar ready"
+docker logs <api> 2>&1 | grep "Receptionist phrase pre-warm"   # {'en': {...}, 'sw': {...}, 'lg': {'cached': N, 'failed': 0}}
+```
+
+Orpheus runs weight-only FP8 (`ORPHEUS_QUANTIZATION=fp8`): at bf16 an RTX A6000
+generates at only ~0.96× real time, which leaves no headroom; FP8 measured 234 ms to
+first audio at 0.63× real time (`App/evals/reports/orpheus_tts_2026-09-24_*.json`).
+
+**Replay check** (`App/scripts/replay_call_audio.py`, twenty scenarios): besides the
+language events, each turn declares the language its answer must be in and fails if
+the receptionist's own word lists place it in another — a Swahili caller answered in
+English passed every other check. `12_silent_caller` says nothing after the greeting
+and expects the call to end. `13`–`16` check escalation: a worried caller is offered
+an officer and says yes (transferred) or no (stays with the AI); "Officer, please"
+alone transfers; a caller in crisis hears the crisis lines, emergency numbers in
+words, and is transferred on yes. `17_yes_over_the_answer_is_asked_again` says "Yes,
+please" over the worried caller's answer, before its officer offer is heard: the
+assistant stops, asks the question again and transfers no one. `18_crisis_while_waiting`
+says it wants to end its life while in the queue: crisis lines at once, the call stays first.
+`19_no_officer_online_is_a_callback_at_once` and `20_call_me_back_while_waiting` cover G180 and
+G186. A transfer with nobody signed in is a callback at once, so the queue scenarios are marked
+`staffed` and run only with `--staffed`, after marking an officer available on the server
+(`presence.upsert_presence("replay_officer", status="available")`, with
+`RECEPTIONIST_PRESENCE_TTL_S` raised for the run); the nobody-online ones run without it. A scenario can require text in a reply
+(`expect_reply`), text said while lingering, and a status that must never come. The harness receives audio at the demo socket's pace,
+twice real time, so it can start talking during a pause *between* greeting sentences;
+that shows up as one barge-in on a first turn and is an artefact of the harness, not
+something a caller listening at normal speed triggers.
+
+Run the test suite against the live WebSocket endpoint:
+```bash
+python3 App/scripts/replay_call_audio.py --ws ws://127.0.0.1:8083/v1/calls/stream
+```
+*Validated 2026-10-01 on GPU stack (`App/evals/reports/call_replay_2026-10-01.json`): 17/17 passed (100%), median first-audio latency ~1,320 ms, barge-in cutoff < 1,000 ms.*
+*Re-run 2026-10-16 on an isolated GPU stack with today's models (SunflowerASR-51, Sunflower-Qwen3.5-9B, Orpheus FP8): 14/18 on R1 (`App/evals/reports/call_replay_2026-10-16_r1_isolated.json`). Scenarios 2, 8, 13 and 14 fail the same way on the code before R1 (`…_dev_baseline_ab.json`): a Luganda answer over the 25 s cap, the synthetic Luganda officer request misheard, and the closing question voiced late (G198) — an environment that has moved since 2026-10-01, not a regression.*
+
+**Before any demo:** the Luganda and Swahili lines in `receptionist/phrases.py` and the
+call-screen strings in `lib/i18n/{lg,sw}.ts` are drafts. Have a native speaker of each
+check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
+(`App/evals/orpheus_tts/listening_sheet.csv`; the speaker key is kept out of git).
+
+**Troubleshooting**
+
+| Symptom | Look at |
+|---|---|
+| Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose. `GET /v1/speech/health` reports `status: degraded` and `orpheus: cooldown` while the sidecar is down; Luganda then uses Spark-TTS-SALT and does not wait out the Orpheus timeout |
+| Luganda TIN question comes back as VAT, or “ttiimu” / “mu ora” never hits the TIN passages | Whisper-SALT can be confident and still wrong (`ttiimu`, `timu`, `okuva mu ora` on `lg_tin.wav`). ClarifyGate asks before answering. Before Qdrant, `repair_asr_entities` rewrites those to `TIN` and `mu URA`. Bare “era” stays “and” |
+| Luganda “how much VAT / vati” is answered from a passage instead of the calculator | The call tries the chat calculator on the repaired transcript before retrieval. `vati` and `okwewandiisa` open `check_vat_registration` / `calculate_vat`. A later “what about 2 million?” stays on that tool |
+| An answer stops mid-word, or runs on as babble | `docker logs ura-app-orpheus-tts`: a `synth … audio_s=16.98` line is a request that hit the sidecar's cap. Text longer than `ORPHEUS_TTS_MAX_CHARS` is already split, so lower that value. Babble on short text usually comes from digit strings, which Orpheus cannot read (G84; the contact footer is no longer spoken for this reason) or from asides such as "(18%)" or "(FY2026-27)" that `clean_text_for_speech` does not yet rewrite |
+| English answer read by an American voice | Orpheus is not voicing English: `ORPHEUS_TTS_LANGUAGES` lacks `en`, or the sidecar is down (`GET /v1/speech/health` → `orpheus: cooldown`), so edge-tts took the line |
+| Caller heard two answers to one question after a language switch | api log should show `Dropping a turn the language router is re-asking`; if not, the router's turn claim did not reach the brain (`brain.turn_claimed` is wired in `multilingual.py`) |
+| English caller moved to Luganda | api log `Language vote lg p=…` lines; raise `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` or `RECEPTIONIST_LID_MIN_SPEECH_S` |
+| First answer feels late | `latency.turn_to_audio_ms_p50` in the call metrics; Sunflower's time on the vLLM card; the filler plays after `RECEPTIONIST_FILLER_AFTER_MS` |
+| Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded; `Language vote` lines show what each utterance voted |
+| Call ended on its own after the caller went quiet | Silence handling: `RECEPTIONIST_IDLE_REPROMPT_S` after the assistant stopped it asked "Are you still there?", and after another such silence ended the call (`end_reason=caller_idle`, api log `Ending call … the caller has been silent`). Raise it, or `0` turns it off |
+| A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
+| Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
+| Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
+| A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and counts it in `ura_receptionist_misrouted_total`. `UraCallMisrouted` fires only where that counter is scraped: the Prometheus in `App/monitoring/` does not scrape the Space (G614), so there, read the log. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
+| Call paths answer 502, and the console says live updates are paused | The call process (`uvicorn-calls`, 127.0.0.1:8082) is down or restarting. supervisord restarts it; chat is unaffected. Its calls ended; callers owed a callback are flagged `service_interrupted` |
+| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). A cold start of the call process is slow: it waits for Qdrant (up to `QDRANT_WAIT_SECONDS`, 90 s by default) and then loads its models, and a chat process that booted first reports this until the call process is up (within 10 s of it). Look at the `uvicorn-calls` log if it persists after the start has finished. Where the API is scraped, `UraCallProcessDown` fires after 5 minutes of it (ADR-0045) |
+| Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |
+| No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
+| Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |

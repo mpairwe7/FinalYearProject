@@ -118,11 +118,11 @@ paths = [
     '''Podfile\.lock$''',
     '''go\.sum$''',
     '''.*_test\.py$''',
-    '''tests/.*''',
+    '''App/tests/.*''',
     '''Results/.*''',
     '''Data/.*''',
     '''.*\.ipynb$''',
-    '''docs/capstone/sbom-cyclonedx\.json$''',
+    '''App/docs/capstone/sbom-cyclonedx\.json$''',
 ]
 # Values that look like keys but are public test vectors, not secrets.
 regexes = [

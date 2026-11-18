@@ -4,7 +4,7 @@
  * axe is necessary but not sufficient: it catches machine-testable issues on
  * every public and staff surface, while the keyboard tests below cover the
  * dynamic controls axe cannot operate. The manual checklist in
- * docs/ACCESSIBILITY_CONFORMANCE.md covers the remaining human checks.
+ * App/docs/ACCESSIBILITY_CONFORMANCE.md covers the remaining human checks.
  */
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";

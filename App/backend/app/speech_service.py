@@ -50,8 +50,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-# Ensure the project root is on sys.path so `ml.scripts.*` imports resolve.
-from ._root import PROJECT_ROOT as _PROJECT_ROOT_P
+# Ensure the folder holding `ml` is on sys.path so `ml.scripts.*` imports resolve.
+from ._root import CODE_ROOT as _PROJECT_ROOT_P
 
 _PROJECT_ROOT = str(_PROJECT_ROOT_P)
 if _PROJECT_ROOT not in sys.path:

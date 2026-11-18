@@ -1,4 +1,4 @@
-"""Receptionist audit R2: the waiting caller's experience (docs/plans/receptionist-cx-audit-2026-10-plan.md).
+"""Receptionist audit R2: the waiting caller's experience (App/docs/plans/receptionist-cx-audit-2026-10-plan.md).
 
 G180 (G91 as actually built): nobody signed in means a callback at once, not a hold for nobody.
 G186: a waiting caller sees their place in the queue and can ask to be called back instead.

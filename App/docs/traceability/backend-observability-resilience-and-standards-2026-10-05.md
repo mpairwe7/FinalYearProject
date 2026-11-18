@@ -9,7 +9,7 @@
 ## 1. Executive Summary & Purpose
 
 This release addresses foundational backend gaps identified during the October 2026 architectural audit of the URA Taxpayer Assistant:
-1. **Prometheus Metrics Alignment**: Fixed metric namespace desynchronization and histogram bucketing between `observability/analytics.py` and `monitoring/alerting-rules.yml` / Grafana dashboards.
+1. **Prometheus Metrics Alignment**: Fixed metric namespace desynchronization and histogram bucketing between `observability/analytics.py` and `App/monitoring/alerting-rules.yml` / Grafana dashboards.
 2. **Distributed Tracing (OpenTelemetry)**: Added W3C `traceparent` extraction at API ingress and outbound header injection, ensuring end-to-end trace correlation across Next.js frontend and backend spans.
 3. **Structured JSON Logging & PII Scrubbing**: Replaced plain-text formatting with `StructuredJsonFormatter` adhering to the OpenTelemetry Log Data Model and wired `PIISanitizingFilter` to scrub taxpayer PII from all log outputs.
 4. **Streaming Analytics Observability**: Instrumented SSE and voice chat lifecycles to observe retrieval modes, faithfulness scores, and escalation events on streaming responses.
@@ -22,7 +22,7 @@ This release addresses foundational backend gaps identified during the October 2
 ## 2. Structural & Architectural Changes
 
 ### 2.1 Prometheus Metrics & Alerting Alignment (Gap 1.1 & 1.2)
-* **Problem**: `MetricsStore` emitted bare metric names (`http_requests_total`, `chat_response_time_ms`) formatted as summaries. `monitoring/alerting-rules.yml` and Grafana queried `ura_` prefixed metrics and evaluated `histogram_quantile()` on `ura_chat_response_time_ms_bucket`. Because summaries do not export `_bucket` series, latency and availability alerts could never trigger.
+* **Problem**: `MetricsStore` emitted bare metric names (`http_requests_total`, `chat_response_time_ms`) formatted as summaries. `App/monitoring/alerting-rules.yml` and Grafana queried `ura_` prefixed metrics and evaluated `histogram_quantile()` on `ura_chat_response_time_ms_bucket`. Because summaries do not export `_bucket` series, latency and availability alerts could never trigger.
 * **Resolution**:
   - `MetricsStore.to_prometheus()` in `App/backend/app/observability/analytics.py` now automatically dual-emits both the base name and the `ura_` prefixed alias.
   - Implemented standard Prometheus histogram duration buckets (`_LATENCY_MS_BUCKETS` and `_LATENCY_S_BUCKETS`) for all latency/duration metrics, emitting `_bucket{le="..."}`, `_count`, and `_sum`.
@@ -36,7 +36,7 @@ This release addresses foundational backend gaps identified during the October 2
   - Added `traceparent` and `tracestate` to `CORSMiddleware` `allow_headers`.
 
 ### 2.3 Structured JSON Logging & PII Sanitization (Gap 3.1 & 3.3)
-* **Problem**: `docs/MONITORING.md` claimed `structlog JSON` logging, while the code utilized standard library text formatting without trace correlation or log-level PII protection.
+* **Problem**: `App/docs/MONITORING.md` claimed `structlog JSON` logging, while the code utilized standard library text formatting without trace correlation or log-level PII protection.
 * **Resolution**:
   - Created `App/backend/app/middleware/logger.py` containing `StructuredJsonFormatter` (ISO 8601 UTC timestamps, level, logger, message, service name, `trace_id`, `span_id`, and exception formatting).
   - Implemented `PIISanitizingFilter` that automatically scrubs TINs, phone numbers, and email addresses (preserving `@ura.go.ug` domains) before log emission.
@@ -65,15 +65,15 @@ This release addresses foundational backend gaps identified during the October 2
 * **Problem**: `main.py` was a 5,032-line monolith registering all routes on the global `app` instance.
 * **Resolution**:
   - Created `App/backend/app/api/` with modular `connectors.py` and `offline.py` APIRouters.
-  - Mounted onto `app` via `app.include_router()`, preserving 100% of the 70+ route contracts tested by `tests/test_all_endpoints_e2e.py`.
+  - Mounted onto `app` via `app.include_router()`, preserving 100% of the 70+ route contracts tested by `App/tests/test_all_endpoints_e2e.py`.
 
 ---
 
 ## 3. Verification & Evidence
 
-1. **Manifest & API Route Parity**: `pytest tests/test_all_endpoints_e2e.py` passed (26/26 test suites green).
-2. **Agent & Chaos Test Suite**: `pytest tests/agents tests/chaos` passed (1,030 tests green).
-3. **Full Regression Suite with Coverage**: `pytest tests/ --cov=ml --cov=App/backend --cov-fail-under=35` passed (1,285 tests green, 40.20% coverage).
+1. **Manifest & API Route Parity**: `pytest App/tests/test_all_endpoints_e2e.py` passed (26/26 test suites green).
+2. **Agent & Chaos Test Suite**: `pytest App/tests/agents App/tests/chaos` passed (1,030 tests green).
+3. **Full Regression Suite with Coverage**: `pytest App/tests/ --cov=ml --cov=App/backend --cov-fail-under=35` passed (1,285 tests green, 40.20% coverage).
 4. **Live Verification**:
    - PII Sanitization & JSON formatting: `PASS`
    - W3C Traceparent extraction & injection: `PASS`

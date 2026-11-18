@@ -27,7 +27,7 @@ SELF = Path(__file__).resolve()
 SKIP: set[Path] = {SELF}
 # Files that name an old module on purpose; --verify does not report them.
 OLD_NAMES_ON_PURPOSE = {
-    REPO / "docs/adr/0056-rag-package-layout.md": "the record of the move",
+    REPO / "App/docs/adr/0056-rag-package-layout.md": "the record of the move",
     REPO / "App/deploy/hf-space/Dockerfile": "builds FROM a pinned image that may predate the move",
     REPO / "App/backend/tests/test_local_dense_leg.py": "asserts the Dockerfile's fallback",
 }
@@ -38,10 +38,10 @@ KNOWN_FINDINGS = {
     "App/backend/tests/test_mcp_wire_conformance.py: no module app.mcp.servers",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.security",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.test",
-    "tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
-    "tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
-    "tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
-    "tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
+    "App/tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
+    "App/tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
+    "App/tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
+    "App/tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
 }
 
 # Old module (dotted, under app) -> new module. A package key moves the whole tree.

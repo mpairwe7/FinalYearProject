@@ -11,17 +11,17 @@ on:
   push:
     branches: [main, dev, develop]
     paths:
-      - 'ml/**'
+      - 'App/ml/**'
       - 'App/backend/**'
       - 'Data/**'
       - 'Model/**'
       - 'requirements.txt'
-      # This workflow's own test job runs `pytest tests/`, so a change to that
+      # This workflow's own test job runs `pytest App/tests/`, so a change to that
       # suite has to trigger it. Without this the guards living there — the
       # endpoint manifest, the coverage registry, the locked surface count —
       # were only ever evaluated when some OTHER path changed, so a fix to them
       # (or a break in them) could sit unverified until an unrelated commit.
-      - 'tests/**'
+      - 'App/tests/**'
       # pytest's configfile — it sets the rootdir and options this job runs under.
       - 'pyproject.toml'
       - '.github/workflows/ci-ml-pipeline.yml'
@@ -79,15 +79,15 @@ jobs:
           # Blocking lint is limited to syntax/undefined-name classes so CI
           # catches production-breaking Python errors without failing on
           # legacy style debt already reported by advisory scans.
-          ruff check ml/ App/backend/ --select=E9,F63,F7,F82 --output-format=github
+          ruff check App/ml/ App/backend/ --select=E9,F63,F7,F82 --output-format=github
 
       - name: Ruff style report (advisory)
         if: always()
-        run: ruff check ml/ App/backend/ --statistics --exit-zero
+        run: ruff check App/ml/ App/backend/ --statistics --exit-zero
 
       - name: Run unit tests
         run: |
-          pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
+          pytest App/tests/ -v --cov=App/ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
 
       - name: Install backend test dependencies
         run: |
@@ -117,7 +117,7 @@ jobs:
         env:
           # "." for the app package, workspace root for the ml chunker the
           # exporters import.
-          PYTHONPATH: .:${{ github.workspace }}
+          PYTHONPATH: .:${{ github.workspace }}/App
           REPO_ROOT: ${{ github.workspace }}
         run: |
           python - <<'PY'
@@ -162,7 +162,7 @@ jobs:
         # headroom so it catches regressions without flapping.
         working-directory: App/backend
         env:
-          PYTHONPATH: .:${{ github.workspace }}
+          PYTHONPATH: .:${{ github.workspace }}/App
           LLM_ENABLED: 'false'
           QDRANT_ENABLED: 'false'
         run: python -m ml.scripts.eval_retrieval --min-hit1 0.90
@@ -183,11 +183,11 @@ jobs:
         # English only: the indexed corpus is English, and Luganda/Kiswahili
         # coverage is a property of translate-then-retrieve rather than of the
         # corpus. Those are measured with `--mode api` against a running
-        # deployment (docs/runbooks/corpus-coverage.md), which this job has not
+        # deployment (App/docs/runbooks/corpus-coverage.md), which this job has not
         # got. Runs offline in seconds — no Qdrant, no LLM, no network.
         working-directory: App/backend
         env:
-          PYTHONPATH: .:${{ github.workspace }}
+          PYTHONPATH: .:${{ github.workspace }}/App
           LLM_ENABLED: 'false'
           QDRANT_ENABLED: 'false'
           SPEECH_ENABLED: 'false'
@@ -250,6 +250,7 @@ jobs:
         # `relevant_sources` labels the eval set does not yet carry, so any
         # threshold would be measuring the harness rather than the system.
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           LLM_ENABLED: 'false'
           QDRANT_ENABLED: 'false'
           SPEECH_ENABLED: 'false'
@@ -281,12 +282,14 @@ jobs:
           PY
 
       - name: Run governance compliance check
-        run: python governance/compliance_check.py
+        run: python App/governance/compliance_check.py
 
       - name: Run data validation
-        run: python ml/pipelines/validate_data.py
+        run: python App/ml/pipelines/validate_data.py
 
       - name: Data augmentation import & schema smoke check
+        env:
+          PYTHONPATH: ${{ github.workspace }}/App
         run: |
           uv pip install --system 'datasketch==1.6.5' ftfy
           python - <<'PY'
@@ -454,13 +457,14 @@ jobs:
 
       - name: Run RAG evaluation (English)
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p Results
           python -m ml.pipelines.evaluate_rag \
             --eval-set Data/eval/rag_eval.jsonl \
             --output-dir Results \
-            --config ml/configs/training_config.yaml
+            --config App/ml/configs/training_config.yaml
 
       - name: Verify Luganda evaluation set exists
         run: |
@@ -481,12 +485,13 @@ jobs:
       # safety probes, abstention) is language-agnostic and still gates.
       - name: Run RAG evaluation (Luganda)
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -m ml.pipelines.evaluate_rag \
             --eval-set Data/eval/rag_eval_lg.jsonl \
             --output-dir Results/lg \
-            --config ml/configs/training_config.yaml \
+            --config App/ml/configs/training_config.yaml \
             --gate-exclude faithfulness,groundedness
 
       - name: Upload RAG evaluation results
@@ -513,11 +518,11 @@ jobs:
   # ============================================
   # Runs the combined production quality gate against the RAG evaluation
   # results. Blocking: every absolute threshold must hold AND no metric may
-  # drop more than 0.03 below ml/configs/quality_baseline.json (the scores
+  # drop more than 0.03 below App/ml/configs/quality_baseline.json (the scores
   # dev last measured). The gate is scored on RAG metrics alone;
   # safety/calibration/tokenizer/benchmark/model-card
   # inputs are omitted (their producing scripts were training-pipeline
-  # tooling, removed with the rest of ml/) — quality_gates.py treats each
+  # tooling, removed with the rest of App/ml/) — quality_gates.py treats each
   # as optional and skips the corresponding check when absent.
   production-gates:
     name: Production Gates
@@ -551,12 +556,14 @@ jobs:
           uv pip install --system pyyaml
 
       - name: Run production quality gates
+        env:
+          PYTHONPATH: ${{ github.workspace }}/App
         run: |
           python -m ml.pipelines.quality_gates \
             --family production \
-            --config ml/configs/training_config.yaml \
+            --config App/ml/configs/training_config.yaml \
             --rag-eval Results/rag_evaluation_results.json \
-            --baseline ml/configs/quality_baseline.json \
+            --baseline App/ml/configs/quality_baseline.json \
             --max-regression 0.03
 
       - name: Step summary
@@ -565,5 +572,5 @@ jobs:
           {
             echo "## Production Gates"
             echo ""
-            echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`ml/configs/quality_baseline.json\` regression baseline (blocking)."
+            echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`App/ml/configs/quality_baseline.json\` regression baseline (blocking)."
           } >> "$GITHUB_STEP_SUMMARY"

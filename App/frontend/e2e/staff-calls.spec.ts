@@ -1,5 +1,5 @@
 /**
- * E2E tests for the officer's Call Desk (docs/plans/officer-call-desk-plan.md §11).
+ * E2E tests for the officer's Call Desk (App/docs/plans/officer-call-desk-plan.md §11).
  *
  * Exercises the call layer across staff pages, transfer alerts, preview,
  * taking calls, active dock survival across navigation, wrapup, and history search.

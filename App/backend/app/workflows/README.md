@@ -116,5 +116,5 @@ they meet it.
    `python -m app.verified_resources --check`.
 2. Pick trigger phrases a taxpayer would type as a task, not as a question.
 3. Add cases to `App/backend/tests/test_guided_journeys_and_ei.py` and a live
-   case to `scripts/probe_guided_journeys.py`, then follow
-   `docs/runbooks/guided-journey-probes.md`.
+   case to `App/scripts/probe_guided_journeys.py`, then follow
+   `App/docs/runbooks/guided-journey-probes.md`.

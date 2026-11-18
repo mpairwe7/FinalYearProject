@@ -13,7 +13,7 @@ let latestPulse = 0;
 
 /**
  * Periodically beats presence heartbeat to /v1/admin/officers/me/presence every 20s
- * while tab is visible (docs/plans/officer-call-desk-plan.md §6.4, §8.2).
+ * while tab is visible (App/docs/plans/officer-call-desk-plan.md §6.4, §8.2).
  * An answer naming a wrap-up the officer owes (`wrap_up_call_id`) brings it up
  * when this tab has no call and the officer is available: the dock offers
  * "Finish wrap-up", and the Desk shows the wrap-up form for that call. While

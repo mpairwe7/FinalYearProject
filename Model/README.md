@@ -85,7 +85,7 @@ output = llm("What is VAT?", max_tokens=200)
 
 ```bash
 # Train tag classifier
-python ml/pipelines/train.py --config ml/configs/training_config.yaml --output-dir Model
+python ml/pipelines/train.py --config App/ml/configs/training_config.yaml --output-dir Model
 
 # Fine-tune Gemma-2B for mobile
 python ml/scripts/fine_tune_gemma.py --target mobile_gemma_2b

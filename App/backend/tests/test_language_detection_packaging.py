@@ -8,7 +8,7 @@ detected as "lg" locally.
 query.detect_language() reaches for ml.scripts.lang_id (the lingua
 backend) and, on ImportError, sets _LANG_DETECTOR_INIT_FAILED and drops to
 a character heuristic that reads Luganda as English. The image never
-copied ml/, so every deployment ran on that heuristic — silently, because
+copied App/ml/, so every deployment ran on that heuristic — silently, because
 the fallback is deliberately quiet and nothing in the response says which
 backend answered. lingua itself was installed the whole time; only the
 96-line module was missing.
@@ -22,7 +22,7 @@ Two guards, because either alone is blind:
 
 The packaging assertion is deliberately about placement, not just
 presence: uvicorn runs with directory=/app/backend and no PYTHONPATH
-(deploy/cranecloud/supervisord.conf), so ml/ has to land beside app/ for
+(deploy/cranecloud/supervisord.conf), so App/ml/ has to land beside app/ for
 the import to resolve at all.
 """
 
@@ -95,18 +95,18 @@ class ImagePackagingTest(unittest.TestCase):
     def test_dockerfile_ships_lang_id_beside_the_app_package(self) -> None:
         body = DOCKERFILE.read_text(encoding="utf-8")
         self.assertIn(
-            "ml/scripts/lang_id.py",
+            "App/ml/scripts/lang_id.py",
             body,
-            "Dockerfile.cranecloud no longer copies ml/scripts/lang_id.py; the "
+            "Dockerfile.cranecloud no longer copies App/ml/scripts/lang_id.py; the "
             "container will fall back to the heuristic and mis-detect Luganda",
         )
-        for module in ("ml/__init__.py", "ml/scripts/__init__.py"):
+        for module in ("App/ml/__init__.py", "App/ml/scripts/__init__.py"):
             self.assertIn(module, body, f"{module} missing — `import ml` will fail")
 
     def test_lang_id_lands_on_the_path_uvicorn_actually_uses(self) -> None:
         """/app/backend, not /app — see the supervisord note in the docstring."""
         for line in DOCKERFILE.read_text(encoding="utf-8").splitlines():
-            if re.match(r"\s*COPY\s+ml/scripts/lang_id\.py", line):
+            if re.match(r"\s*COPY\s+App/ml/scripts/lang_id\.py", line):
                 self.assertIn(
                     "/app/backend/ml/scripts/lang_id.py",
                     line,
@@ -114,7 +114,7 @@ class ImagePackagingTest(unittest.TestCase):
                     "/app/backend with no PYTHONPATH), not to /app",
                 )
                 return
-        self.fail("no COPY line for ml/scripts/lang_id.py in Dockerfile.cranecloud")
+        self.fail("no COPY line for App/ml/scripts/lang_id.py in Dockerfile.cranecloud")
 
 
 class BuildContextTest(unittest.TestCase):
@@ -128,8 +128,8 @@ class BuildContextTest(unittest.TestCase):
     """
 
     def test_every_ml_file_the_dockerfile_copies_is_in_the_build_context(self) -> None:
-        copied = re.findall(r"^\s*COPY\s+(ml/[^\s]+)", DOCKERFILE.read_text(encoding="utf-8"), re.M)
-        self.assertTrue(copied, "no ml/ COPY lines found — did the lang_id fix get reverted?")
+        copied = re.findall(r"^\s*COPY\s+(App/ml/[^\s]+)", DOCKERFILE.read_text(encoding="utf-8"), re.M)
+        self.assertTrue(copied, "no App/ml/ COPY lines found — did the lang_id fix get reverted?")
         allowed = DOCKERIGNORE.read_text(encoding="utf-8")
         for path in copied:
             with self.subTest(path=path):

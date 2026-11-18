@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import restructure_rag_layout as codemod  # noqa: E402
 
 SELF = Path(__file__).resolve()
-ADR = codemod.REPO / "docs/adr/0060-observability-memory-and-prompt-packages.md"
+ADR = codemod.REPO / "App/docs/adr/0060-observability-memory-and-prompt-packages.md"
 
 # Three phases, one pull request each, so every diff stays reviewable (under 100 files).
 # Run each phase on the commit before its pull request.
@@ -64,10 +64,10 @@ codemod.KNOWN_FINDINGS = {
     "App/backend/tests/test_mcp_wire_conformance.py: no module app.mcp.servers",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.security",
     "App/backend/tests/test_observability_endpoints.py: unresolved string app.test",
-    "tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
-    "tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
-    "tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
-    "tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
+    "App/tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
+    "App/tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
+    "App/tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
+    "App/tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
 }
 
 # (module under app/, constant, prompts module, name in app/prompts). The module imports it back as the constant.

@@ -36,7 +36,7 @@ routing gate, and for shipping conversation topic persistence (G6).
 | API | `models.py` `ChatResponse.current_topic` |
 | Flag | `config/flags.py` `agentic_mode` default True |
 | Gate | `agents/eval_routing.py` `agentic_mode_gate` |
-| Tests | `App/backend/tests/test_topics.py`, `tests/agents/test_eval_routing.py`, `tests/agents/test_integration.py` |
+| Tests | `App/backend/tests/test_topics.py`, `App/tests/agents/test_eval_routing.py`, `App/tests/agents/test_integration.py` |
 
 ## 4. How to re-verify
 
@@ -49,8 +49,8 @@ print(f'en routing: {r.correct}/{r.total} acc={r.accuracy:.3f}')
 print(agentic_mode_gate())
 "
 ../../.venv/bin/python -m pytest tests/test_topics.py -q
-cd ../..
-.venv/bin/python -m pytest tests/agents/test_eval_routing.py tests/agents/test_integration.py -q
+cd ./../..
+.venv/bin/python -m pytest App/tests/agents/test_eval_routing.py App/tests/agents/test_integration.py -q
 ```
 
 Cite only numbers printed by that command.

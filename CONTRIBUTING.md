@@ -23,7 +23,7 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
    ```
 3. **Install pre-commit hooks** (one-time setup):
    ```bash
-   bash scripts/setup-secret-scanning.sh
+   bash App/scripts/setup-secret-scanning.sh
    ```
    This installs 4-layer secret scanning (TruffleHog, ggshield, Gitleaks, detect-secrets) plus hygiene hooks. Commits with secrets will be **automatically blocked**.
 4. **Make changes** following our coding standards (below).
@@ -71,7 +71,7 @@ If contributing training data:
 
 - Document any changes to model architecture, hyperparameters, or training data in the PR description.
 - Include evaluation metrics comparison (before/after).
-- Ensure the quality gate thresholds in `ml/pipelines/quality_gates.py` still pass.
+- Ensure the quality gate thresholds in `App/ml/pipelines/quality_gates.py` still pass.
 
 ## Review Process
 

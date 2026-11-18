@@ -2,7 +2,7 @@
 
 Read-only views over what taxpayers said about the service: the AI's chat
 answers (``quality_audit``) and the satisfaction ratings of officer chats and
-calls (``service_ratings``; docs/plans/admin-service-quality-audit-plan.md). Officers do not
+calls (``service_ratings``; App/docs/plans/admin-service-quality-audit-plan.md). Officers do not
 read these: auditing the service is not the job of the people giving it.
 
 Every route here is a staff read of taxpayer text (already redacted when it

@@ -207,7 +207,7 @@ jobs:
 
       - name: Run Bandit scan
         run: |
-          bandit -r App/backend/ ml/ \
+          bandit -r App/backend/ App/ml/ \
             -f sarif \
             -o bandit-results.sarif \
             --severity-level medium \
@@ -228,7 +228,7 @@ jobs:
         id: parse-bandit
         if: always()
         run: |
-          bandit -r App/backend/ ml/ \
+          bandit -r App/backend/ App/ml/ \
             -f json \
             -o bandit-results.json \
             --severity-level medium \
@@ -274,7 +274,7 @@ jobs:
             python: "3.11"          # ci-ml-pipeline.yml PYTHON_VERSION
           - requirements: App/backend/requirements.txt
             python: "3.14"          # Dockerfile / Dockerfile.gpu base image
-          - requirements: ml/requirements-crawl.txt
+          - requirements: App/ml/requirements-crawl.txt
             python: "3.11"          # scheduled-crawl.yml PYTHON_VERSION
           # The call receptionist's stack was installed in every image and
           # audited in none (G598). Every image installs it with this
@@ -359,7 +359,7 @@ jobs:
       - name: Gate on new dependency advisories
         run: |
           REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
-          python3 scripts/check_dependency_advisories.py \
+          python3 App/scripts/check_dependency_advisories.py \
             --audit "pip-audit-${REQ_NAME}.json"
 
       - name: Upload pip-audit results
@@ -596,13 +596,13 @@ jobs:
       - name: Validate threat registry
         id: validate-tm
         run: |
-          python threat-model/validate_threats.py
-          TOTAL=$(python3 -c "import sys; sys.path.insert(0, 'threat-model'); from validate_threats import THREAT_REGISTRY; print(len(THREAT_REGISTRY))")
+          python App/threat-model/validate_threats.py
+          TOTAL=$(python3 -c "import sys; sys.path.insert(0, 'App/threat-model'); from validate_threats import THREAT_REGISTRY; print(len(THREAT_REGISTRY))")
           echo "total_threats=${TOTAL}" >> "$GITHUB_OUTPUT"
 
       - name: Validate threat model risk register
         id: validate-rr
-        run: python scripts/validate-risk-register.py --register docs/security/threat-model/risk-register.yaml
+        run: python App/scripts/validate-risk-register.py --register App/docs/security/threat-model/risk-register.yaml
 
       - name: Check accepted risks review date expiry
         run: |
@@ -610,7 +610,7 @@ jobs:
           import yaml, sys
           from datetime import date
           try:
-              with open('docs/security/threat-model/accepted-risks.yaml') as f:
+              with open('App/docs/security/threat-model/accepted-risks.yaml') as f:
                   risks = yaml.safe_load(f) or []
               today = date.today()
               expired = [r for r in risks if 'review_date' in r and date.fromisoformat(str(r['review_date'])) < today]
@@ -624,7 +624,7 @@ jobs:
         if: always()
         run: |
           mkdir -p threat-model/output
-          python threat-model/tm.py --describe threat-model/output/threats.md || true
+          python App/threat-model/tm.py --describe threat-model/output/threats.md || true
 
       - name: Threat model step summary
         if: always()
@@ -632,7 +632,7 @@ jobs:
           echo "## Threat Model Validation" >> "$GITHUB_STEP_SUMMARY"
           python3 -c "
           import sys
-          sys.path.insert(0, 'threat-model')
+          sys.path.insert(0, 'App/threat-model')
           from validate_threats import THREAT_REGISTRY
           total = len(THREAT_REGISTRY)
           mitigated = sum(1 for t in THREAT_REGISTRY if t['status'] == 'mitigated')
@@ -653,7 +653,7 @@ jobs:
           name: threat-model-report
           path: |
             threat-model/output/
-            docs/security/threat-model/
+            App/docs/security/threat-model/
           retention-days: 90
 
   # ============================================

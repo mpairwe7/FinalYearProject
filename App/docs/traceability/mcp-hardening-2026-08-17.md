@@ -2,7 +2,7 @@
 
 Traceability record for the MCP audit follow-through. Pair with
 `App/docs/mcp-architecture.md` (protocol) and
-`docs/GAPS_AND_AGENTIC_ROADMAP.md` (living register). This file is the
+`App/docs/GAPS_AND_AGENTIC_ROADMAP.md` (living register). This file is the
 decision log: what changed, why, how to re-verify, and what stays open.
 
 The session audit canvas is a working view. This markdown is the

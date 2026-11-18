@@ -650,7 +650,7 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
 #: Tokens that mark an amount as money, in any of the three languages served.
 #: ``ssente`` (Luganda) and ``shilingi`` (Kiswahili) are read from
 #: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
-#: ``tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
+#: ``App/tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
 _CURRENCY_TOKEN_RE = re.compile(
     r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|shiringi|cilingi|ssente|sente|esente|cente|milioni|obukadde|obukaikuru|akakaikuru|emitwalo|emitwaro)\b",
     re.IGNORECASE,

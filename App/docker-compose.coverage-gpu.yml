@@ -1,5 +1,5 @@
 # Local-only overlay for the issue-303 corpus-coverage + voice run.
-# See docs/runbooks/corpus-coverage.md. Not referenced by CI or any deployment.
+# See App/docs/runbooks/corpus-coverage.md. Not referenced by CI or any deployment.
 #
 #   cd App
 #   API_GPU_ID=4 docker compose \

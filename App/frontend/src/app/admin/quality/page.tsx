@@ -4,7 +4,7 @@
  * Service-quality audit — what taxpayers said about the service they got.
  *
  * For administrators and auditors. Officers give the service and do not audit
- * it; administrators no longer handle taxpayers live (docs/plans/
+ * it; administrators no longer handle taxpayers live (App/docs/plans/
  * admin-service-quality-audit-plan.md), so this page is where their work is.
  *
  * One tab per stream audited:

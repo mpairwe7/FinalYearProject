@@ -739,7 +739,7 @@ export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
             </ol>
 
             <p className="connector-runbook-reference">
-              Operational guide: <code>docs/runbooks/enterprise-connectors-and-mcp.md</code>
+              Operational guide: <code>App/docs/runbooks/enterprise-connectors-and-mcp.md</code>
             </p>
           </div>
 
@@ -790,7 +790,7 @@ export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
               Endpoint routing and credentials are managed through a reviewed server configuration. Changes in this console cannot switch this simulator to a live government service.
             </p>
             <p className="connector-runbook-reference">
-              Operational guide: <code>docs/runbooks/enterprise-connectors-and-mcp.md</code>
+              Operational guide: <code>App/docs/runbooks/enterprise-connectors-and-mcp.md</code>
             </p>
           </div>
 

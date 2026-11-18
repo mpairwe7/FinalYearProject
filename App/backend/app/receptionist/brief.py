@@ -4,7 +4,7 @@ An officer taking a transferred call should not have to read the transcript.
 The brief says why a person is needed, what the caller wants, what the AI
 already told them, what is still open and which details they gave — every
 claim citing the transcript turns it rests on (``turn_seqs``), so the officer
-can check it with one click (docs/plans/officer-call-desk-plan.md §6.2).
+can check it with one click (App/docs/plans/officer-call-desk-plan.md §6.2).
 
 It is kept *rolling*: a :class:`BriefScheduler` per live call watches the
 turns as they are written (``store.register_turn_observer``) and rebuilds the

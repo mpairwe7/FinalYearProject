@@ -1,7 +1,7 @@
 """Guided-journey reachability and emotional-intelligence gaps.
 
 Each case below reproduces a finding from the journey probes run against the
-local GPU stack on 2026-09-29 (docs/runbooks/guided-journey-probes.md):
+local GPU stack on 2026-09-29 (App/docs/runbooks/guided-journey-probes.md):
 flows that existed but could not be reached, a how-to question that opened an
 officer ticket, an empathy opener on every "Help me …" request, and no safety
 net for a message about self-harm.

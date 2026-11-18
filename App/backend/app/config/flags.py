@@ -632,7 +632,7 @@ _REGISTRY: dict[str, Flag] = {
             "replies in officer_chat for offline DPO/ORPO preference export.",
         ),
         # Phase 38 (October 2026) — the relationship, EQ and handoff primitives
-        # reach the text channel. See docs/plans/agentic-cx-phase38-plan.md.
+        # reach the text channel. See App/docs/plans/agentic-cx-phase38-plan.md.
         Flag(
             "eq_stakes_escalation",
             False,

@@ -1,7 +1,7 @@
 """Regression tests for the JSONL-first indexing pipeline (backend/app/ingestion/indexer.py).
 
 The chunking that used to live here moved to ``ml.scripts.data_aug.chunkers``
-(structure-preserving, exercised by ``tests/test_data_augmentation.py``) and
+(structure-preserving, exercised by ``App/tests/test_data_augmentation.py``) and
 reaches the index through ``app.ingestion.pdf_corpus``. What remains indexer-owned is how
 a vector document is turned into embedding input and a Qdrant payload.
 """

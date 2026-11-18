@@ -39,7 +39,7 @@ Live work (`/agent`, `/admin/tickets`, `/calls`, the call layer) is for
   vocabulary.** New panels take their names from `chartTheme`
   (`QUANTILE_LABEL`, `RETRIEVAL_MODE_LABEL`, `EVAL_METRIC`, `plainSeconds`) and
   carry a `<ChartNote>` stating the reading. Keep the technical term beside the
-  plain name, never instead of it. See `docs/OPS_CONSOLE_REDESIGN.md`.
+  plain name, never instead of it. See `App/docs/OPS_CONSOLE_REDESIGN.md`.
 - **Taxpayer-facing strings are dictionary keys**, not literals — `useTranslation()`
   and `lib/i18n/en.ts`. The staff console stays English.
 - **REST and SSE share `lib/turnMeta.ts`.** Update turns immutably so memoized

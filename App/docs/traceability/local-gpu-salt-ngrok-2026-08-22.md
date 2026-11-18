@@ -14,7 +14,7 @@ Traceability for the single-GPU local deployment that bakes in both
 Sunbird SALT speech backends (`Sunbird/asr-whisper-large-v3-salt`,
 `Sunbird/spark-tts-salt`) alongside the local `Sunflower-14B-FP8` LLM,
 Redis, and Qdrant, exposed publicly over the existing ngrok reserved
-domain. Companion docs: `docs/runbooks/salt-speech-backends.md` (model
+domain. Companion docs: `App/docs/runbooks/salt-speech-backends.md` (model
 behavior, known bugs, prior isolated verification),
 `App/docs/traceability/capacity-envelope-2026-08-19.md` (Sunflower-14B-FP8
 load numbers on this same hardware class).
@@ -67,7 +67,7 @@ things it does that the base + `local-sunflower` files don't:
 
 `Dockerfile.gpu` bakes `SPARK_TTS_DEVICE=cuda` / `WHISPER_SALT_DEVICE=cuda`
 by default. On this host that raises at `load()` instead of degrading
-gracefully — `docs/runbooks/salt-speech-backends.md` already documents why:
+gracefully — `App/docs/runbooks/salt-speech-backends.md` already documents why:
 `App/backend/requirements.txt` pins `torch==2.12.1`, whose only published
 Linux wheel bundles CUDA 13.0-generation runtime libs, and this host's
 driver reports CUDA 12.2 (`RuntimeError: The NVIDIA driver on your system
@@ -137,7 +137,7 @@ already given up:
 
 ~32s cold model load + CPU-bound LLM-half generation past that put total
 latency at roughly 2.5–3 minutes — consistent with the CPU-fallback
-slowness `docs/runbooks/salt-speech-backends.md` already documents, just
+slowness `App/docs/runbooks/salt-speech-backends.md` already documents, just
 now measured through the full container + tunnel path rather than in
 isolation. The client-side error was an intermediary (curl's own
 `--max-time`, or the ngrok free-tier edge) giving up before that, not an
@@ -151,7 +151,7 @@ is ever exposed to real users on hardware without a matching driver.
 ## 7. What this run does not close out
 
 - **Perceptual verification** of Spark-TTS-SALT output is still open —
-  `docs/runbooks/salt-speech-backends.md` §"Still not done" already flags
+  `App/docs/runbooks/salt-speech-backends.md` §"Still not done" already flags
   this; this run adds a real end-to-end latency measurement, not a listening
   pass.
 - **GPU-execution verification** of both SALT tiers is still blocked on this

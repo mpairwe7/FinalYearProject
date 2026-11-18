@@ -1,6 +1,6 @@
 """The administrator's "Needs review" queue and what was decided about each item.
 
-The service-quality audit (docs/plans/admin-service-quality-audit-plan.md §E2)
+The service-quality audit (App/docs/plans/admin-service-quality-audit-plan.md §E2)
 reads four streams; this module gathers the items in them that call for a
 person to look — an AI chat that went wrong or was never found helpful, a 👎
 with a comment, an officer chat or call rated 1 or 2, a caller who said the AI

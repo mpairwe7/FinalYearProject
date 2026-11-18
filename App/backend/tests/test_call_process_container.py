@@ -1,6 +1,6 @@
 """The container runs two API roles and nginx sends every call path to one.
 
-G306 (docs/plans/receptionist-call-process-2026-11-12.md): a live call lives in
+G306 (App/docs/plans/receptionist-call-process-2026-11-12.md): a live call lives in
 one process's memory, so the Space runs a ``calls`` process on 8082 that owns
 every call path and a ``chat`` process on 8081 for the rest. These tests read
 the deployment files the way the container does: the launcher script is run (in

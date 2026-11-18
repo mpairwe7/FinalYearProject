@@ -346,7 +346,7 @@ def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[st
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise CorpusValidationError(
             "Crawl export needs ml.scripts.data_aug.chunkers. Run the exporter from a "
-            "source checkout with the ml/ package importable."
+            "source checkout with the App/ml/ package importable."
         ) from exc
 
     url = _clean(payload.get("url"))

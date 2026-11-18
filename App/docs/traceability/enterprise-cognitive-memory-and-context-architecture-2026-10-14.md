@@ -55,6 +55,6 @@ This release completes the transformation of the repository's memory subsystem i
 | `App/backend/tests/test_memory_lifecycle.py` | **23/23 Passed** | Episodic decay, working memory TTL, semantic fact deduplication |
 | `App/backend/tests/test_tts_backend_chain.py` | **11/11 Passed** | Speech fallback chain resilience |
 | `App/backend/tests/test_spark_tts_salt.py` | **11/11 Passed** | Spark-TTS speaker tables and synthesis |
-| `tests/agents/test_long_horizon_graph.py` | **16/16 Passed** | Compactor, HITL human gate, goal tracking, and checkpoint resumption |
-| `tests/agents/test_graph.py` | **34/34 Passed** | Main agent graph routing, synthesis, and reflection |
-| `tests/test_all_endpoints_e2e.py` | **27/27 Passed** | Full API contract validation |
+| `App/tests/agents/test_long_horizon_graph.py` | **16/16 Passed** | Compactor, HITL human gate, goal tracking, and checkpoint resumption |
+| `App/tests/agents/test_graph.py` | **34/34 Passed** | Main agent graph routing, synthesis, and reflection |
+| `App/tests/test_all_endpoints_e2e.py` | **27/27 Passed** | Full API contract validation |

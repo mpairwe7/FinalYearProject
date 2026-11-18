@@ -1,7 +1,7 @@
 """Tool framework for agentic AI workflows (Phase 14-A).
 
 This package is the foundation for the supervisor-specialist pattern
-described in ``docs/GAPS_AND_AGENTIC_ROADMAP.md``.  Each tool is:
+described in ``App/docs/GAPS_AND_AGENTIC_ROADMAP.md``.  Each tool is:
 
 - **Deterministic** (or returns ``{"ok": false, "error": ...}`` on
   failure) so the LLM sees a bounded, inspectable result.

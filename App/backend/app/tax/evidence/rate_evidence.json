@@ -1,5 +1,5 @@
 {
-  "about": "Evidence for rate-table figures verified against original documents on 2026-11-08 (ADR-0033). Each document entry quotes the page verbatim (whitespace collapsed); tests/agents/test_rate_table_verification_2026_11.py re-reads the page and checks the quote and the table value.",
+  "about": "Evidence for rate-table figures verified against original documents on 2026-11-08 (ADR-0033). Each document entry quotes the page verbatim (whitespace collapsed); App/tests/agents/test_rate_table_verification_2026_11.py re-reads the page and checks the quote and the table value.",
   "documents": [
     {
       "fiscal_years": [

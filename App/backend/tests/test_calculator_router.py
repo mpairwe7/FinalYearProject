@@ -418,7 +418,7 @@ class FigureLookupIsNotACalculationTests(unittest.TestCase):
     """A question about what a published figure IS must not open a calculator.
 
     Measured against a live Sunflower-14B-FP8 + hybrid-Qdrant stack on
-    2026-09-02 (``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G42). Both of these
+    2026-09-02 (``App/docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G42). Both of these
     produced a guided calculator flow asking the taxpayer for an amount instead
     of stating the figure they asked for:
 
@@ -494,7 +494,7 @@ class SalaryThresholdIsARateLookupTests(unittest.TestCase):
     """Plain-language PAYE threshold questions must read the rate table.
 
     Measured against the deployed HF Space on 2026-09-02
-    (``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G44). ``plan_rate_lookup``
+    (``App/docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G44). ``plan_rate_lookup``
     required BOTH a "rate"/"threshold" word AND a named tax, so the way
     taxpayers actually ask missed it and fell through to hybrid retrieval:
 

@@ -57,6 +57,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
 
+# checkov:skip=CKV_DOCKER_9:apt below is a package upgraded for CVE-2026-109518; the command is apt-get
 # Keep OS packages current with bookworm-security errata (fixes perl-base,
 # libpcre2, openssl/libssl3 3.0.22-1~deb12u2 CVE-2026-84782, apt/libapt-pkg6.0 2.6.2 CVE-2026-109518).
 RUN apt-get update \
@@ -95,7 +96,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
 COPY --chown=appuser:appuser App/backend/app ./app/
-COPY --chown=appuser:appuser plugins ./plugins/
+COPY --chown=appuser:appuser App/plugins ./plugins/
 COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Create necessary directories (including models + offline bundle dirs)

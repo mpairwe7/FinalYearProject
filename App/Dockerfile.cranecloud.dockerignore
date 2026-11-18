@@ -30,9 +30,9 @@
 # from the training tree; this context is deny-all, so without them listed here
 # that COPY fails the build outright — which is how it failed, rather than
 # shipping a degraded image. Keep this list and the COPY lines in step.
-!ml/__init__.py
-!ml/scripts/__init__.py
-!ml/scripts/lang_id.py
+!App/ml/__init__.py
+!App/ml/scripts/__init__.py
+!App/ml/scripts/lang_id.py
 
 # Within the allow-listed paths, still strip cruft.
 App/frontend/node_modules/

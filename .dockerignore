@@ -46,6 +46,6 @@ App/frontend/.next/
 App/backend/__pycache__/
 
 # Documentation
-docs/
+App/docs/
 *.md
 !README.md

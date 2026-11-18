@@ -25,7 +25,7 @@ wheels/
 *.egg
 
 # Frozen LLM prompt contexts generated during model bake-offs
-evals/complex_scenarios/frozen_contexts_*.jsonl
+App/evals/complex_scenarios/frozen_contexts_*.jsonl
 
 # Virtual environments
 .env
@@ -103,7 +103,7 @@ frontend/out/
 Thumbs.db
 
 # Kaggle
-ml/kaggle/*.ipynb
+App/ml/kaggle/*.ipynb
 ml/kaggle/kernel-metadata.json
 
 # Secrets (NEVER COMMIT)
@@ -162,8 +162,8 @@ App/Model/*/
 App/Model/index_reindex_requested.json
 
 # Local evaluation checkpoints and logs
-docs/Reports/data/*_checkpoint.json
-docs/Reports/data/*.log
+App/docs/Reports/data/*_checkpoint.json
+App/docs/Reports/data/*.log
 
 # Retired Flutter mobile build artifacts & Dart tool caches
 MobileApp/

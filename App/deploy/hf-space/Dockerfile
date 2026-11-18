@@ -103,7 +103,7 @@
 # so there is no password form and no client secret anywhere; the public client's
 # issuer, client id and audience are baked into the bundle by design (build args,
 # from repo variables). Runtime verification vars are Space variables. See
-# docs/STAFF_AUTH_DEPLOYMENT.md.
+# App/docs/STAFF_AUTH_DEPLOYMENT.md.
 #
 # Five defects were found by testing against a real provider rather than a mock,
 # every one of which made sign-in impossible on any deployment:
@@ -650,7 +650,7 @@
 # settings picker offered all four, but _synthesize_edge_tts ignored the
 # requested one, so every English voice played as en-US-AriaNeural. Nothing
 # failed, because every frontend spec mocks /api/** and the backend tests stop
-# at the layer above the edge call. scripts/probe_deploy.py exists so that class
+# at the layer above the edge call. App/scripts/probe_deploy.py exists so that class
 # of thing cannot hide again — unmocked HTTP at a running deployment, and the
 # one to run after this roll.
 #
@@ -697,7 +697,7 @@
 # recording panel onto an empty box.
 #
 # Verified against this exact image pulled and run locally: 113/113 on
-# scripts/probe_deploy.py (TTS and STT across all five languages) and 34/34 on
+# App/scripts/probe_deploy.py (TTS and STT across all five languages) and 34/34 on
 # e2e/verify-auth-flows.mjs (PKCE S256, state, prompt=create, a forged callback
 # refused, zero CSP violations). All CI green on this commit.
 #
@@ -851,7 +851,7 @@ RUN set -eux; \
 #   This file is the only copy. The roll pushes it to the Space whole, so a change
 #   made on the Space directly is deleted by the next roll (G371). Change it here.
 #   No CI job builds this file, and HF_CPU_PATCH_B64 asserts on the source it edits,
-#   so tests/test_hf_space_layer.py checks those lines still exist.
+#   so App/tests/test_hf_space_layer.py checks those lines still exist.
 #   1. Installs Pipecat 1.15.0 + Silero ONNX VAD + jellyfish + faiss-cpu into
 #      /opt/venv so the Voice Receptionist (/v1/calls/stream, /v1/admin/calls/stream)
 #      and FAISS-CPU Offline RAG run natively on HF Space CPU infrastructure.

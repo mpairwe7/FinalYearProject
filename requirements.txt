@@ -48,8 +48,8 @@ openpyxl==3.1.5
 # Hybrid retrieval (BM25 sparse + cross-encoder reranking)
 rank-bm25==0.2.2
 
-# Config for the CI gates — ml/pipelines/quality_gates.py and
-# ml/pipelines/corpus_coverage.py both read YAML. It has only ever arrived
+# Config for the CI gates — App/ml/pipelines/quality_gates.py and
+# App/ml/pipelines/corpus_coverage.py both read YAML. It has only ever arrived
 # transitively (via transformers/datasets); declared here because a gate that
 # stops running when an unrelated dependency drops it is a gate that silently
 # stops gating.
@@ -149,7 +149,7 @@ prometheus-client>=0.26.0
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib
 # instrumentations release in lockstep (1.45.Z <-> 0.66bZ): contrib pins
 # opentelemetry-api exactly, so a lone SDK bump is unresolvable. Move the
-# family together; tests/test_ci_supply_chain_policy.py fails otherwise.
+# family together; App/tests/test_ci_supply_chain_policy.py fails otherwise.
 # 1.45.1 fixes CVE-2026-114603 (unbounded tracestate parsing).
 # 1.45.2 fixes CVE-2026-126360 (ReDoS in traceparent extraction).
 opentelemetry-api>=1.45.2,<1.46

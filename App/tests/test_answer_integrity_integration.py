@@ -1,0 +1,676 @@
+"""Endpoint- and pipeline-level integration for the answer-integrity changes.
+
+Sibling of ``test_fallback_integration.py`` and here for the same reason: the
+suite under ``App/backend/tests`` does not run in CI, while
+``pytest App/tests/ --cov=App/backend`` *measures* it. Code covered only there is
+code CI protects on paper. These drive the real objects — a real ``ChatModel``,
+the real FastAPI app, the real translation cache — over the paths a taxpayer
+actually hits:
+
+* the **effective locale** in the streaming core. Detection runs inside
+  ``generate_retrieval_only``; ``run_chat_turn`` used the caller's parameter, so
+  the path the web and WebSocket clients use answered auto-detected Luganda in
+  English while the REST path handled it correctly.
+* the **figure guard** on a translated reply. Machine translation paraphrases,
+  and a paraphrased amount is a different amount.
+* the **translation memo**, which is why a non-English turn is no longer two to
+  three times slower than the same question in English.
+* **withholding** an answer whose figures contradict its cited passage — caught
+  and escalated for a long time, and still printed.
+* **POST /v1/escalate**, the taxpayer's own way into the officer queue.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import types
+import uuid
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "App" / "backend"))
+
+os.environ.setdefault("LLM_ENABLED", "false")
+os.environ.setdefault("CACHE_BACKEND", "memory")
+os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
+os.environ.setdefault("OTEL_ENABLED", "false")
+os.environ.setdefault("QDRANT_URL", "http://127.0.0.1:1")
+os.environ.setdefault("QDRANT_ENABLED", "false")
+os.environ.setdefault("SPEECH_ENABLED", "false")
+# NB: the analytics DB stays on the default cwd `data_store/` path — a tmpdir
+# override would land on tmpfs, where SQLite WAL fails with "database is locked".
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from App.backend.app.db import database  # noqa: E402
+from App.backend.app import mt  # noqa: E402
+from App.backend.app.rag import pipeline as pipeline_module  # noqa: E402
+from App.backend.app.config.flags import flags  # noqa: E402
+from App.backend.app.main import app  # noqa: E402
+from App.backend.app.text_signals import CONTRADICTED_CLAIM_REPLY  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def client():
+    database.init_db()
+    app.state.model = pipeline_module.ChatModel()
+    app.state.speech = types.SimpleNamespace(enabled=False)
+    # No `with` block: skips the lifespan (model download / prod gate).
+    return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_translation_cache():
+    """Each case starts with an empty memo; a hit from a neighbour would make
+    a translation backend look uncalled when it was simply not needed."""
+    mt.cache.clear()
+    yield
+    mt.cache.clear()
+
+
+def _conversation_id() -> str:
+    """A fresh id per case.
+
+    The analytics DB lives on the default `data_store/` path and survives
+    between runs, and `_maybe_create_ticket` deliberately reuses an open ticket
+    for a conversation — so a fixed id makes the *second* run of this file see
+    yesterday's ticket and read "already looking at this conversation". That is
+    the dedup working, not a failure, but it makes the assertion wrong.
+    """
+    return f"conv-int-{uuid.uuid4().hex[:12]}"
+
+
+def _drain(agen):
+    async def _run():
+        return [event async for event in agen]
+
+    return asyncio.run(_run())
+
+
+@pytest.mark.parametrize("queue_enabled", [True, False])
+def test_call_wrapup_ticket_respects_tenant_and_queue_switch(queue_enabled):
+    """The real desk route must not create cross-tenant or disabled handoffs."""
+    from app.db import database as call_db
+    from app.auth.jwt_auth import make_dev_token
+    from app.config.flags import flags as call_flags
+    from app.main import app as call_app
+    from app.receptionist.store import create_call, get_call, init_receptionist_schema
+
+    call_db.init_db()
+    init_receptionist_schema()
+    call_id = f"call_integrity_{uuid.uuid4().hex[:10]}"
+    create_call(call_id, conversation_id=f"conv_{call_id}", tenant_id="qa-tenant", status="ended", locale="lg")
+    token = make_dev_token("qa-officer", tenant_id="qa-tenant", role="ura_staff")
+    with mock.patch.object(call_flags, "is_enabled", side_effect=lambda name, **kw: (
+        queue_enabled if name == "ticket_queue" else name in ("auth_required", "multi_tenant")
+    )):
+        response = TestClient(call_app).post(
+            f"/v1/admin/calls/{call_id}/wrapup",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"outcome": "follow_up", "note": "Officer review needed", "ticket_action": "create"},
+        )
+    saved = get_call(call_id)
+    if queue_enabled:
+        assert response.status_code == 200, response.text
+        ticket = call_db.query_one("SELECT tenant_id, conversation_id, locale FROM tickets WHERE id = ?", (saved["ticket_id"],))
+        assert dict(ticket) == {"tenant_id": "qa-tenant", "conversation_id": f"conv_{call_id}", "locale": "lg"}
+    else:
+        assert response.status_code == 409, response.text
+        assert not saved.get("ticket_id")
+        assert not saved.get("wrapup_at")
+
+
+# ---------------------------------------------------------------------------
+# The translation memo
+# ---------------------------------------------------------------------------
+class TestTheTranslationMemo:
+    def test_a_repeated_reply_is_translated_once(self):
+        english = "Visit ura.go.ug and choose Get a TIN."
+        luganda = "Genda ku ura.go.ug olonde Funa TIN."
+        with mock.patch.object(
+            pipeline_module, "_translate_reply", return_value=luganda
+        ) as backend:
+            first = pipeline_module.localize_reply(english, "lg")
+            second = pipeline_module.localize_reply(english, "lg")
+        assert first == second == luganda
+        backend.assert_called_once()
+
+    def test_the_question_is_translated_once_per_turn_not_per_caller(self):
+        """rag/pipeline.py translates the question for the deterministic routers and
+        the hybrid retriever translates it again for the corpus. That second
+        call was a whole extra round trip for a string translated milliseconds
+        earlier."""
+        from App.backend.app.rag.query import translate_query_for_retrieval
+
+        calls = []
+
+        def _fake_llm_translate(text, source_lang="en", target_lang="lg"):
+            calls.append((text, source_lang, target_lang))
+            return "How do I register for a TIN?"
+
+        with mock.patch("App.backend.app.rag.generator.translate_text", _fake_llm_translate):
+            first = translate_query_for_retrieval("TIN nnyingira ntya", "lg")
+            second = translate_query_for_retrieval("TIN nnyingira ntya", "lg")
+
+        assert first == second == "How do I register for a TIN?"
+        assert len(calls) == 1
+
+    def test_the_memo_holds_a_digest_and_not_the_question(self):
+        """Taxpayer questions reach this cache and can carry a TIN or a name."""
+        question_with_a_tin = "My TIN is 1000123456 — how much do I owe?"
+        mt.cache.put("lg", "en", question_with_a_tin, "translated")
+        assert question_with_a_tin not in str(list(mt.cache._entries))
+
+
+# ---------------------------------------------------------------------------
+# Figures across translation
+# ---------------------------------------------------------------------------
+class TestFiguresSurviveTranslation:
+    def test_a_changed_amount_serves_the_english_answer(self):
+        english = "The PAYE due on this salary is UGX 235,000 for the month."
+        with mock.patch.object(
+            pipeline_module,
+            "_translate_reply",
+            return_value="Omusolo gwa PAYE ye UGX 253,000 buli mwezi.",
+        ):
+            assert pipeline_module.localize_reply(english, "lg") == english
+
+    def test_a_rate_marked_differently_is_still_the_same_rate(self):
+        """Luganda writes a rate as parts per hundred, with no percent sign.
+        Comparing money and percentages as separate categories threw away a
+        translation that was exactly right."""
+        english = "The standard VAT rate in Uganda is 18% on taxable supplies."
+        luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
+        with mock.patch.object(pipeline_module, "_translate_reply", return_value=luganda):
+            assert pipeline_module.localize_reply(english, "lg") == luganda
+
+    def test_a_refused_translation_is_not_memoised(self):
+        english = "The registration threshold is UGX 150,000,000 per year."
+        with mock.patch.object(
+            pipeline_module,
+            "_translate_reply",
+            return_value="Ekipimo kya UGX 100,000,000 buli mwaka.",
+        ) as backend:
+            pipeline_module.localize_reply(english, "lg")
+            after_first_turn = backend.call_count
+            pipeline_module.localize_reply(english, "lg")
+        # A figure-bearing reply costs two round trips per turn once the
+        # protected pass fails — one masked, one unprotected retry (see
+        # App/docs/runbooks/multilingual-figure-fidelity.md). The count itself is
+        # not the property under test: what matters is that the second turn
+        # paid a backend again rather than being served a refused translation
+        # out of the memo.
+        assert backend.call_count == after_first_turn * 2
+        assert mt.cache.get("en", "lg", english) is None
+
+
+# ---------------------------------------------------------------------------
+# The streaming core
+# ---------------------------------------------------------------------------
+class TestTheStreamingCoreAnswersInTheDetectedLanguage:
+    def _turn(self, result, caller_locale="en"):
+        model = mock.MagicMock()
+        model.generate_retrieval_only.return_value = result
+        with mock.patch.object(pipeline_module, "localize_reply") as localize:
+            localize.side_effect = lambda text, locale: f"[{locale}] {text}"
+            events = _drain(
+                pipeline_module.run_chat_turn(
+                    model,
+                    message="TIN nnyingira ntya",
+                    conversation_id=None,
+                    top_k=4,
+                    locale=caller_locale,
+                    session_id=None,
+                    request_id=None,
+                    user_id=None,
+                    tenant_id="default",
+                )
+            )
+        return events, localize
+
+    def test_an_auto_detected_locale_reaches_localization(self):
+        events, localize = self._turn(
+            {
+                "reply": "Register on ura.go.ug.",
+                "retrieval_mode": "abstained",
+                "locale": "lg",
+                "_hits": [],
+            }
+        )
+        assert localize.call_args.args[1] == "lg"
+        assert [p for k, p in events if k == "token"] == ["[lg] Register on ura.go.ug."]
+
+    def test_the_client_is_told_which_language_was_resolved(self):
+        events, _ = self._turn(
+            {
+                "reply": "Register on ura.go.ug.",
+                "retrieval_mode": "abstained",
+                "locale": "lg",
+                "_hits": [],
+            }
+        )
+        completed = next(p for k, p in events if k == "retrieval.completed")
+        assert completed["locale"] == "lg"
+        assert [k for k, _ in events if k.startswith("translation.")] == [
+            "translation.started",
+            "translation.completed",
+        ]
+
+    def test_an_english_turn_announces_no_translation(self):
+        events, _ = self._turn(
+            {
+                "reply": "Register on ura.go.ug.",
+                "retrieval_mode": "abstained",
+                "locale": "en",
+                "_hits": [],
+            }
+        )
+        assert [k for k, _ in events if k.startswith("translation.")] == []
+
+
+# ---------------------------------------------------------------------------
+# Withholding
+# ---------------------------------------------------------------------------
+class TestAContradictedFigureIsNotPrinted:
+    def _guard(self, claim_report):
+        model = mock.MagicMock()
+        model._evaluate_response_judge.return_value = {"decision": "approve", "reasons": []}
+        model._build_handoff_packet.return_value = {"topic": "vat", "priority": "normal"}
+        model._maybe_create_ticket.return_value = "ticket-int-1"
+        output_guard = mock.MagicMock()
+        output_guard.should_escalate.return_value = (False, "")
+        with mock.patch.object(
+            pipeline_module, "verify_claims", return_value=claim_report
+        ), mock.patch.object(
+            pipeline_module.HybridRetriever, "compute_faithfulness", return_value=0.9
+        ):
+            return pipeline_module._apply_output_guards(
+                model,
+                message="What is the VAT rate?",
+                reply="Value Added Tax is charged at 20% on taxable supplies. [1]",
+                hits=[{"text": "VAT is charged at 18%.", "source": "vat.csv"}],
+                citations=[
+                    {"ref": "[1]", "source": "vat.csv", "passage": "VAT is charged at 18%."}
+                ],
+                conversation_history=[],
+                session_id="sess-int",
+                conversation_id="conv-int",
+                output_guard=output_guard,
+            )
+
+    def test_the_wrong_figure_never_reaches_the_client(self):
+        out = self._guard(
+            {"decision": "escalate", "contradicted_claims": [{"text": "VAT is 20%"}]}
+        )
+        assert out["reply"] == CONTRADICTED_CLAIM_REPLY
+        assert "20%" not in out["reply"]
+        assert out["escalate"] is True
+        # No score: 0.9 described text that is no longer being sent, and
+        # reporting it would put a "well grounded" badge on a withholding notice.
+        assert out["faithfulness"] is None
+        # And an officer is waiting — withholding without a handoff leaves the
+        # taxpayer with nothing at all.
+        assert out["ticket_id"]
+
+    def test_an_unsupported_but_uncontradicted_answer_is_still_served(self):
+        out = self._guard(
+            {
+                "decision": "revise",
+                "contradicted_claims": [],
+                "unsupported_claims": [{"text": "You may register online."}],
+            }
+        )
+        assert "20%" in out["reply"]
+
+
+# ---------------------------------------------------------------------------
+# The taxpayer's own escalation
+# ---------------------------------------------------------------------------
+class TestTaxpayerEscalationEndpoint:
+    @pytest.fixture(autouse=True)
+    def desk_always_open(self, monkeypatch):
+        """Officers on duty whatever the hour the suite runs at.
+
+        Outside working hours the endpoint words its reply differently (G196),
+        so wording asserted here would fail every run after 23:00 Kampala time.
+        """
+        for name in ("CXP_TIMEZONE", "CXP_WORKING_DAYS", "CXP_CLOSED_DATES"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("CXP_OPEN_HOUR", "0")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "24")
+
+    def test_it_queues_a_real_ticket_and_returns_its_reference(self, client):
+        flags.set("ticket_queue", True)
+        try:
+            conversation_id = _conversation_id()
+            response = client.post(
+                "/v1/escalate",
+                json={
+                    "conversation_id": conversation_id,
+                    "reason": "The VAT answer does not match my assessment notice.",
+                },
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["ok"] is True
+            assert body["ticket_id"]
+            assert body["status"] == "open"
+            assert "here in this conversation" in body["message"]
+
+            ticket = database.get_ticket(body["ticket_id"])
+            assert ticket is not None
+            assert ticket["conversation_id"] == conversation_id
+            # Officers need to tell an answer the system doubted from a person
+            # who asked for help; they need different first replies.
+            assert ticket["handoff"]["requested_by"] == "taxpayer"
+        finally:
+            flags.clear("ticket_queue")
+
+    def test_asking_twice_puts_one_officer_on_it(self, client):
+        flags.set("ticket_queue", True)
+        try:
+            conversation_id = _conversation_id()
+            first = client.post(
+                "/v1/escalate", json={"conversation_id": conversation_id}
+            ).json()
+            second = client.post(
+                "/v1/escalate", json={"conversation_id": conversation_id}
+            ).json()
+            assert first["ticket_id"] == second["ticket_id"]
+            assert second["reused_existing"] is True
+            assert "already looking at this conversation" in second["message"]
+        finally:
+            flags.clear("ticket_queue")
+
+    def test_at_night_asking_again_says_it_is_already_with_the_officers(self, client, monkeypatch):
+        """The real funnel and endpoint off duty: today closed, so the next shift is named."""
+        import datetime as dt
+
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=3))).date().isoformat()
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_CLOSED_DATES", today)
+        flags.set("ticket_queue", True)
+        try:
+            conversation_id = _conversation_id()
+            first = client.post("/v1/escalate", json={"conversation_id": conversation_id}).json()
+            second = client.post("/v1/escalate", json={"conversation_id": conversation_id}).json()
+            assert first["officer_hours"]["on_duty"] is False
+            assert "when they are next on duty, from" in first["message"]
+            assert second["reused_existing"] is True
+            assert "already with URA's officers" in second["message"]
+        finally:
+            flags.clear("ticket_queue")
+
+    def test_cxp_business_hours_flag_after_hours_escalation_message(self, client, monkeypatch):
+        """When cxp_business_hours is enabled after 11:00 PM EAT, /v1/escalate returns after_hours=True and 5-locale CXP notice."""
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_FORCE_AFTER_HOURS", "true")
+        flags.set("ticket_queue", True)
+        flags.set("cxp_business_hours", True)
+        try:
+            conversation_id = _conversation_id()
+            resp = client.post(
+                "/v1/escalate",
+                json={"conversation_id": conversation_id, "locale": "lg"},
+            ).json()
+            assert resp["ok"] is True
+            assert resp["after_hours"] is True
+            assert "07:00 EAT" in resp["next_open_eat"]
+            assert "11:00 PM EAT" in resp["message"]
+            assert "7:00 AM EAT" in resp["message"]
+        finally:
+            flags.clear("cxp_business_hours")
+            flags.clear("ticket_queue")
+
+    def test_the_queue_being_off_is_said_plainly(self, client):
+        flags.set("ticket_queue", False)
+        try:
+            body = client.post(
+                "/v1/escalate", json={"conversation_id": _conversation_id()}
+            ).json()
+            assert body["ok"] is False
+            assert body["status"] == "queue_disabled"
+            assert "0800 117 000" in body["message"]
+        finally:
+            flags.clear("ticket_queue")
+
+    def test_self_declared_urgency_is_ignored(self, client):
+        """A queue where every taxpayer can mark their own ticket urgent stops
+        sorting anything."""
+        flags.set("ticket_queue", True)
+        try:
+            body = client.post(
+                "/v1/escalate",
+                json={"conversation_id": _conversation_id(), "priority": "urgent"},
+            ).json()
+            ticket = database.get_ticket(body["ticket_id"])
+            assert ticket["priority"] == "normal"
+        finally:
+            flags.clear("ticket_queue")
+
+
+class TestACaseAnswersOnlyToItsOwner:
+    """OWASP API1:2023 (BOLA) on the taxpayer's case routes and the chat lookup.
+
+    The status and reply routes take no login: the exact ticket UUID the
+    taxpayer was given is the capability. They used to fall back to a ticket
+    *search* (a LIKE over reason, query, staff note, officer reply and the
+    transcript), so any word from someone's case, or a bare wildcard, opened
+    it — and a reply landed on it as that taxpayer's words. The chat answered
+    "status of TIC-…" for anyone, before the input guard and the crisis check.
+    """
+
+    @staticmethod
+    def _owned_ticket() -> tuple[dict, str, str]:
+        session = f"sess-owner-{uuid.uuid4().hex[:12]}"
+        marker = f"Marker{uuid.uuid4().hex[:10]}"
+        ticket = database.create_ticket(
+            reason=f"Refund delayed for {marker}",
+            user_query=f"My refund for {marker} is late",
+            session_id=session,
+            conversation_id=_conversation_id(),
+        )
+        return ticket, session, marker
+
+    def test_the_owner_still_reads_and_replies_with_the_exact_id(self, client):
+        ticket, _, marker = self._owned_ticket()
+        status = client.get(f"/v1/escalate/{ticket['id']}")
+        assert status.status_code == 200
+        assert marker in status.json()["reason"]
+        reply = client.post(f"/v1/escalate/{ticket['id']}/reply", json={"message": "Here is my receipt."})
+        assert reply.status_code == 200
+        assert reply.json()["ticket_id"] == ticket["id"]
+
+    @pytest.mark.parametrize("how", ["free_text", "wildcard", "reference", "id_prefix"])
+    def test_nothing_short_of_the_exact_id_opens_a_case(self, client, how):
+        ticket, _, marker = self._owned_ticket()
+        probe = {
+            "free_text": marker,
+            "wildcard": "%25",
+            "reference": f"TIC-{ticket['id'][:8].upper()}",
+            "id_prefix": ticket["id"][:8],
+        }[how]
+        status = client.get(f"/v1/escalate/{probe}")
+        assert status.status_code in (404, 422), status.text
+        # A 422 echoes the caller's own input; what must not appear is the case.
+        assert ticket["id"] not in status.text
+        assert f"Refund delayed for {marker}" not in status.text
+        before = len(database.get_ticket(ticket["id"]).get("transcript") or [])
+        reply = client.post(f"/v1/escalate/{probe}/reply", json={"message": "Send my refund to account 999."})
+        assert reply.status_code in (404, 422), reply.text
+        assert len(database.get_ticket(ticket["id"]).get("transcript") or []) == before
+
+    def test_a_reference_in_chat_is_answered_for_its_owner_only(self, client):
+        ticket, owner_session, marker = self._owned_ticket()
+        question = f"What is the status of TIC-{ticket['id'][:8].upper()}?"
+        stranger = client.post(
+            "/v1/chat",
+            json={"message": question, "conversation_id": _conversation_id()},
+            headers={"X-Session-ID": f"sess-stranger-{uuid.uuid4().hex[:12]}"},
+        ).json()
+        assert stranger["retrieval_mode"] == "support_case"
+        assert marker not in stranger["reply"]
+        assert "No active record was found" in stranger["reply"]
+
+        owner = client.post(
+            "/v1/chat",
+            json={"message": question, "conversation_id": _conversation_id()},
+            headers={"X-Session-ID": owner_session},
+        ).json()
+        assert owner["retrieval_mode"] == "support_case"
+        assert marker in owner["reply"]
+
+    def test_a_crisis_is_answered_before_any_case_lookup(self, client):
+        ticket, owner_session, _ = self._owned_ticket()
+        body = client.post(
+            "/v1/chat",
+            json={
+                "message": f"TIC-{ticket['id'][:8].upper()} is still not resolved and I want to end my life",
+                "conversation_id": _conversation_id(),
+            },
+            headers={"X-Session-ID": owner_session},
+        ).json()
+        assert body["retrieval_mode"] == "crisis_support"
+        assert body["agent_role"] == "safety_guard"
+
+    def test_a_search_for_a_wildcard_matches_the_character_not_every_ticket(self):
+        ticket, _, _ = self._owned_ticket()
+        searched = ("id", "reason", "user_query", "assignee", "team", "staff_note", "officer_reply")
+        stored = database.get_ticket(ticket["id"])
+        for wildcard in ("%", "_"):
+            # Precondition: the character appears in none of the searched fields.
+            assert not any(wildcard in str(stored.get(col) or "") for col in searched)
+            found = {t["id"] for t in database.list_tickets(q=wildcard, limit=500)}
+            assert ticket["id"] not in found, wildcard
+
+
+class TestStatutoryGapFixes:
+    def test_excise_duty_mobile_money_withdrawal_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the excise duty rate on mobile money cash withdrawals?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "0.5%" in body["reply"]
+        assert "Excise Duty Act" in body["reply"]
+
+    def test_late_filing_penalty_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the penalty for late filing of an income tax return?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "200,000" in body["reply"]
+        assert "2%" in body["reply"]
+        assert "Tax Procedures Code Act" in body["reply"]
+
+    def test_presumptive_tax_threshold_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the turnover threshold for small businesses using presumptive tax?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "150,000,000" in body["reply"]
+        assert "10,000,000" in body["reply"]
+
+    def test_local_service_tax_answers_out_of_scope_clearly(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the local service tax policy for municipal authorities?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "out_of_scope"
+        assert "Local Service Tax" in body["reply"]
+        assert "Local Governments (Amendment) Act 2008" in body["reply"]
+        assert "URA does not assess, collect, or enforce" in body["reply"]
+
+
+class TestOctober2026GapClosuresIntegration:
+    """End-to-end integration tests for G288, G290, G293, G294 across REST and SSE."""
+
+    def test_g290_staff_answer_override_serves_on_both_rest_and_sse_with_punctuation_variance(self, client):
+        from app import cms
+
+        cms.upsert(
+            "What is the special URA test override question",
+            "Verified Staff Override Answer: URA toll-free helpline is 0800 117 000.",
+            source_url="https://ura.go.ug/override-test",
+            created_by="ura_admin",
+            enabled=True,
+        )
+        flags.set("answer_overrides", True)
+        try:
+            # REST with trailing question mark and mixed case
+            rest = client.post(
+                "/v1/chat",
+                json={"message": "What is the special URA test override question?!"},
+            )
+            assert rest.status_code == 200
+            body = rest.json()
+            assert body["retrieval_mode"] == "answer_override"
+            assert "Verified Staff Override Answer" in body["reply"]
+
+            # SSE streaming transport parity
+            stream_res = client.post(
+                "/v1/chat/stream",
+                json={"message": "what is the special ura test override question?"},
+            )
+            assert stream_res.status_code == 200
+            assert "Verified Staff Override Answer" in stream_res.text
+            assert '"retrieval_mode": "answer_override"' in stream_res.text
+
+            # Crisis detection must take precedence over a matching override key on both paths
+            cms.upsert(
+                "I want to end my life right now",
+                "This override must never mask crisis support.",
+                created_by="ura_admin",
+                enabled=True,
+            )
+            crisis_rest = client.post(
+                "/v1/chat",
+                json={"message": "I want to end my life right now"},
+            )
+            assert crisis_rest.status_code == 200
+            assert crisis_rest.json()["retrieval_mode"] == "crisis_support"
+
+            crisis_stream = client.post(
+                "/v1/chat/stream",
+                json={"message": "I want to end my life right now"},
+            )
+            assert crisis_stream.status_code == 200
+            assert '"retrieval_mode": "crisis_support"' in crisis_stream.text
+        finally:
+            flags.clear("answer_overrides")
+
+    def test_g288_and_g294_false_premise_contradiction_and_fiscal_validity_bounds(self):
+        from app.rag import entailment
+        from app.ingestion import indexer
+
+        passage = "The standard rate of Value Added Tax (VAT) in Uganda is 18%."
+        assert entailment.numeric_contradiction(
+            "Yes, the standard VAT rate in Uganda is 20% [1].",
+            passage,
+            user_query="Is the standard VAT rate 20%?",
+        )
+        assert not entailment.numeric_contradiction(
+            "No, the standard VAT rate in Uganda is 18%, not 20% [1].",
+            passage,
+            user_query="Is the standard VAT rate 20%?",
+        )
+        assert indexer.fiscal_year_validity_bounds("FY2026-27") == ("2026-07-01", "2027-06-30")
+

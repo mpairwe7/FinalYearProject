@@ -1,5 +1,5 @@
 /* The console's call layer — call bar, transfer alerts, active-call dock,
-   device check (docs/plans/officer-call-desk-plan.md §3.1, §9). Ops tokens
+   device check (App/docs/plans/officer-call-desk-plan.md §3.1, §9). Ops tokens
    only: flat panels, hairlines, colour for state. Both themes via tokens. */
 
 .cc-sr-only {

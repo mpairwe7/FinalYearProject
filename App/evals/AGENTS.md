@@ -1,0 +1,26 @@
+# App/evals/
+
+Deterministic gates. Do not call a hosted LLM from these jobs.
+
+| Artifact | Path | Gate |
+| --- | --- | --- |
+| RAG golden set | `Data/eval/rag_eval.jsonl` | retrieval regression |
+| Coverage bank | `Data/eval/coverage_bank.jsonl` + `coverage_domains.yaml` | `ml.pipelines.corpus_coverage --fail-under-floor` — per-domain floor (#303) |
+| Red-team corpus | `Data/eval/redteam_corpus.jsonl` (+ `guardrail_benign_controls.jsonl`) | `test_redteam_corpus.py` — every row refused (`channel: retrieved` rows by `injection_present`), a malformed row fails, each attack class has a floor, and no benign control may be refused (ADR-0029) |
+| Routing golden sets | `app.agents.eval_routing` | EN ≥ 0.95 before `agentic_mode` |
+| Preference export | `App/evals/export_preferences.py` | thumbs-down + `officer_reply`; no fine-tune |
+| Spoken language id | `App/evals/language_id/` + `App/scripts/eval_language_id.py` | receptionist Phase 0A — measurement, GPU; see its README |
+| Orpheus Luganda voice | `App/evals/orpheus_tts/` + `App/scripts/bench_orpheus_tts.py` | receptionist Phase 0B — latency here, naturalness by listeners |
+| Trilingual multi-turn | `App/evals/multiturn_trilingual/scenarios.jsonl` | `test_multiturn_trilingual_eval.py` — answer language, English replay, scrubbed history, facts (deterministic); `App/scripts/eval_multiturn_trilingual.py` measures the GPU stack |
+| Trilingual retrieval | `App/evals/retrieval_multilingual/` + `App/scripts/eval_retrieval_multilingual.py` | measurement on the GPU stack, **not a gate**: part of the set is machine-translated (see its README); Hit@1/nDCG per leg, abstention, latency |
+| Complex tax scenarios | `App/evals/complex_scenarios/{dev,heldout}.jsonl` + `scoring.py` | `test_complex_scenarios_schema.py` + `test_complex_scenarios_scoring.py` (deterministic); `App/scripts/eval_complex_scenarios.py` measures live stack (`HELDOUT.sha256` two-run rule) |
+| Live web research & Qdrant sync | `App/evals/web_research_scenarios/scenarios.jsonl` | `test_web_research_scenarios_eval.py` — 17 scenarios across all 9 web research triggers, live FX (USD/EUR/GBP/KES), ephemeral PDF sandbox & Turn-2 `web_sync_ledger` skip |
+| Adversarial web evidence | `App/evals/web_research_scenarios/adversarial.jsonl` | `test_web_research_adversarial_eval.py` — poisoned, foreign, mis-scoped, stale, snippet-only and failed searches, each asserting the turn's `status` (ADR-0021) |
+| Hostile pages for the portal co-pilot | `App/evals/portal_copilot_scenarios/adversarial.jsonl` | `test_portal_copilot_adversarial_eval.py` — DOM telemetry a hostile page could send (page-chosen selectors, text that buys a click, credential fields under other names, injection, fence breakout, oversized payloads) through `/v1/chat`; every accepted row must leave the action rules intact, and benign rows must still be helped (ADR-0038) |
+
+`FLAG_HYDE` / `FLAG_GRAPH_FUSION` stay off until an unseen multi-hop set exists.
+
+The coverage bank is the one set here that is **not** derived from the corpus —
+it probes for subjects the corpus does not cover. A new `ura_*_faqs.csv` needs a
+domain in `coverage_domains.yaml` and a question in the bank, or the gate fails.
+See `App/docs/runbooks/corpus-coverage.md`.

@@ -147,7 +147,7 @@ runs:
 docker run -d --name ura-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=ura \
   -p 55432:5432 postgres:16.6-alpine
 POSTGRES_DSN="postgresql://postgres:pw@localhost:55432/ura" \
-  python -m pytest tests/agents/test_backend_column_parity.py
+  python -m pytest App/tests/agents/test_backend_column_parity.py
 ```
 
 Worth doing for any change touching `db/postgres.py`: the `user_id` defect

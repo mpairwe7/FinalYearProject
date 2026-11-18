@@ -1,7 +1,7 @@
 """Caller and officer screens, server side: what a browser is told, and when.
 
 Regressions from phase 4 of the November 2026 call-receptionist review
-(docs/plans/receptionist-assurance-2026-11-11.md, ADR-0042).
+(App/docs/plans/receptionist-assurance-2026-11-11.md, ADR-0042).
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Records and accountability: what a call leaves behind is true, scoped and owned.
 
 Regressions from phase 2 of the November 2026 call-receptionist review
-(docs/plans/receptionist-assurance-2026-11-11.md, ADR-0040).
+(App/docs/plans/receptionist-assurance-2026-11-11.md, ADR-0040).
 """
 
 from __future__ import annotations

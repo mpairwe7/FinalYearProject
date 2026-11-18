@@ -13,7 +13,7 @@ This release streamlines the LLM serving architecture across the repository by:
 2. **Enhancing Sunflower-14B-FP8 Context Window (32K → 131K via YaRN)**: Enhanced `App/Model/Sunflower-14B-FP8` model configuration and vLLM runtime settings to utilize modern YaRN (Yet another RoPE extensioN) RoPE scaling, extending the effective context length from native 32K/40K up to **131,072 tokens (131K / 128K)**.
 3. **Applying Latest vLLM Production Standards**: Configured chunked prefill (`--enable-chunked-prefill`), automatic prefix caching (`--enable-prefix-caching`), batched token headroom (`--max-num-batched-tokens 16384`), and Hermes tool-call parsing (`--tool-call-parser hermes`) in Docker compose manifests.
 4. **Backend Token Budget Alignment**: Updated `LLM_CONTEXT_WINDOW` in `App/backend/app/rag/generator.py` and `.env.example` to default to `131072`, allowing `_fit_to_context` to dynamically allocate up to the full 131K window served by vLLM.
-5. **Verifying FAISS Offline Retrieval**: Confirmed the production offline RAG pipeline (`rag/offline_rag.py`, `offline_bundle.py`, `scripts/export_offline_bundle.py`) remains intact for on-device and air-gapped deployments.
+5. **Verifying FAISS Offline Retrieval**: Confirmed the production offline RAG pipeline (`rag/offline_rag.py`, `offline_bundle.py`, `App/scripts/export_offline_bundle.py`) remains intact for on-device and air-gapped deployments.
 6. **Docker Resource & Image Deduplication**: Removed stale duplicate image layers and tags (`app-api:pre-*`, `app-frontend:pre-*`, `ura-chatbot-*`), reclaiming >40 GB of host disk space.
 
 ---
@@ -50,7 +50,7 @@ This release streamlines the LLM serving architecture across the repository by:
 ### 2.3 Decommissioning Non-Sunflower vLLM Overlays
 * **Removed**:
   - `vllm-quantized` service removed from `docker-compose.yml`.
-  - `vllm-quantized` scrape target removed from `monitoring/prometheus.yml`.
+  - `vllm-quantized` scrape target removed from `App/monitoring/prometheus.yml`.
   - `App/docker-compose.local-qwen.yml` completely deleted.
   - `vllm` override block removed from `App/docker-compose.coverage-gpu.yml`.
 * **Retained**:
@@ -97,11 +97,11 @@ This release streamlines the LLM serving architecture across the repository by:
 | :--- | :--- | :--- |
 | `App/backend/tests/test_prompt_budget.py` | **7/7 Passed** | Validates `_fit_to_context` dynamic window budgeting |
 | `App/backend/tests/test_tool_budget.py` | **10/10 Passed** | Validates schema budgeting and fitting against model window |
-| `tests/agents/test_graph.py` | **34/34 Passed** | Main agent graph routing, synthesis, and reflection |
-| `tests/agents/test_graph_checkpointer.py` | **4/4 Passed** | Durable checkpointer integration and round-trip |
-| `tests/agents/test_long_horizon_graph.py` | **15/15 Passed** | Compactor, HITL human gate, goal tracking, and resumption |
-| `tests/test_monitoring_config.py` | **106/106 Passed** | Validates Prometheus jobs and alerting queries post-cleanup |
-| `tests/test_all_endpoints_e2e.py` | **27/27 Passed** | Full API contract validation |
+| `App/tests/agents/test_graph.py` | **34/34 Passed** | Main agent graph routing, synthesis, and reflection |
+| `App/tests/agents/test_graph_checkpointer.py` | **4/4 Passed** | Durable checkpointer integration and round-trip |
+| `App/tests/agents/test_long_horizon_graph.py` | **15/15 Passed** | Compactor, HITL human gate, goal tracking, and resumption |
+| `App/tests/test_monitoring_config.py` | **106/106 Passed** | Validates Prometheus jobs and alerting queries post-cleanup |
+| `App/tests/test_all_endpoints_e2e.py` | **27/27 Passed** | Full API contract validation |
 | `App/backend/tests/test_api_endpoints.py` | **66/66 Passed** | All core and offline endpoints pass |
-| `tests/agents` | **1104/1104 Passed** | Agentic loop, connectors, tools, and supervisor regression-free |
+| `App/tests/agents` | **1104/1104 Passed** | Agentic loop, connectors, tools, and supervisor regression-free |
 | Transformers YaRN Parameter Check | **Passed** | `inv_freq` shape `[64]`, `attention_scaling: 1.1386`, `model_max_length: 131072` |

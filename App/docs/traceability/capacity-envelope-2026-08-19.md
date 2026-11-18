@@ -3,7 +3,7 @@
 Traceability for GitHub issue
 [#304](https://github.com/mpairwe7/FinalYearProject/issues/304)
 (capacity envelope + published SLOs). Companion operator numbers:
-`docs/runbooks/capacity-slo.md`.
+`App/docs/runbooks/capacity-slo.md`.
 
 This file is the audit log: what was measured, on which hardware, with
 which stack, and what a later reviewer must **not** treat as a closed
@@ -172,8 +172,8 @@ Stream mix: C=1 p95 9 ms (TTFT p95 7 ms); C=8 p95 87 ms (TTFT p95 69 ms).
 
 | Source | Chat p95 |
 |---|---|
-| `docs/DEPLOYMENT.md` §10, `docs/MONITORING.md` §7, `monitoring/alerting-rules.yml` | **&lt; 2s** |
-| `tests/load/k6-chat-slo.js` (NFR-01), `monitoring/prometheus-rules.yaml` | **&lt; 3s** |
+| `App/docs/DEPLOYMENT.md` §10, `App/docs/MONITORING.md` §7, `App/monitoring/alerting-rules.yml` | **&lt; 2s** |
+| `App/tests/load/k6-chat-slo.js` (NFR-01), `monitoring/prometheus-rules.yaml` | **&lt; 3s** |
 
 A blended `/v1/chat` p95 will pass 2s whenever FAQ/calculator dominate
 and fail as soon as the histogram is hybrid-only. Publish **per
@@ -194,7 +194,7 @@ pinned to hybrid and the limiter is raised.
 
 ## 10. How to re-run
 
-See `docs/runbooks/capacity-slo.md`.
+See `App/docs/runbooks/capacity-slo.md`.
 
 ## 11. Live e2e + high-load re-run (Qdrant + Sunflower)
 
@@ -202,7 +202,7 @@ Same stack as campaign C. Playwright `chat-flow.spec.ts` still mocks
 the backend; this pass is **HTTP against the live API**.
 
 Stubbed pytest regression (no live LLM): **43 passed**
-(`test_resilience`, `tests/chaos`, `test_sunbird_retry_budget`,
+(`test_resilience`, `App/tests/chaos`, `test_sunbird_retry_budget`,
 `test_production_readiness`, `tests/test_all_endpoints_e2e`).
 
 Live functional e2e: **9/9 passed**

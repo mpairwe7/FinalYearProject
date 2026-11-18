@@ -82,7 +82,7 @@ services:
   # ---------------------------------------------------------------------------
   qdrant:
     # Existing v1.17 storage must be upgraded one minor version at a time;
-    # see docs/runbooks/qdrant-staged-rebuild.md before starting this v1.19 image.
+    # see App/docs/runbooks/qdrant-staged-rebuild.md before starting this v1.19 image.
     image: qdrant/qdrant:v1.19.0
     container_name: ura-qdrant
     ports:
@@ -135,7 +135,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SLOWAPI_STORAGE_URI=${SLOWAPI_STORAGE_URI:-redis://redis:6379/1}
       - CACHE_BACKEND=${CACHE_BACKEND:-redis}
-      # Telemetry (docs/MONITORING.md): OTLP goes to the monitoring profile's
+      # Telemetry (App/docs/MONITORING.md): OTLP goes to the monitoring profile's
       # Collector when OTEL_ENABLED=true; METRICS_TOKEN comes from .env.
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
@@ -314,7 +314,7 @@ services:
       - ura-network
 
   # ===========================================================================
-  # Observability stack (profile: monitoring) — docs/MONITORING.md
+  # Observability stack (profile: monitoring) — App/docs/MONITORING.md
   #   docker compose --profile monitoring up -d
   # Required env: METRICS_TOKEN (>=32 chars; the API and Prometheus share it),
   # GRAFANA_PASSWORD, ALERTMANAGER_WEBHOOK_URL. UIs bind to 127.0.0.1 only;
@@ -331,9 +331,9 @@ services:
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
-      - ./monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
+      - ./App/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./App/monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
+      - ./App/monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
       - prometheus_data:/prometheus
     secrets:
       - ura_metrics_token
@@ -360,7 +360,7 @@ services:
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
     volumes:
-      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./App/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     secrets:
       - alertmanager_webhook_url
@@ -379,7 +379,7 @@ services:
     command:
       - "--config.file=/etc/blackbox/blackbox.yml"
     volumes:
-      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+      - ./App/monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
     read_only: true
     restart: unless-stopped
     security_opt:
@@ -449,7 +449,7 @@ services:
     profiles: [monitoring]
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./App/monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
     ports:
       - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
       - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
@@ -467,7 +467,7 @@ services:
     profiles: [monitoring]
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
-      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
+      - ./App/monitoring/loki.yaml:/etc/loki/config.yaml:ro
       - loki_data:/loki
     ports:
       - "127.0.0.1:${LOKI_PORT:-3100}:3100"
@@ -510,8 +510,8 @@ services:
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./App/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./App/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     depends_on:
       prometheus:

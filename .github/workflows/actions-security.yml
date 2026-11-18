@@ -13,7 +13,7 @@
 #                  error-level shellcheck findings in `run:` blocks.
 #
 # The weekly run catches actions that become known-vulnerable after they were
-# pinned. tests/test_ci_supply_chain_policy.py enforces the offline subset of the
+# pinned. App/tests/test_ci_supply_chain_policy.py enforces the offline subset of the
 # same policy in the root pytest suite.
 # =============================================================================
 name: "Security: GitHub Actions"

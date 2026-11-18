@@ -1,5 +1,5 @@
 # Keeps the crawled corpus current without letting anything older or unreviewed
-# replace it (ADR-0023, docs/runbooks/crawl-operations.md).
+# replace it (ADR-0023, App/docs/runbooks/crawl-operations.md).
 #
 #   Weekdays         `changes`: read the sitemaps and notice listings, then fetch
 #                    only what the publisher changed, added or stopped listing.
@@ -115,7 +115,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install locked crawl dependencies
-        run: python -m pip install --require-hashes -r ml/requirements-crawl.txt
+        run: python -m pip install --require-hashes -r App/ml/requirements-crawl.txt
 
       # The report compares with dev, because that is what a merge would change.
       # The crawl continues from any open proposal, so an unmerged monthly pass
@@ -136,6 +136,7 @@ jobs:
 
       - name: Crawl
         env:
+          PYTHONPATH: ${{ github.workspace }}/App
           TIER: ${{ needs.plan.outputs.tier }}
           MAX_FETCHES: ${{ inputs.max_fetches }}
         run: |
@@ -216,7 +217,7 @@ jobs:
       - name: Stop on hold
         if: steps.judge.outputs.verdict == 'hold'
         run: |
-          echo "::error::The crawl gate held this run. Read the job summary, then docs/runbooks/crawl-operations.md."
+          echo "::error::The crawl gate held this run. Read the job summary, then App/docs/runbooks/crawl-operations.md."
           exit 1
 
   publish:

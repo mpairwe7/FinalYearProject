@@ -2,7 +2,7 @@
 
 An escalated chat used to be a ticket with one ``officer_reply`` field, which
 each reply overwrote, read by the taxpayer in a separate Case Room every few
-seconds. This module makes it a conversation (docs/plans/
+seconds. This module makes it a conversation (App/docs/plans/
 admin-service-quality-audit-plan.md §C1):
 
 * **A thread.** ``ticket_messages`` keeps every message in order — taxpayer,

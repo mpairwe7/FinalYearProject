@@ -115,8 +115,8 @@ services:
       - ./Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
       - ../Model/adapters:/app/adapters:ro
-      - ../ml:/app/ml:ro
-      - ../plugins:/app/plugins:ro
+      - ./ml:/app/ml:ro
+      - ./plugins:/app/plugins:ro
       - ../data_store:/app/data_store
       - /mnt/nas1/caches/huggingface_cache:/app/hf_cache
     healthcheck:

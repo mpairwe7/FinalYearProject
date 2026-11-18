@@ -1,6 +1,6 @@
 """G39: a question must not be captured as a task, in any language.
 
-``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.10 measured it: 80 of 186 live probes
+``App/docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.10 measured it: 80 of 186 live probes
 were answered with a guided-flow slot prompt instead of an answer, and *all* of
 them were Luganda or Kiswahili. Coverage in both languages sat 27 points below
 English, and this was the largest single cause.

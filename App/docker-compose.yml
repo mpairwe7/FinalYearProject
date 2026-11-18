@@ -28,7 +28,7 @@ services:
   qdrant:
     # Keep the server on the actively maintained v1.19 release line. Upgrades
     # of an existing qdrant_data volume must follow Qdrant's documented
-    # one-minor-version-at-a-time path; see docs/runbooks/qdrant-staged-rebuild.md.
+    # one-minor-version-at-a-time path; see App/docs/runbooks/qdrant-staged-rebuild.md.
     image: qdrant/qdrant:v1.19.0
     container_name: ura-app-qdrant
     volumes:
@@ -133,8 +133,8 @@ services:
       - ../Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
       - ../Model/adapters:/app/adapters:ro
-      - ../ml:/app/ml:ro
-      - ../plugins:/app/plugins:ro
+      - ./ml:/app/ml:ro
+      - ./plugins:/app/plugins:ro
       - ./backend/app:/app/app
       - api_logs:/app/logs
       - ../data_store:/app/data_store

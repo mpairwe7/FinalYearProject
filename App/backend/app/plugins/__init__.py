@@ -5,11 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure repo root is in sys.path so plugins package is accessible
-from .._root import PROJECT_ROOT
+# Ensure the folder holding the plugins package is on sys.path
+from .._root import CODE_ROOT
 
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+if str(CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(CODE_ROOT))
 
 from plugins import (  # noqa: E402
     bwims,

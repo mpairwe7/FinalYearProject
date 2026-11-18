@@ -7,7 +7,7 @@ the agent makes, and returns the answer with its trace (every call, its
 arguments, the provision ids and the kernel version). A test passes only if
 both match.
 
-Variants exercised by ``tests/agents/test_kernel_core_2026_11.py``:
+Variants exercised by ``App/tests/agents/test_kernel_core_2026_11.py``:
 
 * the fiscal-year boundary (30 June and 1 July);
 * a contradicting passage, which must produce a recorded conflict and leave

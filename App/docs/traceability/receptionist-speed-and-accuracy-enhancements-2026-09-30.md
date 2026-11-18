@@ -52,7 +52,7 @@ Measured on the local GPU stack with the follow-up build (`fix/voice-reply-langu
 | Check | Result |
 |---|---|
 | Backend suite (in the `app-api:gpu` image) | 2480 passed. The failing set is identical to `dev` (50 failed, 7 errors, all fixtures the image lacks); nothing new. CI's blocking ruff set is clean. |
-| Call replay, 12 scenarios | 12/12 (`evals/reports/call_replay_2026-09-30_followup.json`). The English VAT answer is now spoken as "…is 18 percent, for the 2026 to 2027 financial year". |
+| Call replay, 12 scenarios | 12/12 (`App/evals/reports/call_replay_2026-09-30_followup.json`). The English VAT answer is now spoken as "…is 18 percent, for the 2026 to 2027 financial year". |
 | UX, control and accuracy suite | 7/7 (was 6/7). The voice-socket check now waits for the audio and received 4 chunks (`receptionist_ux_control_accuracy_report.json`). |
 | Stress: text accuracy | 8/9 under the stricter check (figure required as a standalone number). The one miss is pre-existing, not caused by this change: the Swahili penalty question is answered with criminal fines (faithfulness 0.00) instead of 2% a month. The old check passed it by finding "2" inside "2,000,000". Recorded under G81. |
 | Stress: concurrency | 24 requests at c=12: 100% success, 8.70 req/s, p95 1379 ms. |

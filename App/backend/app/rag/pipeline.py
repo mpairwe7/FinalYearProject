@@ -4732,7 +4732,7 @@ def _simple_search(
     # but never displace or reorder existing ones.
     #
     # A dense-embedding path was built and measured for this instead, and
-    # rejected — see ml/scripts/eval_retrieval.py. Fusing static embeddings cost
+    # rejected — see App/ml/scripts/eval_retrieval.py. Fusing static embeddings cost
     # 14-26 points of Hit@1 at every weight tried, and their cosines did not
     # separate real matches from off-domain noise ("buy cheap flight tickets to
     # Dubai" outscored every genuine Luganda rescue), so no threshold admitted
@@ -9234,7 +9234,7 @@ class ChatModel:
         ``journey_events_total{workflow, event, step}`` with ``event`` one of
         started, step_entered, step_invalid, completed, cancelled. Where the
         ``step_entered`` count drops between consecutive steps is the drop-off
-        the CX team fixes first (docs/runbooks/guided-journey-probes.md). Slot
+        the CX team fixes first (App/docs/runbooks/guided-journey-probes.md). Slot
         values are never labels: the counter carries no personal data, so it
         needs no analytics consent.
         """
@@ -11645,7 +11645,7 @@ class ChatModel:
             # narrowing ungated (turn 1 1.00 -> 0.25, turn 2 0.75 -> 0.00).
             # It only looked like a win against a stale 729-document snapshot.
             # The dilution is real; the fix for it belongs in the scorer, not
-            # here. See docs/GAPS_AND_AGENTIC_ROADMAP.md §2.9.
+            # here. See App/docs/GAPS_AND_AGENTIC_ROADMAP.md §2.9.
             retrieval_query = rewritten
             # _simple_search's binding_query keeps FAQ-match authorization
             # bound to the user's own (unexpanded) words rather than

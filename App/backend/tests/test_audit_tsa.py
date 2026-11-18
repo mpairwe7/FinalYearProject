@@ -4,7 +4,7 @@ The previous client POSTed JSON (no TSA speaks that), stored any 200 body as
 the "token", and verification only checked the token was 8+ characters. These
 tests build real CMS-signed tokens with a local test TSA and check every step
 the verifier now performs. A live check against public TSAs (DigiCert,
-Sectigo) is recorded in docs/runbooks/audit-trail.md.
+Sectigo) is recorded in App/docs/runbooks/audit-trail.md.
 """
 
 from __future__ import annotations

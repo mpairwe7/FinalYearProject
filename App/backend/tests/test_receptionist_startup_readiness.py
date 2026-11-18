@@ -1,7 +1,7 @@
 """Starts safely, fails visibly: the receptionist's startup, gates and readiness.
 
 Regressions from phase 3 of the November 2026 call-receptionist review
-(docs/plans/receptionist-assurance-2026-11-11.md, ADR-0041).
+(App/docs/plans/receptionist-assurance-2026-11-11.md, ADR-0041).
 """
 
 from __future__ import annotations
