@@ -10,7 +10,6 @@ from app.memory import (
     FactExtractor,
     SemanticMemory,
     UserFact,
-    WorkingMemory,
     compute_decayed_confidence,
     decay_factor,
 )
@@ -72,48 +71,6 @@ class TestDecay:
             now=now,
         )
         assert 0.0 <= d < 0.001
-
-
-# ---------------------------------------------------------------------------
-# Working memory
-# ---------------------------------------------------------------------------
-class TestWorkingMemory:
-    def test_set_and_get(self):
-        wm = WorkingMemory(ttl_seconds=60)
-        wm.set("alice", {"current_topic": "vat"})
-        assert wm.get("alice")["current_topic"] == "vat"
-
-    def test_update_merges(self):
-        wm = WorkingMemory(ttl_seconds=60)
-        wm.update("alice", current_topic="vat")
-        wm.update("alice", last_query="how to register")
-        v = wm.get("alice")
-        assert v["current_topic"] == "vat"
-        assert v["last_query"] == "how to register"
-
-    def test_missing_returns_none(self):
-        wm = WorkingMemory(ttl_seconds=60)
-        assert wm.get("nobody") is None
-
-    def test_clear_removes_key(self):
-        wm = WorkingMemory(ttl_seconds=60)
-        wm.set("alice", {"x": 1})
-        wm.clear("alice")
-        assert wm.get("alice") is None
-
-    def test_ttl_expiry(self):
-        wm = WorkingMemory(ttl_seconds=0)  # everything expires immediately
-        wm.set("alice", {"x": 1})
-        time.sleep(0.01)
-        assert wm.get("alice") is None
-
-    def test_size_lazy_eviction(self):
-        wm = WorkingMemory(ttl_seconds=0)
-        wm.set("alice", {"x": 1})
-        wm.set("bob", {"y": 2})
-        time.sleep(0.01)
-        # size() evicts expired keys as a side-effect
-        assert wm.size() == 0
 
 
 # ---------------------------------------------------------------------------

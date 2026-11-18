@@ -1,83 +1,8 @@
-"""Standalone process-local working-memory utility with a 30-minute TTL.
+"""How long a conversation's working memory lives.
 
-The production :class:`MemoryService` stores working state in the shared
-analytics backend so reads and erasure behave consistently across workers.
-This class remains available for isolated callers and unit tests.
+:class:`~app.memory.service.MemoryService` keeps working state in the shared
+analytics backend (``db.upsert_working_memory``), so reads and erasure behave
+the same in every worker.
 """
 
-from __future__ import annotations
-
-import threading
-import time
-from dataclasses import dataclass
-from typing import Any
-
 WORKING_TTL_SECONDS = 30 * 60
-
-
-@dataclass
-class _Entry:
-    payload: dict[str, Any]
-    expires_at: float
-
-
-class WorkingMemory:
-    """Thread-safe short-term memory with TTL expiry."""
-
-    def __init__(self, ttl_seconds: int = WORKING_TTL_SECONDS) -> None:
-        self._ttl = ttl_seconds
-        self._store: dict[str, _Entry] = {}
-        self._lock = threading.Lock()
-
-    def set(self, user_id: str, payload: dict[str, Any]) -> None:
-        with self._lock:
-            self._store[user_id] = _Entry(
-                payload=dict(payload),
-                expires_at=time.time() + self._ttl,
-            )
-
-    def get(self, user_id: str) -> dict[str, Any] | None:
-        now = time.time()
-        with self._lock:
-            entry = self._store.get(user_id)
-            if entry is None:
-                return None
-            if entry.expires_at < now:
-                self._store.pop(user_id, None)
-                return None
-            return dict(entry.payload)
-
-    def update(self, user_id: str, **fields: Any) -> None:
-        """Merge fields into the existing entry (or create)."""
-        with self._lock:
-            entry = self._store.get(user_id)
-            if entry is None:
-                self._store[user_id] = _Entry(
-                    payload=dict(fields),
-                    expires_at=time.time() + self._ttl,
-                )
-            else:
-                entry.payload.update(fields)
-                entry.expires_at = time.time() + self._ttl
-
-    def clear(self, user_id: str) -> None:
-        with self._lock:
-            self._store.pop(user_id, None)
-
-    def clear_all(self) -> None:
-        with self._lock:
-            self._store.clear()
-
-    def purge_expired(self) -> int:
-        """Delete expired entries and return the number removed."""
-        with self._lock:
-            now = time.time()
-            expired = [key for key, value in self._store.items() if value.expires_at < now]
-            for key in expired:
-                self._store.pop(key, None)
-            return len(expired)
-
-    def size(self) -> int:
-        self.purge_expired()
-        with self._lock:
-            return len(self._store)

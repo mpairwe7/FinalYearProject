@@ -11,7 +11,7 @@ it keeps it, and who can read it. The code is in
 | Conversation turns | Each turn and the language it was answered in | The application database | `CONVERSATION_TTL_DAYS`, 7 days | The conversation |
 | Case facts | Amounts, days in Uganda, residency, salary and benefits, entity type and turnover stated in this conversation (`case_facts.py`) | Redis, keyed by conversation, with an in-process fallback | 6 hours | The conversation |
 | Answer language | The language the conversation is answered in (`language_state.py`) | Read from the stored turns; no store of its own | As the turns | The conversation |
-| Working memory | The current conversation's working state (`working.py`) | The shared analytics backend | 30 minutes | The conversation |
+| Working memory | The current conversation's working state (`MemoryService` in `service.py`; TTL in `working.py`) | The shared analytics backend | 30 minutes | The conversation |
 | Episodic | A one to three sentence summary of each finished conversation (`episodic.py`) | `episodic_summaries` | `EPISODIC_TTL_DAYS`, 90 days | The taxpayer, with `personalization` consent |
 | Semantic | Facts about the taxpayer, each with provenance, confidence and decay (`semantic.py`) | The application database | `SEMANTIC_TTL_DAYS`, 365 days | The taxpayer, with `personalization` consent |
 | Resolution ledger | Multi-step goals carried across calls, chat and officers (`resolution_ledger.py`) | Shared working memory | `RESOLUTION_CASE_TTL_HOURS`, 168 hours | The taxpayer, with `personalization` consent and a confident transcript |

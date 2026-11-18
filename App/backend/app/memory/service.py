@@ -1,6 +1,7 @@
 """Top-level memory service — the single entry point for agents.
 
-Composes WorkingMemory + EpisodicMemory + SemanticMemory behind a
+Composes working memory (shared-backend rows with a 30-minute TTL) +
+EpisodicMemory + SemanticMemory behind a
 clean interface that the Phase 15 graph orchestrator and any
 future tool can call:
 

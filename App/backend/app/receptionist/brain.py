@@ -1729,9 +1729,9 @@ class UraReceptionistBrain(LLMService):
         if luganda_reply and not (
             mt.figures_survived(english_reply, luganda_reply, locale="lg")
             and mt.units_survived(english_reply, luganda_reply)
-            # And none of its own: the synthesis is a second model answer that
-            # no output guard reads, so a rate or amount it adds would be
-            # spoken unchecked (G588).
+            # And none of its own: the output guard below checks the wording,
+            # not the figures, so a rate or amount it adds would be spoken
+            # unchecked (G588).
             and mt.figures(luganda_reply, locale="lg") <= mt.figures(english_reply, locale="en") | {1.0}
         ):
             logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
