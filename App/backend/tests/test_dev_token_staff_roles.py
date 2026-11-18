@@ -89,6 +89,20 @@ def test_outside_development_a_staff_role_under_the_audience_is_refused(staging)
         jwt_auth._hs256_verify(hidden, jwt_auth.AUTH_DEV_SECRET)
 
 
+def test_outside_development_a_dev_token_carries_only_the_demo_identity(staging, client):
+    """Tenant, email and purposes come from a fixed template, not from the token."""
+    now = int(time.time())
+    forged = _signed({
+        "sub": DEMO["user_id"], "iat": now, "exp": now + 600, "role": "verified_taxpayer",
+        "tenant_id": "another-tenant", "email": "officer@ura.go.ug", "granted_purposes": ["ura_actions"],
+    })
+    claims = jwt_auth._hs256_verify(forged, jwt_auth.AUTH_DEV_SECRET)
+    assert (claims["tenant_id"], claims["email"], claims["granted_purposes"]) == (
+        "default", f"{DEMO['user_id']}@taxpayer.go.ug", []
+    )
+    assert client.post("/v1/auth/dev-token", json={**DEMO, "tenant_id": "another-tenant"}).status_code == 403
+
+
 def test_outside_development_an_expired_dev_token_is_refused(staging):
     now = int(time.time())
     expired = _signed({"sub": DEMO["user_id"], "iat": now - 7200, "exp": now - 3600, "role": "verified_taxpayer"})

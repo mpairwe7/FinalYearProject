@@ -119,6 +119,15 @@ def _hs256_verify(token: str, secret: str) -> dict[str, Any]:
         if resolve_role(payload, _get_verifier().audience).startswith("ura_"):
             raise JWTAuthError(f"a development token cannot grant a staff role under APP_ENV={APP_ENV}")
         _check_times(payload)  # the RS256 fallbacks call this without JWTVerifier.verify
+        # Identity comes from a fixed template; only the non-identity claims are kept.
+        return {
+            "sub": PORTAL_DEMO_TAXPAYER_ID,
+            "tenant_id": "default",
+            "email": f"{PORTAL_DEMO_TAXPAYER_ID}@taxpayer.go.ug",
+            "role": "verified_taxpayer",
+            "granted_purposes": [],
+            **{k: payload[k] for k in ("iss", "aud", "iat", "nbf", "exp") if k in payload},
+        }
     return payload
 
 

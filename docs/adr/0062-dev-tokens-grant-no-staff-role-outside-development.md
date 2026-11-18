@@ -39,7 +39,9 @@ Option 1. `jwt_auth.DEV_TOKEN_STAFF_ENVS` is `{"development", "test"}`.
 three RS256 fallbacks), applies three rules outside those environments. The token must
 name the portal demo taxpayer (`jwt_auth.PORTAL_DEMO_TAXPAYER_ID`). Its role, read with
 the verifier's audience exactly as `_claims_to_user` reads it, must not be `ura_*`. And
-its `exp` and `nbf` must hold, which the fallbacks did not check before. Outside them,
+its `exp` and `nbf` must hold, which the fallbacks did not check before. The claims it
+returns come from a fixed demo template (tenant `default`, the demo email, no granted
+purposes); only `iss`, `aud`, `iat`, `nbf` and `exp` are kept from the token. Outside them,
 `/v1/auth/dev-token` mints only that demo taxpayer as `verified_taxpayer`, and answers
 403 otherwise.
 

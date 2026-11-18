@@ -5013,7 +5013,8 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
     # Outside development this endpoint answers anyone, so it mints only the
     # portal's demo taxpayer (the quick sign-in in portal/[portalKey]/page.tsx).
     if os.getenv("APP_ENV", "development").lower() not in DEV_TOKEN_STAFF_ENVS:
-        if user_id != PORTAL_DEMO_TAXPAYER_ID or requested_role != "verified_taxpayer" or email:
+        demo = user_id == PORTAL_DEMO_TAXPAYER_ID and requested_role == "verified_taxpayer"
+        if not demo or email or (req.tenant_id or "default") != "default":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Outside development only the portal demo taxpayer gets a dev token. Use the OIDC provider.",
