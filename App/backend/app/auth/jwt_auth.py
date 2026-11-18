@@ -38,6 +38,9 @@ OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "https://dev-s16d7m00eyrksjy2.us.auth
 OIDC_JWKS_CACHE_TTL_S = int(os.getenv("OIDC_JWKS_CACHE_TTL_S", "3600"))
 OIDC_JWKS_TIMEOUT_S = float(os.getenv("OIDC_JWKS_TIMEOUT_S", "5"))
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+#: Where a development token may carry a staff role. Anywhere else anyone can
+#: mint or forge one, so it grants a taxpayer role at most.
+DEV_TOKEN_STAFF_ENVS = frozenset({"development", "test"})
 
 
 class JWTAuthError(Exception):
@@ -103,6 +106,11 @@ def _hs256_verify(token: str, secret: str) -> dict[str, Any]:
     # Here as well as in JWTVerifier.verify: the development fallback (an
     # HS256 token under an RS256 verifier) calls this directly.
     _require_issued_at(payload)
+    if APP_ENV not in DEV_TOKEN_STAFF_ENVS:
+        from .dependencies import resolve_role  # dependencies imports this module
+
+        if resolve_role(payload).startswith("ura_"):
+            raise JWTAuthError(f"a development token cannot grant a staff role under APP_ENV={APP_ENV}")
     return payload
 
 
