@@ -31,7 +31,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 AUTH_ALG = os.getenv("AUTH_ALG", "HS256").upper()  # HS256 | RS256
-AUTH_DEV_SECRET = os.getenv("AUTH_DEV_SECRET", "dev-insecure-change-me")
+#: The documented default secret. Anyone can sign a token with it.
+PUBLIC_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105  # pragma: allowlist secret
+AUTH_DEV_SECRET = os.getenv("AUTH_DEV_SECRET", PUBLIC_DEV_SECRET)
 OIDC_ISSUER = os.getenv("OIDC_ISSUER", "https://dev-s16d7m00eyrksjy2.us.auth0.com/")
 OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "https://ura-chatbot/api")
 OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json")
@@ -44,6 +46,16 @@ DEV_TOKEN_STAFF_ENVS = frozenset({"development", "test"})
 #: The one identity a development token may name elsewhere: the demo taxpayer the
 #: portal's quick sign-in uses (portal/[portalKey]/page.tsx), built in two parts as there.
 PORTAL_DEMO_TAXPAYER_ID = "10000" + "23456"
+
+
+def dev_token_is_trusted(secret: str) -> bool:
+    """Whether a development token signed with *secret* may name anyone (ADR-0062).
+
+    Only in development or test, and only on a secret nobody else knows: the
+    documented default, or an empty one, could have signed it for anyone, so
+    there it names the portal demo taxpayer at most.
+    """
+    return APP_ENV in DEV_TOKEN_STAFF_ENVS and secret not in ("", PUBLIC_DEV_SECRET)
 
 
 class JWTAuthError(Exception):
@@ -109,15 +121,15 @@ def _hs256_verify(token: str, secret: str) -> dict[str, Any]:
     # Here as well as in JWTVerifier.verify: the development fallback (an
     # HS256 token under an RS256 verifier) calls this directly.
     _require_issued_at(payload)
-    if APP_ENV not in DEV_TOKEN_STAFF_ENVS:
+    if not dev_token_is_trusted(secret):
         # Anyone can mint or forge one here: it names the demo taxpayer, never staff,
         # and the role is read exactly as the request's user is built (_claims_to_user).
         from .dependencies import _get_verifier, resolve_role  # dependencies imports this module
 
         if str(payload.get("sub") or "") != PORTAL_DEMO_TAXPAYER_ID:
-            raise JWTAuthError(f"a development token names only the portal demo taxpayer under APP_ENV={APP_ENV}")
+            raise JWTAuthError(f"a development token names only the portal demo taxpayer here (APP_ENV={APP_ENV})")
         if resolve_role(payload, _get_verifier().audience).startswith("ura_"):
-            raise JWTAuthError(f"a development token cannot grant a staff role under APP_ENV={APP_ENV}")
+            raise JWTAuthError(f"a development token cannot grant a staff role here (APP_ENV={APP_ENV})")
         _check_times(payload)  # the RS256 fallbacks call this without JWTVerifier.verify
         # Identity comes from a fixed template; only the non-identity claims are kept.
         return {
