@@ -52,7 +52,11 @@ GUARDRAILS = split_module.Plan(
     overrides={"STORE_RAW_PROMPTS": "pii", "ABSTENTION_THRESHOLD": "output_checks"},
     shared="normalize",
     # The logger keeps its name, so log queries on "app.guardrails" still match.
-    text_edits={"normalize": [("logging.getLogger(__name__)", 'logging.getLogger("app.guardrails")')]},
+    text_edits={
+        "normalize": [("logging.getLogger(__name__)", 'logging.getLogger("app.guardrails")')],
+        # A ten-digit literal starting with 1 reads as a TIN to the ura-pii-ug-tin-hardcoded Semgrep rule.
+        "pii": [("(e.g. 1000000000 UGX)", "(for example 1,000,000,000 UGX)")],
+    },
 )
 
 PHASES: dict[int, dict[str, str]] = {

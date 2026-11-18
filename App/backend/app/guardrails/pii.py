@@ -60,7 +60,7 @@ _CURRENCY_INDICATORS_AFTER = re.compile(r"(?i)^\s*(?:ugx|ush|shs|usd|shillings?|
 
 
 def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
-    """Return True if 10-digit number is surrounded by currency markers (e.g. 1000000000 UGX)."""
+    """Return True if 10-digit number is surrounded by currency markers (for example 1,000,000,000 UGX)."""
     matched = match.group(0)
     if re.search(r"(?i)\btin\b", matched) or "-" in matched or " " in matched:
         return False
