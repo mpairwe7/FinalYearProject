@@ -152,7 +152,7 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         env:
-          PYTHONPATH: App/backend:.
+          PYTHONPATH: App/backend:App
           TIER: ${{ needs.plan.outputs.tier }}
           MAX_FETCHES: ${{ inputs.max_fetches }}
         run: |
@@ -182,7 +182,7 @@ jobs:
         # Also after a failed crawl: a run that stopped short still needs a verdict.
         if: ${{ !cancelled() }}
         env:
-          PYTHONPATH: App/backend:.
+          PYTHONPATH: App/backend:App
           BASELINE: ${{ inputs.baseline }}
           TIER: ${{ needs.plan.outputs.tier }}
           PUBLISH_INPUT: ${{ inputs.publish }}

@@ -104,7 +104,7 @@ jobs:
         # corpus-validation and retrieval-ranking contracts — was ungated.
         working-directory: App/backend
         env:
-          PYTHONPATH: .
+          PYTHONPATH: .:${{ github.workspace }}/App
         run: pytest tests/ -q
 
       - name: Corpus contract round-trip
@@ -380,7 +380,7 @@ jobs:
       - name: The stack is installed
         working-directory: App/backend
         env:
-          PYTHONPATH: .
+          PYTHONPATH: .:${{ github.workspace }}/App
         run: |
           python - <<'PY'
           import livekit  # noqa: F401
@@ -395,7 +395,7 @@ jobs:
       - name: Run the receptionist tests
         working-directory: App/backend
         env:
-          PYTHONPATH: .
+          PYTHONPATH: .:${{ github.workspace }}/App
         run: pytest tests/ -q -rs -k "receptionist or orpheus or tts_backend or spark_tts"
 
   # ============================================

@@ -63,5 +63,5 @@ jobs:
         working-directory: App/backend
         env:
           LOCAL_DENSE_TEST_DSN: postgresql://postgres@localhost:5432/ura_dense
-          PYTHONPATH: .
+          PYTHONPATH: .:${{ github.workspace }}/App
         run: python -m pytest -q -p no:cacheprovider -rs tests/test_local_dense_pgvector_live.py
