@@ -3335,6 +3335,8 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `FLAG_VOICE_CONSENT` | Enforce voice-specific consent checks before audio processing | `false` |
 | **Analytics DB** | | |
 | `ANALYTICS_BACKEND` | Analytics storage backend (`sqlite` or `postgres`) | `sqlite` |
+| `DB_SNAPSHOT_TARGET` | Where `analytics.db` is kept across restarts: `hf://buckets/<owner>/<bucket>[/<prefix>]` (private; `HF_TOKEN` needs write access) or `file:///<dir>` (ADR-0063) | unset (off) |
+| `DB_SNAPSHOT_INTERVAL_SECONDS` | Seconds between snapshot exports; one more runs on shutdown (minimum 60) | `300` |
 | `POSTGRES_DSN` | PostgreSQL connection string for analytics | |
 | **vLLM** | | |
 | `LLM_BACKEND` | LLM dispatch backend (`local` or `vllm`) | `local` |

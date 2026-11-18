@@ -243,7 +243,9 @@ On the Hugging Face Space that database is `/app/data_store/analytics.db`, on
 the container's own disk. The Space has no persistent storage, so every restart
 and every roll starts a new, empty ledger, with no seals. The chain and its
 verification cover only the time since the last start (G616). Do not treat the
-Space's trail as the record of anything before its last restart.
+Space's trail as the record of anything before its last restart. With database
+snapshots on ([runbook](database-snapshots.md), ADR-0063), the ledger is restored
+with its hashes and seals, and only the writes since the last export are lost.
 
 If that
 directory or its files are world-writable, any local user can rewrite rows
