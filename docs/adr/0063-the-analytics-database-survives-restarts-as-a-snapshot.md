@@ -35,14 +35,18 @@ Option 1, in `app/db/snapshot.py`.
   read while both API roles keep writing. The copy is dumped with `iterdump`,
   gzipped and stored as `snapshots/<sha256>.sql.gz`. `latest.json` then names it,
   and every other dump is deleted, including one a failed upload or delete left
-  behind. A reader never sees half an upload. An export holds the snapshot lock
+  behind, except the one `latest.json` names when it is re-read just before the
+  prune. A reader never sees half an upload. An export holds the snapshot lock
   throughout, so the loop and a manual export cannot interleave.
 - **Restore.** `uvicorn-role.sh` runs `restore` before each role's server starts.
   Under a file lock, the first role decides for the container. It writes `restored`,
   `empty` (no snapshot yet), `kept` (a database was already there) or `failed` to a
   status file next to the database. A damaged `latest.json` (empty, `null` or not
   JSON) is `failed`, not `empty`. `uvicorn-role.sh` stops a restore after 120
-  seconds, so a slow bucket cannot hold both roles.
+  seconds, so a slow bucket cannot hold both roles. The status reads `failed` from
+  the moment a download starts until the outcome replaces it, so a killed restore
+  stays `failed`. Otherwise the server would create an empty database, and the
+  other role would read that as `kept`.
 - **Exports stop after a failed restore.** A failed restore starts the API on an
   empty database. An export then would replace the last good snapshot, so exports
   run only after `restored`, `empty` or `kept`, and a program restart cannot change
@@ -61,7 +65,9 @@ Option 1, in `app/db/snapshot.py`.
   new container before the old one's final export loses the same window: the new
   container's next export replaces the old one's final dump. Two databases cannot
   be merged, and refusing to export after such a race would stop backups after
-  every roll.
+  every roll. Two containers exporting within the same few seconds could still
+  delete each other's dump between the re-read and the delete. Their exports are
+  normally an interval apart.
 - The snapshot holds the same personal data as the database, in HF storage, under
   the account that already hosts the Space. Retention runs on the restored rows at
   startup, and an erasure leaves the target with the next successful export.

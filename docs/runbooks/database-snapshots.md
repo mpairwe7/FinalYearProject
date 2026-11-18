@@ -50,8 +50,9 @@ The API starts on an empty database. Exports stay off for that container, so the
 last good snapshot is not overwritten. The log line names the cause: a missing dump,
 a SHA-256 mismatch or a failed `integrity_check`.
 
-A restore that runs longer than 120 seconds is stopped and leaves no status. Exports
-stay off then too, and the log shows `the database snapshot restore did not run`.
+A restore that runs longer than 120 seconds is stopped. Its status stays `failed`
+(`the restore did not finish`), exports stay off, and the log shows `the database
+snapshot restore did not run`.
 
 1. Download the dump and check it.
 

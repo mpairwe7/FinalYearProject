@@ -235,3 +235,46 @@ def test_a_local_dump_is_readable_by_its_owner_only(container):
     latest = snapshot.export()
     for path in (bucket / latest["file"], bucket / snapshot.MANIFEST):
         assert path.stat().st_mode & 0o077 == 0, path
+
+
+def test_a_restore_killed_part_way_keeps_exports_off(container, monkeypatch):
+    """A killed restore lets the server create an empty database; that must not read as "kept"."""
+    _, bucket, restart = container
+    snapshot.restore()
+    _ticket("keep me")
+    good = snapshot.export()
+    restart()
+
+    def killed(*_args):
+        raise SystemExit("killed by timeout")
+
+    monkeypatch.setattr(snapshot, "_get", killed)
+    with pytest.raises(SystemExit):
+        snapshot.restore()
+    monkeypatch.undo()
+    monkeypatch.setattr(db, "_DB_PATH", container[0])
+    monkeypatch.setenv("DB_SNAPSHOT_TARGET", f"file://{bucket}")
+    db.init_db()  # the first role's server starts on an empty database
+    assert snapshot.restore() == "failed", "the second role must not decide kept"
+    with pytest.raises(snapshot.SnapshotError):
+        snapshot.export()
+    assert json.loads((bucket / snapshot.MANIFEST).read_text())["sha256"] == good["sha256"]
+
+
+def test_an_export_never_deletes_the_dump_the_published_manifest_names(container, monkeypatch):
+    """Another container may publish its manifest between this export's upload and its prune."""
+    _, bucket, _ = container
+    snapshot.restore()
+    _ticket("one")
+    theirs = snapshot.export()
+    _ticket("two")
+    real_list = snapshot._list
+
+    def list_after_their_publish(target, folder):
+        names = real_list(target, folder)
+        (bucket / snapshot.MANIFEST).write_text(json.dumps(theirs))  # they publish again
+        return names
+
+    monkeypatch.setattr(snapshot, "_list", list_after_their_publish)
+    snapshot.export()
+    assert (bucket / theirs["file"]).exists()

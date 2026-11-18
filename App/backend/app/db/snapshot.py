@@ -223,6 +223,9 @@ def restore() -> str:
             return restore_status()
         if db_path.exists() and db_path.stat().st_size > 0:
             return _decide("kept")
+        # Until the outcome replaces it: a restore killed part-way (uvicorn-role.sh's
+        # timeout) lets a server create an empty database, which must not read as "kept".
+        _decide("failed", "the restore did not finish")
         try:
             manifest = _manifest(target)
             if manifest is None:
@@ -300,10 +303,14 @@ def export() -> dict[str, Any] | None:
         }
         _put(target, manifest["file"], data)
         _put(target, MANIFEST, json.dumps(manifest, indent=1).encode())
-        # Every other dump goes, including one a failed delete or upload left behind.
-        for stale in _list(target, DUMPS):
-            if stale != manifest["file"]:
-                _delete(target, stale)
+        # Every other dump goes, including one a failed delete or upload left behind, but
+        # never the one the manifest names now: another container may have just published.
+        stale = _list(target, DUMPS)
+        published = _manifest(target)
+        keep = {manifest["file"], published["file"] if published else manifest["file"]}
+        for name in stale:
+            if name not in keep:
+                _delete(target, name)
         return manifest
 
 
