@@ -40,7 +40,7 @@ App/
 │   │   │   └── flags.py         # Feature flag registry (91 flags, cohort rollout)
 │   │   ├── ingestion/
 │   │   │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-│   │   │   └── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │   │   └── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (177 PDFs → 5,639 chunks, ADR-0009)
 │   │   ├── vectorstore/
 │   │   │   └── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)

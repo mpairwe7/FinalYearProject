@@ -10,7 +10,7 @@ changes arrive as a reviewed pull request (ADR-0023, `docs/runbooks/crawl-operat
 
 ## Statutory & 11-MDA PDF Corpus Traceability (`Data/pdfs/` → `App/Data/pdf_jsonl/`)
 
-`Data/pdfs/` tracks **186 official PDFs** (`175` unique after SHA-256 deduplication, exported into `5,639` hierarchical chunks in `App/Data/pdf_jsonl/pdf_corpus_manifest.json` and indexed into Qdrant `ura_knowledge_base_jsonl_active`):
+`Data/pdfs/` tracks **177 official PDFs**, each unique by SHA-256 (11 byte-identical copies stored under a second name were removed on 2026-11-18, ADR-0064; the export had already skipped them), exported into `5,639` hierarchical chunks in `App/Data/pdf_jsonl/pdf_corpus_manifest.json` and indexed into Qdrant `ura_knowledge_base_jsonl_active`):
 - **Parliament of Uganda (`https://www.parliament.go.ug/page/tax-bills-2026`)**: All 8 FY2026-27 Tax Amendment Bills (`Income Tax`, `Value Added Tax`, `Excise Duty`, `Tax Procedures Code`, `Stamp Duty`, `Lotteries and Gaming`, `External Trade`, and `Traffic and Road Safety`).
 - **URA Laws, Acts & Regulations (`https://ura.go.ug/download-category/laws-and-acts/` + `?cp=2`)**: All 19 consolidated Domestic Tax & Customs Acts, Regulations, EAC CET, and COMESA Rules of Origin compendiums.
 - **11 High-Dependency Ugandan MDAs (`MDA_STATUTORY_PDF_REGISTRY` in `App/backend/app/ingestion/pdf_corpus.py`; see `docs/adr/0009-statutory-and-10-mda-pdf-harvester-and-qdrant-indexing.md`)**:
