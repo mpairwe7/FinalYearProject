@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
 import signal
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -185,14 +187,51 @@ def test_the_loop_exports_once_more_when_stopped(tmp_path):
         ).stdout
         == "kept\n"
     )
-    loop = subprocess.Popen([*run, "loop"], env=env, stderr=subprocess.PIPE, text=True)
+    loop = subprocess.Popen([*run, "loop"], env=env, stderr=subprocess.PIPE)
     try:
-        for line in loop.stderr:
-            if "snapshot loop running" in line:
-                break
+        ready = selectors.DefaultSelector()
+        ready.register(loop.stderr, selectors.EVENT_READ)
+        seen, deadline = b"", time.monotonic() + 60
+        while b"snapshot loop running" not in seen:
+            assert time.monotonic() < deadline, f"the loop never started: {seen!r}"
+            if ready.select(timeout=1):
+                chunk = os.read(loop.stderr.fileno(), 4096)
+                assert chunk, f"the loop exited early: {seen!r}"
+                seen += chunk
         loop.send_signal(signal.SIGTERM)
         loop.wait(timeout=60)
     finally:
         loop.kill()
     manifest = json.loads((tmp_path / "bucket" / snapshot.MANIFEST).read_text())
     assert manifest["tables"] == {"tickets": 1}
+
+
+@pytest.mark.parametrize("damage", [b"", b"null", b"{not json"])
+def test_a_damaged_manifest_is_a_failed_restore_not_an_empty_one(container, damage):
+    """Read as "no snapshot", the next export would replace the pointer to the real dump."""
+    _, bucket, restart = container
+    snapshot.restore()
+    _ticket("keep me")
+    snapshot.export()
+    (bucket / snapshot.MANIFEST).write_bytes(damage)
+    restart()
+    assert snapshot.restore() == "failed"
+
+
+def test_an_export_removes_dumps_a_failed_upload_or_delete_left_behind(container):
+    _, bucket, _ = container
+    snapshot.restore()
+    _ticket("one")
+    snapshot.export()
+    stray = bucket / "snapshots" / f"{'0' * 64}.sql.gz"
+    stray.write_bytes(b"left behind")
+    latest = snapshot.export()
+    assert sorted(p.name for p in (bucket / "snapshots").iterdir()) == [Path(latest["file"]).name]
+
+
+def test_a_local_dump_is_readable_by_its_owner_only(container):
+    _, bucket, _ = container
+    snapshot.restore()
+    latest = snapshot.export()
+    for path in (bucket / latest["file"], bucket / snapshot.MANIFEST):
+        assert path.stat().st_mode & 0o077 == 0, path

@@ -34,29 +34,37 @@ Option 1, in `app/db/snapshot.py`.
 - **Export.** SQLite's online backup API copies the live database in one consistent
   read while both API roles keep writing. The copy is dumped with `iterdump`,
   gzipped and stored as `snapshots/<sha256>.sql.gz`. `latest.json` then names it,
-  and the previous dump is deleted. A reader never sees half an upload, and only
-  the latest dump exists.
+  and every other dump is deleted, including one a failed upload or delete left
+  behind. A reader never sees half an upload. An export holds the snapshot lock
+  throughout, so the loop and a manual export cannot interleave.
 - **Restore.** `uvicorn-role.sh` runs `restore` before each role's server starts.
   Under a file lock, the first role decides for the container. It writes `restored`,
   `empty` (no snapshot yet), `kept` (a database was already there) or `failed` to a
-  status file next to the database.
+  status file next to the database. A damaged `latest.json` (empty, `null` or not
+  JSON) is `failed`, not `empty`. `uvicorn-role.sh` stops a restore after 120
+  seconds, so a slow bucket cannot hold both roles.
 - **Exports stop after a failed restore.** A failed restore starts the API on an
   empty database. An export then would replace the last good snapshot, so exports
   run only after `restored`, `empty` or `kept`, and a program restart cannot change
   that decision.
 - **Schedule.** The supervisord program `db-snapshot` exports every
   `DB_SNAPSHOT_INTERVAL_SECONDS` (default 300, minimum 60) and once more on SIGTERM.
-  Its priority stops it after both API roles, so the last export sees their last
-  writes.
+  It waits with `sigtimedwait` rather than a signal handler. Its priority stops it
+  after both API roles, so the last export sees their last writes, and it logs
+  `final export starting` so an export cut short by the platform's stop timeout
+  shows in the logs.
 - **Privacy.** The HF transport refuses a bucket that is not private.
 
 ## Consequences
 
 - A restart loses at most the writes since the last export. A roll that starts the
-  new container before the old one's final export loses the same window.
+  new container before the old one's final export loses the same window: the new
+  container's next export replaces the old one's final dump. Two databases cannot
+  be merged, and refusing to export after such a race would stop backups after
+  every roll.
 - The snapshot holds the same personal data as the database, in HF storage, under
   the account that already hosts the Space. Retention runs on the restored rows at
-  startup, and an erasure leaves the target with the next export.
+  startup, and an erasure leaves the target with the next successful export.
 - Restored rows keep their hashes, so the audit chain verifies across restarts.
 - Enabling it needs a private bucket and an `HF_TOKEN` with write access to it
   ([runbook](../runbooks/database-snapshots.md)).
@@ -65,12 +73,13 @@ Option 1, in `app/db/snapshot.py`.
 
 ## Confirmation
 
-- `App/backend/tests/test_db_snapshot.py` covers four things:
+- `App/backend/tests/test_db_snapshot.py` covers these cases:
   - A container restarted onto a wiped disk gets back an identical dump.
-  - A damaged snapshot is never overwritten, even after a program restart.
-  - Only the latest dump is kept, and a public bucket is refused.
+  - A damaged dump or manifest is never overwritten, even after a program restart.
+  - Only the latest dump is kept, stray dumps included, and a public bucket is refused.
+  - A local dump is readable by its owner only.
   - The loop exports once more on SIGTERM.
 
-  Removing any of the four guards fails its test.
+  Removing any of these guards fails its test.
 - `App/backend/tests/test_call_process_container.py` checks two things. Each role
   restores before its server starts. The snapshot loop stops after both roles.

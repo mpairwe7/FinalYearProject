@@ -12,8 +12,8 @@ dump at that target and restored from it before the API starts::
 ``DB_SNAPSHOT_TARGET`` is ``hf://buckets/<owner>/<bucket>[/<prefix>]`` (a private
 bucket; ``HF_TOKEN`` needs write access to it) or ``file:///<absolute dir>``.
 The dump is stored under its SHA-256 and ``latest.json`` names it, so a reader
-never sees half an upload, and only the latest dump is kept: an erased taxpayer
-leaves the target with the next export.
+never sees half an upload. Each export then deletes every other dump, so an
+erased taxpayer leaves the target with the next successful export.
 """
 
 from __future__ import annotations
@@ -30,17 +30,20 @@ import signal
 import sqlite3
 import sys
 import tempfile
-import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import database
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
 MANIFEST = "latest.json"
+DUMPS = "snapshots"
 #: A restore outcome after which exporting cannot replace data this database lacks.
 EXPORTABLE = frozenset({"restored", "empty", "kept"})
 
@@ -78,8 +81,10 @@ def configured_target(raw: str | None = None) -> Target | None:
 def _file_put(target: Target, name: str, data: bytes) -> None:
     path = Path(target.root) / target.path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".part")
-    tmp.write_bytes(data)
+    # Owner-only from the first byte: the dump holds taxpayers' records.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with os.fdopen(fd, "wb") as out:
+        out.write(data)
     os.replace(tmp, path)
 
 
@@ -90,6 +95,15 @@ def _file_get(target: Target, name: str) -> bytes | None:
 
 def _file_delete(target: Target, name: str) -> None:
     (Path(target.root) / target.path(name)).unlink(missing_ok=True)
+
+
+def _file_list(target: Target, folder: str) -> list[str]:
+    directory = Path(target.root) / target.path(folder)
+    return (
+        sorted(f"{folder}/{p.name}" for p in directory.glob("*.sql.gz"))
+        if directory.is_dir()
+        else []
+    )
 
 
 def _hf_api() -> Any:
@@ -119,9 +133,17 @@ def _hf_delete(target: Target, name: str) -> None:
     _hf_api().batch_bucket_files(target.root, delete=[target.path(name)])
 
 
+def _hf_list(target: Target, folder: str) -> list[str]:
+    full = target.path(folder) + "/"
+    paths = (
+        item.path for item in _hf_api().list_bucket_tree(target.root, prefix=full, recursive=True)
+    )
+    return sorted(f"{folder}/{p[len(full) :]}" for p in paths if p.endswith(".sql.gz"))
+
+
 TRANSPORTS = {
-    "file": (_file_put, _file_get, _file_delete),
-    "hf": (_hf_put, _hf_get, _hf_delete),
+    "file": (_file_put, _file_get, _file_delete, _file_list),
+    "hf": (_hf_put, _hf_get, _hf_delete, _hf_list),
 }
 
 
@@ -137,6 +159,10 @@ def _delete(target: Target, name: str) -> None:
     TRANSPORTS[target.scheme][2](target, name)
 
 
+def _list(target: Target, folder: str) -> list[str]:
+    return TRANSPORTS[target.scheme][3](target, folder)
+
+
 def _db_path() -> Path:
     return Path(database._DB_PATH)
 
@@ -144,6 +170,16 @@ def _db_path() -> Path:
 def _status_path() -> Path:
     # On the container's own disk, like the database: one restore decision per container start.
     return _db_path().with_name(_db_path().name + ".snapshot-status")
+
+
+@contextlib.contextmanager
+def _locked() -> Iterator[None]:
+    """One restore or export at a time, across the roles, the loop and a manual run."""
+    db_path = _db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(db_path.with_name(db_path.name + ".snapshot-lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def restore_status() -> str:
@@ -158,8 +194,17 @@ def _decide(status: str, detail: str = "") -> str:
 
 
 def _manifest(target: Target) -> dict[str, Any] | None:
+    """The published manifest; None only when there is none. A damaged one raises."""
     raw = _get(target, MANIFEST)
-    return json.loads(raw) if raw else None
+    if raw is None:
+        return None
+    try:
+        manifest = json.loads(raw)
+    except ValueError:
+        manifest = None
+    if not isinstance(manifest, dict) or not {"file", "sha256"} <= manifest.keys():
+        raise SnapshotError(f"{MANIFEST} is damaged")
+    return manifest
 
 
 def restore() -> str:
@@ -173,9 +218,7 @@ def restore() -> str:
     if target is None:
         return "off"
     db_path = _db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(db_path.with_name(db_path.name + ".snapshot-lock"), "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _locked():
         if restore_status():
             return restore_status()
         if db_path.exists() and db_path.stat().st_size > 0:
@@ -207,51 +250,66 @@ def restore() -> str:
             return _decide("failed", str(exc)[:300])
 
 
-def export() -> dict[str, Any] | None:
-    """Write a consistent dump of the live database to the target."""
-    target = configured_target()
-    if target is None:
-        return None
-    if restore_status() not in EXPORTABLE:
-        raise SnapshotError(
-            f"not exporting: this container's restore status is {restore_status() or 'missing'}, "
-            "so the snapshot it would replace may hold data this database lacks"
-        )
-    db_path = _db_path()
-    if not db_path.exists():
-        return None
+def _dump(db_path: Path) -> tuple[str, dict[str, int]]:
+    """A consistent SQL dump of the live database and the rows it holds per table."""
     # shortcut: the dump is built in memory; stream it through a temp file once the database outgrows a few hundred MB.
     with (
         contextlib.closing(sqlite3.connect(db_path, timeout=10)) as live,
         contextlib.closing(sqlite3.connect(":memory:")) as copy,
     ):
         live.backup(copy)  # one consistent read while the API keeps writing
-        sql = "\n".join(copy.iterdump())
+        statements = list(copy.iterdump())
         tables = {
-            name: copy.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]  # noqa: S608 - names from sqlite_master
+            name: 0
             for (name,) in copy.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             )
         }
-    data = gzip.compress(sql.encode(), mtime=0)
-    digest = hashlib.sha256(data).hexdigest()
-    previous = _manifest(target)
-    manifest = {
-        "format": 1,
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "file": f"snapshots/{digest}.sql.gz",
-        "sha256": digest,
-        "bytes": len(data),
-        "tables": tables,
-    }
-    _put(target, manifest["file"], data)
-    _put(target, MANIFEST, json.dumps(manifest, indent=1).encode())
-    if previous and previous.get("file") != manifest["file"]:
-        _delete(target, previous["file"])
-    return manifest
+    for statement in statements:  # iterdump writes one INSERT INTO "<table>" per row
+        if statement.startswith('INSERT INTO "'):
+            name = statement[len('INSERT INTO "') :].split('"', 1)[0]
+            if name in tables:
+                tables[name] += 1
+    return "\n".join(statements), tables
 
 
-def _export_logged() -> None:
+def export() -> dict[str, Any] | None:
+    """Write a consistent dump of the live database to the target."""
+    target = configured_target()
+    if target is None:
+        return None
+    with _locked():
+        if restore_status() not in EXPORTABLE:
+            raise SnapshotError(
+                f"not exporting: this container's restore status is {restore_status() or 'missing'}, "
+                "so the snapshot it would replace may hold data this database lacks"
+            )
+        db_path = _db_path()
+        if not db_path.exists():
+            return None
+        sql, tables = _dump(db_path)
+        data = gzip.compress(sql.encode(), mtime=0)
+        digest = hashlib.sha256(data).hexdigest()
+        manifest = {
+            "format": 1,
+            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "file": f"{DUMPS}/{digest}.sql.gz",
+            "sha256": digest,
+            "bytes": len(data),
+            "tables": tables,
+        }
+        _put(target, manifest["file"], data)
+        _put(target, MANIFEST, json.dumps(manifest, indent=1).encode())
+        # Every other dump goes, including one a failed delete or upload left behind.
+        for stale in _list(target, DUMPS):
+            if stale != manifest["file"]:
+                _delete(target, stale)
+        return manifest
+
+
+def _export_logged(final: bool = False) -> None:
+    if final:
+        logger.info("final export starting")
     try:
         manifest = export()
     except Exception as exc:
@@ -269,16 +327,17 @@ def loop(interval_s: float | None = None) -> None:
     """Export every interval and once more on SIGTERM (supervisord stops the API first)."""
     if interval_s is None:
         interval_s = max(60.0, float(os.getenv("DB_SNAPSHOT_INTERVAL_SECONDS", "300")))
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
+    stops = {signal.SIGTERM, signal.SIGINT}
+    signal.pthread_sigmask(
+        signal.SIG_BLOCK, stops
+    )  # taken by sigtimedwait below, never by a handler
     enabled = configured_target() is not None
     logger.info("snapshot loop running every %ss (%s)", int(interval_s), "on" if enabled else "off")
-    while not stop.wait(interval_s):
+    while signal.sigtimedwait(stops, interval_s) is None:
         if enabled:
             _export_logged()
     if enabled:
-        _export_logged()
+        _export_logged(final=True)
 
 
 def main(argv: list[str] | None = None) -> int:

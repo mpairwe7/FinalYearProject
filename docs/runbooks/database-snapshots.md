@@ -7,6 +7,10 @@ private HF bucket and restored before the API starts (ADR-0063,
 
 ## Turn it on
 
+Check first that the Space runs a build with this feature. Its logs must show
+`snapshot loop running every 300s (off)`. Before that build is live, the setting
+below does nothing.
+
 1. Create a private bucket. It must be private: the export refuses a public one.
 
    ```bash
@@ -46,20 +50,26 @@ The API starts on an empty database. Exports stay off for that container, so the
 last good snapshot is not overwritten. The log line names the cause: a missing dump,
 a SHA-256 mismatch or a failed `integrity_check`.
 
+A restore that runs longer than 120 seconds is stopped and leaves no status. Exports
+stay off then too, and the log shows `the database snapshot restore did not run`.
+
 1. Download the dump and check it.
 
    ```bash
-   hf buckets cp hf://buckets/landwind22/ura-chatbot-db/latest.json .
-   hf buckets cp hf://buckets/landwind22/ura-chatbot-db/snapshots/<sha256>.sql.gz .
-   sha256sum <sha256>.sql.gz   # must match latest.json
-   gunzip -c <sha256>.sql.gz | sqlite3 /tmp/check.db && sqlite3 /tmp/check.db 'PRAGMA integrity_check'
+   B=hf://buckets/landwind22/ura-chatbot-db
+   hf buckets cp "$B/latest.json" latest.json
+   SHA=$(python3 -c 'import json; print(json.load(open("latest.json"))["sha256"])')
+   hf buckets cp "$B/snapshots/$SHA.sql.gz" dump.sql.gz
+   echo "$SHA  dump.sql.gz" | sha256sum -c -
+   CHECK=$(mktemp -d)/check.db
+   gunzip -c dump.sql.gz | sqlite3 "$CHECK" && sqlite3 "$CHECK" 'PRAGMA integrity_check'
    ```
 
 2. If the dump is good, restart the Space. The restore runs again on the new
    container.
-3. If the dump is damaged, there is no older copy: each export deletes the previous
-   dump. Delete `latest.json` to start from an empty database. Exports then resume
-   on the next restart.
+3. If the dump is damaged, there is no older copy: each export deletes every other
+   dump. Delete `latest.json` and restart the Space to start from an empty database.
+   That start reports `empty`, and its first export deletes the damaged dump.
 
 ## Turn it off
 

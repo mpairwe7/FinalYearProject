@@ -113,8 +113,9 @@ flock "$DIR/.lock" sh -c '
 # The database outlives a container only as a snapshot (app/db/snapshot.py,
 # ADR-0063), so it is restored here, before this role's server opens it. Both roles
 # run this; the first to take the snapshot lock decides for the container. A failed
-# restore is logged and the server starts anyway, with exports off.
-SNAPSHOT_RESTORE="/opt/venv/bin/python -m app.db.snapshot restore"
+# or timed-out restore is logged and the server starts anyway, with exports off, so
+# a slow bucket delays each role by at most the timeout.
+SNAPSHOT_RESTORE="timeout 120 /opt/venv/bin/python -m app.db.snapshot restore"
 if [ -n "${DB_SNAPSHOT_TARGET:-}" ]; then
     if [ "${URA_DRY_RUN:-}" = 1 ]; then
         echo "restore: $SNAPSHOT_RESTORE"
