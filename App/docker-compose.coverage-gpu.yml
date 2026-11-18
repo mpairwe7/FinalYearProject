@@ -8,7 +8,7 @@
 #
 # It pins the API GPU consumer and provides speech models.
 #
-# Only Luganda has an adapter (`fine-tuning/adapters/` is empty and
+# Only Luganda has an adapter (`Model/adapters/` is empty and
 # WHISPER_ADAPTER_SW/NYN/ACH have nothing to point at), so English and
 # Kiswahili fall through speech_service's legacy `_whisper_peft` compat path
 # and are transcribed by the Luganda-merged model. That is a real gap in what

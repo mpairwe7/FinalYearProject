@@ -114,7 +114,7 @@ services:
       - ../Data/pdfs:/app/Data/pdfs:ro
       - ./Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
-      - ../fine-tuning/adapters:/app/adapters:ro
+      - ../Model/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
       - ../plugins:/app/plugins:ro
       - ../data_store:/app/data_store

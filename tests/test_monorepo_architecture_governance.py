@@ -53,7 +53,8 @@ def test_root_agents_md_router_table_resolves_every_path_and_guide() -> None:
     agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     row_re = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|$", re.M)
     rows = row_re.findall(agents_md)
-    assert len(rows) >= 16, f"Expected >= 16 layout rows in AGENTS.md, got {len(rows)}"
+    # 13 since the README-only pointer folders (agents/, apps/, packages/, prompts/, skills/) were removed.
+    assert len(rows) >= 13, f"Expected >= 13 layout rows in AGENTS.md, got {len(rows)}"
     for owned_path, guide_path in rows:
         target = REPO_ROOT / owned_path.rstrip("/")
         guide = REPO_ROOT / guide_path
