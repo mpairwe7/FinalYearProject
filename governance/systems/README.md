@@ -14,3 +14,4 @@ share the manifest and the model card.
 | Change log | Here | [change_log.md](ura-ai-chatbot/change_log.md) lists every model swap and prompt change with its decision record. [MODEL_SWAP_GUIDE.md](../../docs/MODEL_SWAP_GUIDE.md) is the swap procedure. |
 | System prompts | Here | [system_prompts.md](ura-ai-chatbot/system_prompts.md) lists every system prompt, where its text lives in `App/backend/app/prompts/`, which call sends it and which test pins it. |
 | Memory | Here | [memory.md](ura-ai-chatbot/memory.md) lists what the assistant remembers, where, for how long, and the consent and erasure controls. |
+| Agents and workflows | Here | [agents.md](ura-ai-chatbot/agents.md) lists each agent role and workflow, its flag, and where a person must approve. |

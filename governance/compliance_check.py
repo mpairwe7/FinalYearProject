@@ -27,6 +27,8 @@ REQUIRED_FILES = [
     "governance/policies/prohibited_uses.md",
     "governance/policies/risk_appetite.md",
     "governance/evidence/incident_log/README.md",
+    "governance/evidence/red_team.md",
+    "governance/systems/ura-ai-chatbot/agents.md",
     "governance/monitoring/cost_per_decision.csv",
     "SECURITY.md",
     "App/backend/app/guardrails/input_checks.py",
