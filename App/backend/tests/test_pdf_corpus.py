@@ -834,7 +834,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
 
     def test_harvest_rejects_robots_noindex_and_ai_usage_opt_out_and_embedded_injection(self) -> None:
         from app.ingestion.pdf_corpus import _pdf_response_opts_out, inspect_pdf_for_prompt_injection
-        from app.pdf_guards import PdfRejected
+        from app.guardrails.pdf import PdfRejected
 
         self.assertEqual(_pdf_response_opts_out({"x-robots-tag": "noindex"}), "noindex")
         self.assertEqual(

@@ -50,7 +50,7 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from .faq_corpus import CorpusValidationError
 from ..malware_scan import MalwareRejected, scan_bytes
-from ..pdf_guards import (
+from ..guardrails.pdf import (
     CORPUS_PDF_LIMITS,
     PdfRejected,
     inspect_pdf_bytes,

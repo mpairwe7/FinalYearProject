@@ -17,7 +17,7 @@ consumption), NIST SSDF PW.5 / PW.6.
 
 | Phase | Outcome | Primary implementation | Evidence |
 | --- | --- | --- | --- |
-| P0 — PDF structure | Fail-closed header, encryption, active-content, xref, and page-edge checks before extract/OCR. Index-time export skips a file that fails the same inspector. | `backend/app/pdf_guards.py`, `documents.py`, `ingestion/pdf_corpus.py` | `backend/tests/test_pdf_guards.py` |
+| P0 — PDF structure | Fail-closed header, encryption, active-content, xref, and page-edge checks before extract/OCR. Index-time export skips a file that fails the same inspector. | `backend/app/guardrails/pdf.py`, `documents.py`, `ingestion/pdf_corpus.py` | `backend/tests/test_pdf_guards.py` |
 | P1 — Office / image | Reject zip-slip, encrypted ZIP, and `vbaProject.bin`; drop `.xlsm`. Pillow pixel cap. OCR sidecar magic-byte reject. | `documents.py`, `ocr_service.py`, `frontend/src/lib/attachments.ts` | Office + filename tests in `test_pdf_guards.py` |
 | P2 — Indirect injection | Scrub extracted text with `scan_retrieved_text`; wrap attachment passages in `<untrusted_user_document>`; system rule that uploads are evidence only. | `documents.py`, `rag/generator.py`, `guardrails.py` | Scrub + wrapper tests in `test_pdf_guards.py` / `test_documents.py` |
 | P3 — Threat model | Living registry T21–T28; document DFD nodes in pytm; LLM06 now mapped. | `threat-model/validate_threats.py`, `threat-model/tm.py` | `python threat-model/validate_threats.py` |

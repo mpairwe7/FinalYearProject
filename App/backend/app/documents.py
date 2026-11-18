@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from .guardrails.input_checks import scan_retrieved_text
-from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
@@ -216,7 +216,7 @@ def _validate_document_content(data: bytes, kind: str) -> list[str]:
     """
     if kind == "pdf":
         from .document_worker import isolated_enabled
-        from .pdf_guards import scan_pdf_object_text, validate_pdf_header
+        from .guardrails.pdf import scan_pdf_object_text, validate_pdf_header
 
         try:
             validate_pdf_header(data)

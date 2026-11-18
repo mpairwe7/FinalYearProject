@@ -11,7 +11,7 @@ decision in [ADR-0029](../adr/0029-ai-security-layer-detection-egress-friction-a
 | Stage | Control | Module | Fails |
 | --- | --- | --- | --- |
 | Before retrieval | Input guard on the message and its English form, over raw, canonical, de-obfuscated and decoded views | `guardrails.InputGuard`, `pipeline._guard_both_forms` | Refuses with a "please rephrase" or illegal-activity reply |
-| Before retrieval | Strike friction: 5 refusals in 10 minutes pause the user, session or conversation for 5 minutes | `guard_friction.py` | Fixed notice with URA contacts, no model call |
+| Before retrieval | Strike friction: 5 refusals in 10 minutes pause the user, session or conversation for 5 minutes | `guardrails/friction.py` | Fixed notice with URA contacts, no model call |
 | Prompt assembly | Passages, tool output and uploads scrubbed of injection phrases and of directives addressed to an AI; fences on passages and uploads | `scan_retrieved_text`, `scan_external_tool_text`, `fence_spotlight_body`, `fence_untrusted_document_body` | The directive to the end of its line, or the whole passage, becomes `[REDACTED_INSTRUCTION]` |
 | Output | Links de-linked unless the host is trusted; identifiers dropped from trusted queries; prompt leaks redacted | `OutputGuard.sanitize`, `neutralize_untrusted_links`, `check_prompt_leakage` | `[link removed]`, `[external link removed]`, `[REDACTED]` |
 | Final reply | Links re-checked on the whole reply; a removal is sent to the client as a revision | `pipeline._apply_output_guards` | The streamed text is replaced |

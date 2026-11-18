@@ -26,7 +26,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 
-from app.premise_guard import check_false_premise  # noqa: E402
+from app.guardrails.premise import check_false_premise  # noqa: E402
 
 #: Taxes Uganda does not levy, asked the way a taxpayer would.
 FABRICATED = [

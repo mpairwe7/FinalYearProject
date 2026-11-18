@@ -8,7 +8,7 @@ from pathlib import Path
 from app.calculator_router import plan_rate_lookup
 from app.config.flags import _REGISTRY, flags
 from app.memory.procedural import ProceduralMemory
-from app.premise_guard import check_false_premise
+from app.guardrails.premise import check_false_premise
 from app.scenario_planner import should_defer_to_scenario_planner
 from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
 from app.tools.portal_navigator_data import (

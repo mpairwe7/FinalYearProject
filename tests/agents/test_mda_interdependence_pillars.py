@@ -357,7 +357,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert p95_ms < max_p95_ms, f"Expected p95 < {max_p95_ms} ms, got {p95_ms:.3f} ms"
 
     # 5. False-premise guard must never reject legitimate MDA/B2G/UESW statutory terms when hits=[]
-    from app.premise_guard import check_false_premise
+    from app.guardrails.premise import check_false_premise
 
     for valid_q in (
         "What is the UNBS PVoC surcharge in Uganda?",

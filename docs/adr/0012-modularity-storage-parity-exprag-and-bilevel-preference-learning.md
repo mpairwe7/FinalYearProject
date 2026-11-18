@@ -38,7 +38,7 @@ We implemented a 3-phase architectural upgrade:
 
 ### Phase 3 — Modularity & Robustness (`TurnPipelineOrchestrator`, `should_defer_to_scenario_planner`, Declarative Portal Pack & `G224`)
 - Created `App/backend/app/turn_pipeline.py` defining `TurnStage`, `BehavioralManifest` (`OWASP ASI10`), `StageExecutionReceipt` (`AgentSLA`), `TurnPipelineTrace`, and `TurnPipelineOrchestrator` (guaranteeing `STAGE_6_OUTPUT_GUARD_AND_AUDIT` executes even when an earlier stage short-circuits).
-- Added `should_defer_to_scenario_planner()` in `App/backend/app/scenario_planner.py`, updated `App/backend/app/calculator_router.py` (`plan_rate_lookup`), and hardened `App/backend/app/premise_guard.py` so all 30 `dev.jsonl` and 75 `heldout.jsonl` complex tax scenarios have **0 false-premise false positives** (`G224` closed).
+- Added `should_defer_to_scenario_planner()` in `App/backend/app/scenario_planner.py`, updated `App/backend/app/calculator_router.py` (`plan_rate_lookup`), and hardened `App/backend/app/guardrails/premise.py` so all 30 `dev.jsonl` and 75 `heldout.jsonl` complex tax scenarios have **0 false-premise false positives** (`G224` closed).
 - Added `App/backend/app/tools/data/portal_navigation_overrides.json` and `load_portal_knowledge_pack()` / `get_portal_knowledge_provenance()` in `App/backend/app/tools/portal_navigator_data.py`.
 
 ---

@@ -3,7 +3,7 @@
 Maps conversation-scoped :class:`app.memory.case_facts.CaseFacts` and the taxpayer's
 question to deterministic calculator and statutory-rule tools, executes them
 through the MCP client (`get_client().call_tool(...)`), checks for statutory
-premise contradictions via :func:`app.premise_guard.check_fact_contradictions`,
+premise contradictions via :func:`app.guardrails.premise.check_fact_contradictions`,
 and renders a single ``## Verified Statutory Facts & Calculations`` block
 injected before retrieved passages in both REST and streaming paths.
 
@@ -40,7 +40,7 @@ from .calculator_router import (
     plan_calculation,
 )
 from .memory.case_facts import CaseFacts, extract_case_facts
-from .premise_guard import check_fact_contradictions
+from .guardrails.premise import check_fact_contradictions
 
 logger = logging.getLogger(__name__)
 

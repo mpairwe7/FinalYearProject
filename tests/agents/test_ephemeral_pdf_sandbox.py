@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from app import egress
 from app import ephemeral_pdf_sandbox as sbx
-from app.pdf_guards import PdfRejected
+from app.guardrails.pdf import PdfRejected
 
 
 @pytest.fixture(autouse=True)

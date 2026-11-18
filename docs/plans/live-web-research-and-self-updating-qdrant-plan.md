@@ -3,7 +3,7 @@
 Status: **Ready for implementation.** Authored 2026-10-21 against `dev` @ `de3ed5ed72` (plus the local streaming-parity diff in `App/backend/app/rag/pipeline.py` and `App/backend/app/calculator_router.py`).  
 Audience: a **new** coding session with no memory of the conversation that produced this plan. Read each referenced file before editing it.
 
-> **Builds upon:** [`docs/plans/sovereign-opus-level-accuracy-plan.md`](sovereign-opus-level-accuracy-plan.md) and [`ADR-0007`](../adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md) (merged in PRs #594–#607). All local two-tier vLLM routing (`Sunbird/Sunflower-Qwen3.5-9B` T1 on GPU 4 + `Qwen/Qwen3.8-27B-FP8` T2/T3 on GPU 7), `CaseFacts`, `scenario_planner.py`, `premise_guard.py`, `rag/claim_polarity.py`, and `verify_figure_lock` are already live on `dev`.
+> **Builds upon:** [`docs/plans/sovereign-opus-level-accuracy-plan.md`](sovereign-opus-level-accuracy-plan.md) and [`ADR-0007`](../adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md) (merged in PRs #594–#607). All local two-tier vLLM routing (`Sunbird/Sunflower-Qwen3.5-9B` T1 on GPU 4 + `Qwen/Qwen3.8-27B-FP8` T2/T3 on GPU 7), `CaseFacts`, `scenario_planner.py`, `guardrails/premise.py`, `rag/claim_polarity.py`, and `verify_figure_lock` are already live on `dev`.
 
 ---
 
@@ -88,7 +88,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
 - **Resolution (§6):** Do **not** train the model to click through `ura.go.ug` menus (which breaks whenever URA changes its HTML layout and takes 30–60s). Instead, build an **Ephemeral RAM-Backed Document Sandbox (`App/backend/app/ephemeral_pdf_sandbox.py`)**:
   - Discovers `.pdf` / `.xlsx` / `.docx` links on `ura.go.ug` (via search + HTML `<a href>` link extraction).
   - Downloads candidate files into an isolated, turn-scoped `tmpfs` directory (`/tmp/ura-web-sandbox/<turn_id>/`).
-  - Validates PDFs with our existing `App/backend/app/pdf_guards.py` (`inspect_pdf_bytes`) and `App/backend/app/mcp/validation.py` (`screen_tool_result`).
+  - Validates PDFs with our existing `App/backend/app/guardrails/pdf.py` (`inspect_pdf_bytes`) and `App/backend/app/mcp/validation.py` (`screen_tool_result`).
   - Extracts text and tables page-by-page using `PyMuPDF` (`fitz`) / `openpyxl` (`App/backend/app/documents.py`) and ranks the pages against the user's question on **GPU 2** (`BAAI/bge-m3` + `mixedbread-ai/mxbai-rerank-base-v2`).
   - **Wipes the temporary directory in a `finally:` block** at the end of the turn, while caching the sanitized extracted text chunks in Redis (24h TTL keyed by `sha256`) for instant Turn 2+ follow-ups.
 
@@ -303,7 +303,7 @@ Implement the **Claude Opus / Gemini Deep Research** style search planner and so
 ## 6. Phase D — Ephemeral RAM-Backed PDF/Document Sandbox (`ephemeral_pdf_sandbox.py`)
 
 ### D.1 Create `App/backend/app/ephemeral_pdf_sandbox.py`
-Read `App/backend/app/pdf_guards.py` and `App/backend/app/documents.py` first. Build a turn-scoped ephemeral sandbox for downloading and searching `.pdf`, `.xlsx`, and `.docx` files discovered on `ura.go.ug` / `ulii.org`:
+Read `App/backend/app/guardrails/pdf.py` and `App/backend/app/documents.py` first. Build a turn-scoped ephemeral sandbox for downloading and searching `.pdf`, `.xlsx`, and `.docx` files discovered on `ura.go.ug` / `ulii.org`:
 
 1. **Isolated `tmpfs` Workspace (`/tmp/ura-web-sandbox/<turn_id>/`):**
    - Use a context manager `@contextlib.contextmanager def ephemeral_sandbox(turn_id: str) -> Iterator[Path]:` that creates `/tmp/ura-web-sandbox/<turn_id>/` (`0o700` permissions) and **unconditionally deletes the entire directory (`shutil.rmtree(sandbox_dir, ignore_errors=True)`) in the `finally:` block**.
@@ -312,7 +312,7 @@ Read `App/backend/app/pdf_guards.py` and `App/backend/app/documents.py` first. B
    - Computes `sha256` on the downloaded bytes.
    - Before parsing any PDF, checks Redis cache `ura:pdf_chunks:{sha256}` (24h TTL). If already parsed in an earlier turn, returns the cached chunks in `< 10 ms`!
 3. **Security Inspection (`pdf_guards` + `scan_retrieved_text`):**
-   - Calls `inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)` from `App/backend/app/pdf_guards.py` (verifies `%PDF-` magic header, rejects encrypted PDFs, rejects `/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFiles`, and enforces `max_xrefs`).
+   - Calls `inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)` from `App/backend/app/guardrails/pdf.py` (verifies `%PDF-` magic header, rejects encrypted PDFs, rejects `/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFiles`, and enforces `max_xrefs`).
    - Runs `scan_retrieved_text` (`App/backend/app/guardrails/`) and `screen_tool_result` (`App/backend/app/mcp/validation.py`) on every extracted page to strip any indirect prompt injection or Unicode bidi smuggling.
 4. **Page-Level Extraction, Metadata Parsing & GPU 2 Micro-Reranking:**
    - Extracts text and tables per page via `fitz.open(stream=raw_bytes, filetype="pdf")` (or `openpyxl` for `.xlsx` valuation schedules).

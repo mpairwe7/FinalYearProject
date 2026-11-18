@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from app.calculator_router import plan_calculation
-from app.premise_guard import check_false_premise
+from app.guardrails.premise import check_false_premise
 from app.providers.routing import ModelTier, select_tier
 from app.rag.query import correct_spelling, expand_abbreviations
 from app.text_signals import detect_user_distress

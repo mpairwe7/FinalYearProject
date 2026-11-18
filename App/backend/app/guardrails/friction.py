@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .guardrails.input_checks import GuardResult
+    from .input_checks import GuardResult
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ strike_tracker = StrikeTracker()
 
 
 def _friction_enabled() -> bool:
-    from .config.flags import flags
+    from ..config.flags import flags
 
     return flags.is_enabled("guardrail_strike_friction")
 
@@ -174,7 +174,7 @@ def paused(principal: str, *, crisis: bool = False) -> GuardResult | None:
         return None
     if strike_tracker.cooldown_remaining(principal) <= 0:
         return None
-    from .guardrails.input_checks import GuardResult
+    from .input_checks import GuardResult
 
     return GuardResult(allowed=False, reason=COOLDOWN_REPLY, flags=["guardrail_cooldown"])
 
@@ -191,7 +191,7 @@ def note_refusal(principal: str, guard: GuardResult) -> None:
     if not _friction_enabled() or not strike_tracker.record_strike(principal):
         return
     try:
-        from .observability.security_events import record_security_event
+        from ..observability.security_events import record_security_event
 
         record_security_event(
             "guardrail_strike_cooldown", reason="repeated_guard_blocks", principal=principal

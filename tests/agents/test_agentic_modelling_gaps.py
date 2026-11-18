@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from app.agents.graphs import AgentGraphState, GraphOutcome
 from app.agents.graphs.main_graph import bind_arguments, build_main_graph
-from app.premise_guard import check_false_premise
+from app.guardrails.premise import check_false_premise
 from app.rag.pipeline import ChatModel, _call_llm_agentic, run_chat_turn
 
 
@@ -517,7 +517,7 @@ class TestWorkflowResumptionNextActions:
         assert result["workflow"]["status"] == "active"
 
     def test_interrogative_prefix_stripped_cleanly(self):
-        from app.premise_guard import _extract_candidate_tax_concepts, check_false_premise
+        from app.guardrails.premise import _extract_candidate_tax_concepts, check_false_premise
 
         candidates = _extract_candidate_tax_concepts("Is there a plastic bag levy in Uganda?")
         assert len(candidates) >= 1
@@ -525,7 +525,7 @@ class TestWorkflowResumptionNextActions:
         assert "is there" not in candidates[0][0]
 
     def test_psf_levy_in_corpus_not_rejected(self):
-        from app.premise_guard import check_false_premise
+        from app.guardrails.premise import check_false_premise
 
         hits = [{"text": "The PSF levy is an administrative charge for private sector development."}]
         res = check_false_premise("What is the PSF levy in Uganda?", hits=hits)
