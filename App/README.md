@@ -749,8 +749,8 @@ uv pip install -r requirements.txt
 
 # Full production startup with local LoRA adapters and speech:
 WHISPER_ADAPTER_LG="../../artifacts/speech/asr/whisper_lg/final" \
-WHISPER_ADAPTER_SW="../../ml/fine-tuning/adapters/whisper-sw" \
-WHISPER_ADAPTER_NYN="../../ml/fine-tuning/adapters/whisper-nyn" \
+WHISPER_ADAPTER_SW="../../Model/adapters/whisper-sw" \
+WHISPER_ADAPTER_NYN="../../Model/adapters/whisper-nyn" \
 WHISPER_DEVICE=cpu \
 SPEECH_ENABLED=true \
 SPEECH_MT_BACKEND=prompted \
@@ -761,10 +761,10 @@ LLM_BACKEND=local \
 LLM_DEVICE=auto \
 LLM_LOAD_IN_4BIT=true \
 LLM_TORCH_DTYPE=bfloat16 \
-LORA_ADAPTER_LG="../../ml/fine-tuning/adapters/luganda-lora" \
-LORA_ADAPTER_SW="../../ml/fine-tuning/adapters/sw-lora" \
-LORA_ADAPTER_NYN="../../ml/fine-tuning/adapters/nyn-lora" \
-LORA_ADAPTER_ACH="../../ml/fine-tuning/adapters/ach-lora" \
+LORA_ADAPTER_LG="../../Model/adapters/luganda-lora" \
+LORA_ADAPTER_SW="../../Model/adapters/sw-lora" \
+LORA_ADAPTER_NYN="../../Model/adapters/nyn-lora" \
+LORA_ADAPTER_ACH="../../Model/adapters/ach-lora" \
 SUNBIRD_API_TOKEN="<your-sunbird-jwt>" \
 CORS_ORIGINS="http://localhost:3300" \
 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8887 --reload
@@ -1930,7 +1930,7 @@ tool — see:
 - **Response budget:** compose sets `LLM_MAX_TOKENS=512` for vLLM chat calls to allow complete procedural answers. Qwen3 thinking mode is suppressed via `/no_think` system prompt tag and `chat_template_kwargs: {"enable_thinking": False}` in vLLM requests, so the full token budget goes to answer content.
 - **4-bit Qwen fallback:** local Transformers can still load Qwen with BitsAndBytes NF4 when `LLM_BACKEND=local` and `LLM_LOAD_IN_4BIT=true`.
 - **GPU split:** compose maps the API container to host GPU 2 (`NVIDIA_VISIBLE_DEVICES=2`) so `RETRIEVER_DENSE_DEVICE=cuda:0` uses that free mapped GPU; reranking runs on CPU (`RERANKER_DEVICE=cpu`) to avoid GPU 0 startup stalls; vLLM serves Qwen on GPU 7; Whisper remains on CPU.
-- **Locale LoRA routing:** production compose mounts `../ml/fine-tuning/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
+- **Locale LoRA routing:** production compose mounts `../Model/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
 - **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen or retrieval GPU workloads.
 - **Redis cache:** compose runs `redis:7.4-alpine`; the API uses `CACHE_BACKEND=redis`, `REDIS_URL=redis://redis:6379/0`, and `SLOWAPI_STORAGE_URI=redis://redis:6379/1`.
 - **Anonymous public assistant:** `/v1/chat`, `/v1/chat/stream`, speech health, TTS, translation, and consented voice processing work without login. Anonymous requests use `role=public` and cannot access account/action tools.

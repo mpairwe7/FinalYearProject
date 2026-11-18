@@ -103,7 +103,7 @@ App code is baked into `app-api:gpu`; the stack must be rebuilt to see a change
 ngrok-exposed" in [`salt-speech-backends.md`](salt-speech-backends.md)).
 
 **Do not run `docker compose` from a git worktree.** The api's bind mounts
-(`App/Data/*`, `data_store/`, `artifacts/`, `App/Model`, `ml/fine-tuning/adapters`)
+(`App/Data/*`, `data_store/`, `artifacts/`, `App/Model`, `Model/adapters`)
 are relative to the compose directory, and those directories are gitignored
 generated state that a worktree does not have: the api would start with no
 corpus. Build from the branch, recreate from the main checkout:

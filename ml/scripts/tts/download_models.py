@@ -9,8 +9,7 @@ Voices fetched (all MIT / Apache-2.0):
     * hexgrad/Kokoro-82M                  — Apache-2.0; small mobile English TTS
 
 **Luganda is not downloaded here** because no commercial-safe pretrained
-Luganda TTS exists in 2026. The Luganda voice is trained in-project via
-:mod:`ml.scripts.tts.train_luganda_vits` once voice data has been recorded.
+Luganda TTS exists in 2026, and no Luganda voice is trained in this repository.
 
 Usage::
 

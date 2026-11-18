@@ -116,10 +116,3 @@ def test_cms_exact_match_roundtrip(mem_db) -> None:
     assert lookup("what is the vat rate?") is None
 
 
-def test_dpo_job_refuses_without_eval_gate(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setenv("DPO_RUN", "1")
-    monkeypatch.delenv("EVAL_GATE_OK", raising=False)
-    monkeypatch.setenv("PREFERENCE_EXPORT_PATH", str(tmp_path / "pairs.jsonl"))
-    import evals.dpo_job as job
-
-    assert job.main() == 2

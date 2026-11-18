@@ -41,7 +41,7 @@ Status: partially applied; external infra drills remain.
 - Production compose overlay now requires authority freshness and exposes URA API configuration points.
 - Qwen3-8B now supports a fast vLLM runtime for local/ngrok demos (`LLM_BACKEND=vllm`, host `ura-vllm` on GPU 7) plus a BitsAndBytes NF4 4-bit local fallback.
 - Compose caps vLLM responses with `LLM_MAX_TOKENS=256` to keep anonymous ngrok/proxy chat responses below the frontend timeout.
-- Compose mounts Qwen and Whisper LoRA adapters from `ml/fine-tuning/adapters` read-only, pins Whisper and reranking to CPU, and maps API dense retrieval to host GPU 2 as container `cuda:0` to avoid GPU 0 startup stalls.
+- Compose mounts Qwen and Whisper LoRA adapters from `Model/adapters` read-only, pins Whisper and reranking to CPU, and maps API dense retrieval to host GPU 2 as container `cuda:0` to avoid GPU 0 startup stalls.
 - Redis is first-class in compose (`CACHE_BACKEND=redis`, `REDIS_URL`, `SLOWAPI_STORAGE_URI`) for semantic cache and distributed rate-limit storage.
 - Cached and generated replies now share the same output sanitizer; TIN registration and return-filing how-to prompts bypass free-form LLM synthesis for vetted FAQ-backed answers, with high-precision FAQ hits and query-ranked deterministic revisions as fallback.
 - Live smoke and deploy preflight scripts cover anonymous chat, informational TIN answers, explicit guided workflow behavior, speech health, and protected admin denial.

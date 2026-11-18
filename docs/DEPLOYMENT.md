@@ -171,7 +171,7 @@ The App compose stack mounts LoRA artifacts read-only from the repository:
 services:
   api:
     volumes:
-      - ../ml/fine-tuning/adapters:/app/adapters:ro
+      - ../Model/adapters:/app/adapters:ro
 ```
 
 For GPU-constrained hosts, keep `LLM_LOAD_IN_4BIT=true`. The local Transformers path loads Qwen3-8B with BitsAndBytes NF4 quantization and then attaches the per-locale PEFT adapters for `lg`, `sw`, `nyn`, and `ach`. Whisper ASR should remain on CPU with `WHISPER_DEVICE=cpu` unless the deployment has a separate GPU budget for ASR.

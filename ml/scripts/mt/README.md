@@ -20,15 +20,6 @@ Commercial-safe machine translation for Luganda <-> English.
 download_models.py            # fetch MADLAD-400 into artifacts/mt/models/
       |
       v
-finetune_mt.py                # LoRA fine-tune teacher on Data/TTT/ parallel pairs
-      |
-      v
-backtranslate.py              # synthesize Lg->En pairs from monolingual Luganda
-      |
-      v                       # (optional iterative round-trip)
-distill_mt.py                 # teacher -> student distillation for mobile
-      |
-      v
 export_mt_onnx.py             # optimum INT8 ONNX quantisation
       |
       v
@@ -39,9 +30,6 @@ ml/scripts/speech/export_mobile_speech.py   # copy into MobileApp assets
 
 ```bash
 python -m ml.scripts.mt.download_models --dry-run
-python -m ml.scripts.mt.finetune_mt --dry-run
-python -m ml.scripts.mt.backtranslate --dry-run
-python -m ml.scripts.mt.distill_mt --dry-run
 python -m ml.scripts.mt.export_mt_onnx --dry-run
 python -m ml.scripts.mt.infer_mt --text "Hello" --target-lang lg
 ```
