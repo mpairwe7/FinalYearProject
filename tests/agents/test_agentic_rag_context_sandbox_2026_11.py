@@ -337,10 +337,15 @@ def test_the_extracted_modules_do_not_import_the_graph() -> None:
 
 
 def _reaches_the_graph(imports: list[tuple[str, list[str]]]) -> list[str]:
-    """``from . import agents`` names the package, not a module under it (CodeRabbit on #705)."""
+    """The graph lives in ``workflows/graph/`` (ADR-0061); ``agents`` holds the roles it routes to.
+
+    ``from . import agents`` names the package, not a module under it (CodeRabbit on #705).
+    """
     return [
         module for module, names in imports
-        if module.startswith("app.agents") or (module == "app" and "agents" in names)
+        if module.startswith(("app.agents", "app.workflows.graph"))
+        or (module == "app" and "agents" in names)
+        or (module == "app.workflows" and "graph" in names)
     ]
 
 
