@@ -110,6 +110,20 @@ flock "$DIR/.lock" sh -c '
     done
 ' sh "$DIR"
 
+# The database outlives a container only as a snapshot (app/db/snapshot.py,
+# ADR-0063), so it is restored here, before this role's server opens it. Both roles
+# run this; the first to take the snapshot lock decides for the container. A failed
+# or timed-out restore is logged and the server starts anyway, with exports off, so
+# a slow bucket delays each role by at most the timeout.
+SNAPSHOT_RESTORE="timeout 120 /opt/venv/bin/python -m app.db.snapshot restore"
+if [ -n "${DB_SNAPSHOT_TARGET:-}" ]; then
+    if [ "${URA_DRY_RUN:-}" = 1 ]; then
+        echo "restore: $SNAPSHOT_RESTORE"
+    else
+        $SNAPSHOT_RESTORE || echo "uvicorn-role: the database snapshot restore did not run" >&2
+    fi
+fi
+
 # Gated on the Qdrant sidecar (wait-for-qdrant.sh is bounded and never fail-closed).
 set -- /usr/local/bin/wait-for-qdrant.sh /opt/venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port "$PORT" --workers "$n_workers" \

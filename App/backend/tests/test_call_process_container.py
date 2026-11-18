@@ -317,6 +317,23 @@ class RoleScriptTests(unittest.TestCase):
 
 
 class SupervisordTests(unittest.TestCase):
+    def test_each_role_restores_the_database_snapshot_before_its_server(self) -> None:
+        with tempfile.TemporaryDirectory() as metrics:
+            on = _run_role_script("chat", metrics, DB_SNAPSHOT_TARGET="hf://buckets/o/b").stdout
+            off = _run_role_script("chat", metrics).stdout
+        self.assertLess(on.index("restore: "), on.index("exec "), on)
+        self.assertIn("app.db.snapshot restore", on)
+        self.assertNotIn("restore: ", off)
+
+    def test_the_snapshot_loop_stops_after_both_roles(self) -> None:
+        """supervisord stops programs in reverse priority; the last export needs the API stopped."""
+        conf = _supervisord()
+        section = "program:db-snapshot"
+        self.assertEqual(conf.get(section, "command").strip(), "/opt/venv/bin/python -m app.db.snapshot loop")
+        for role in ("chat", "calls"):
+            self.assertLess(conf.getint(section, "priority"), conf.getint(f"program:uvicorn-{role}", "priority"))
+        self.assertGreaterEqual(conf.getint(section, "stopwaitsecs"), 30)
+
     def test_supervisord_runs_both_roles(self) -> None:
         conf = _supervisord()
         self.assertFalse(
