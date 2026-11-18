@@ -5004,11 +5004,21 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Dev token generation is disabled under APP_ENV=production. Use a real OIDC provider.",
         )
-    from .auth.jwt_auth import make_dev_token
+    from .auth.jwt_auth import DEV_TOKEN_STAFF_ENVS, PORTAL_DEMO_TAXPAYER_ID, make_dev_token
 
     requested_role = (req.role or "").strip().lower()
     email = (req.email or "").strip().lower()
     user_id = (req.user_id or "").strip()
+
+    # Outside development this endpoint answers anyone, so it mints only the
+    # portal's demo taxpayer (the quick sign-in in portal/[portalKey]/page.tsx).
+    if os.getenv("APP_ENV", "development").lower() not in DEV_TOKEN_STAFF_ENVS:
+        demo = user_id == PORTAL_DEMO_TAXPAYER_ID and requested_role == "verified_taxpayer"
+        if not demo or email or (req.tenant_id or "default") != "default":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Outside development only the portal demo taxpayer gets a dev token. Use the OIDC provider.",
+            )
 
     # Predefined server-side allowlist for official URA personnel
     predefined_staff: dict[str, str] = {

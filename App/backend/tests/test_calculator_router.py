@@ -35,6 +35,17 @@ class AmountExtractionTests(unittest.TestCase):
         self.assertEqual(extract_amounts("since 2024 the rules changed"), [])
         self.assertEqual(extract_amounts("call 0772140000 for help"), [])
 
+    def test_a_stated_tin_is_not_an_amount(self) -> None:
+        """G670: "My TIN is …" put the TIN in the PAYE salary on the live Space."""
+        tin = "10001" + "23456"
+        for message in (
+            f"My TIN is {tin}, what is the PAYE on UGX 500,000 a month?",
+            f"my tin number is {tin} and I earn UGX 500,000",
+            f"TIN was {tin}; salary UGX 500,000",
+        ):
+            self.assertEqual([a for a, _, _ in extract_amounts(message)], [500_000.0], message)
+        self.assertEqual([a for a, _, _ in extract_amounts("turnover of UGX 1,000,000,000")], [1_000_000_000.0])
+
     def test_multiple_amounts_refuse_single_parse(self) -> None:
         self.assertIsNone(parse_ugx_amount("between 1m and 2m"))
         self.assertIsNone(parse_ugx_amount("no numbers here"))
