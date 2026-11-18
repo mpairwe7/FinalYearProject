@@ -133,7 +133,7 @@ class ClientTelemetryTest(unittest.TestCase):
         body = json.dumps(
             {
                 "metrics": [
-                    {"name": "LCP", "value": 1800, "rating": "good", "route": "/c/3f2a9b1c-aaaa-bbbb", "navigation_type": "navigate"},
+                    {"name": "LCP", "value": 1800, "rating": "good", "route": "/portal/3f2a9b1c-aaaa-bbbb", "navigation_type": "navigate"},
                     {"name": "CLS", "value": 0.02, "rating": "good", "route": "/", "navigation_type": "navigate"},
                 ]
             }
@@ -141,7 +141,7 @@ class ClientTelemetryTest(unittest.TestCase):
         resp = self.client.post("/v1/telemetry/vitals", content=body, headers={"Content-Type": "text/plain;charset=UTF-8"})
         self.assertEqual(resp.status_code, 204)
         hists = metrics.snapshot()["histograms"]
-        self.assertTrue(any(k.startswith('web_vitals_ms{metric="LCP",rating="good",route="/c/:id"}') for k in hists))
+        self.assertTrue(any(k.startswith('web_vitals_ms{metric="LCP",rating="good",route="/portal/:id"}') for k in hists))
         self.assertTrue(any(k.startswith("web_vitals_cls{") for k in hists))
 
     def test_unknown_fields_and_oversize_are_refused(self) -> None:
@@ -168,10 +168,27 @@ class ClientTelemetryTest(unittest.TestCase):
         )
         self.assertEqual(with_message.status_code, 422)
 
-    def test_routes_are_bounded(self) -> None:
-        self.assertEqual(normalise_route("/staff/tickets/7d1c0e2a-1b2c-4d5e?tab=1"), "/staff/tickets/:id")
-        self.assertEqual(normalise_route("/a/b/c/d/e"), "/a/b/c")
+    def test_routes_are_the_clients_page_templates(self) -> None:
+        """G669: a label is one of the client's pages or /other, never a raw path segment."""
+        self.assertEqual(normalise_route("/admin/tickets?tab=1"), "/admin/tickets")
+        self.assertEqual(normalise_route("/admin/tickets/7d1c0e2a-1b2c-4d5e"), "/admin/tickets")
+        self.assertEqual(normalise_route("/portal/vat-return"), "/portal/:id")
+        self.assertEqual(normalise_route("/Jane"), "/other")
+        self.assertEqual(normalise_route("/signin/callback#code=x"), "/signin/callback")
         self.assertEqual(normalise_route(""), "/")
+
+    def test_route_templates_match_the_frontend_pages(self) -> None:
+        from pathlib import Path
+
+        from app.observability import client_telemetry
+
+        app_dir = Path(__file__).resolve().parents[2] / "frontend" / "src" / "app"
+        pages = set()
+        for page in app_dir.rglob("page.tsx"):
+            parts = page.parent.relative_to(app_dir).parts
+            parts = [":id" if p.startswith("[") else p for p in parts if not p.startswith("(")]
+            pages.add("/" + "/".join(parts))
+        self.assertEqual(set(client_telemetry.ROUTES), pages)
 
 
 class AiDisclosureTest(unittest.TestCase):

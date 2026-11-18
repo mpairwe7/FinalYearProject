@@ -22,7 +22,6 @@ normalised so a conversation or ticket id cannot become a label value.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,7 +32,14 @@ logger = logging.getLogger("app.client")
 
 #: Largest telemetry body accepted (a full vitals batch is well under 2 KB).
 MAX_BODY_BYTES = 16_384
-_ID_SEGMENT = re.compile(r"/(?:[0-9a-fA-F-]{8,}|\d+|[A-Za-z0-9_-]{24,})(?=/|$)")
+#: The web client's pages (App/frontend/src/app/**/page.tsx); ``:id`` is a dynamic segment.
+#: A test keeps this list equal to the frontend's pages.
+ROUTES = (
+    "/", "/admin", "/admin/audit", "/admin/connectors", "/admin/discrepancies", "/admin/flags",
+    "/admin/outbox", "/admin/overrides", "/admin/quality", "/admin/tickets", "/agent", "/analytics",
+    "/analytics/evaluation", "/calls", "/chats", "/portal/:id", "/signin", "/signin/callback", "/signup",
+)
+_ROUTE_PARTS = [tuple(route.strip("/").split("/")) for route in ROUTES if route != "/"]
 _CLS_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.0)
 
 
@@ -73,13 +79,19 @@ class ClientError(BaseModel):
 
 
 def normalise_route(path: str) -> str:
-    """Pathname -> bounded label: no query string, ids folded to ``:id``."""
-    clean = (path or "/").split("?", 1)[0].split("#", 1)[0] or "/"
-    if not clean.startswith("/"):
-        clean = "/" + clean
-    clean = _ID_SEGMENT.sub("/:id", clean)
-    parts = [part for part in clean.split("/") if part][:3]
-    return "/" + "/".join(parts)
+    """Pathname -> the longest client page it falls under, else ``/other`` (G669).
+
+    The browser sends the path, so a raw segment could be anything a person typed
+    or a link carried; a label is only ever one of :data:`ROUTES`.
+    """
+    parts = [part for part in (path or "/").split("?", 1)[0].split("#", 1)[0].split("/") if part]
+    if not parts:
+        return "/"
+    matches = [
+        template for template in _ROUTE_PARTS
+        if len(template) <= len(parts) and all(t in (":id", p) for t, p in zip(template, parts))
+    ]
+    return "/" + "/".join(max(matches, key=len)) if matches else "/other"
 
 
 def record_web_vitals(batch: WebVitalsBatch) -> int:
