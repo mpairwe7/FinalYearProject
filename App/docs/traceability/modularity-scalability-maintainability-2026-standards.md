@@ -11,7 +11,7 @@ Implements architectural enhancements closing identified gaps across three core 
 ### 1. Scoped Output Redaction Exemption (G143)
 - **Problem**: Output PII redaction was unconditional, censoring the taxpayer's own user-stated identifiers (e.g. `1000123456` -> `[REDACTED_UG_TIN]`) when the model confirmed or repeated the taxpayer's input.
 - **Solution**:
-  - Enhanced `redact_pii_text` and `OutputGuard.redact_pii` in `App/backend/app/guardrails.py` to accept `allowed_values: Iterable[str] | None`.
+  - Enhanced `redact_pii_text` and `OutputGuard.redact_pii` in `App/backend/app/guardrails/` to accept `allowed_values: Iterable[str] | None`.
   - Introduced turn-scoped `_ACTIVE_USER_STATED_IDS` ContextVar in `App/backend/app/rag/pipeline.py`, automatically capturing user-declared TINs/PRNs per turn and passing them into `_finalize_reply` without leaking across sessions.
 
 ### 2. Vernacular-Safe Query Rewriting (G135)

@@ -274,7 +274,7 @@ AUDIT_TSA_URL=https://tsa.example.gov.ug/timestamp
 When configured, Merkle roots from periodic seals are automatically submitted to the TSA, recording verifiable external cryptographic timestamp tokens.
 
 ### 6.4 Streaming Data Loss Prevention (DLP)
-All SSE (`/v1/chat/stream`) and WebSocket (`/v2/chat/stream`) streams route through `StreamingDLPFilter` (`app/guardrails.py`):
+All SSE (`/v1/chat/stream`) and WebSocket (`/v2/chat/stream`) streams route through `StreamingDLPFilter` (`app/guardrails/`):
 - Stateful 24-character word-boundary window prevents multi-chunk sensitive token leaks (Ugandan 14-character NINs, 10-digit TINs, phone numbers).
 - Exemption rules preserve official URA contact numbers and `@ura.go.ug` email channels.
 

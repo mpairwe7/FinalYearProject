@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 from app import document_worker
 from app.rag import query
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 
 APP = Path(__file__).resolve().parents[2] / "App" / "backend" / "app"
 
@@ -316,7 +316,8 @@ def test_turn_context_is_a_leaf() -> None:
 def test_the_security_layer_and_tools_do_not_reach_into_the_orchestrator() -> None:
     importers = _importers_of_pipeline()
 
-    for lower in ("guardrails.py", "agents/evaluator.py", "tools/empathy.py", "rag/query.py", "rag/retriever.py",
+    for lower in ("guardrails/input_checks.py", "guardrails/output_checks.py", "guardrails/pii.py", "guardrails/fences.py", "guardrails/normalize.py",
+                  "agents/evaluator.py", "tools/empathy.py", "rag/query.py", "rag/retriever.py",
                   "rag/context_manager.py", "rag/corrective_rag.py", "rag/turn_context.py", *_EXTRACTED):
         assert lower not in importers, lower
 

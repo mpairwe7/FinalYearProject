@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from ..guardrails import scan_retrieved_text
+from ..guardrails.input_checks import scan_retrieved_text
 from ..vision.ocr import escape_untrusted_document_markers, strip_hidden_control_and_bidi
 
 logger = logging.getLogger(__name__)

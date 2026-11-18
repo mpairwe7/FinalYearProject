@@ -19,13 +19,10 @@ from app.rag.context_manager import RollingContextManager, extract_conversation_
 from app.rag.entailment import numeric_contradiction
 from app.escalation_notify import team_for_topic
 from app.config.flags import flags
-from app.guardrails import (
-    InputGuard,
-    MAX_INPUT_LENGTH,
-    OutputGuard,
-    _canonicalize_text,
-    redact_pii_text,
-)
+from app.guardrails.input_checks import InputGuard, MAX_INPUT_LENGTH
+from app.guardrails.normalize import _canonicalize_text
+from app.guardrails.output_checks import OutputGuard
+from app.guardrails.pii import redact_pii_text
 from app.malware_scan import MalwareRejected, scan_required
 from app.mt import citations_survived, figures_survived, units_survived
 from app.premise_guard import check_false_premise

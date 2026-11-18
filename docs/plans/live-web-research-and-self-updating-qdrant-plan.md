@@ -313,7 +313,7 @@ Read `App/backend/app/pdf_guards.py` and `App/backend/app/documents.py` first. B
    - Before parsing any PDF, checks Redis cache `ura:pdf_chunks:{sha256}` (24h TTL). If already parsed in an earlier turn, returns the cached chunks in `< 10 ms`!
 3. **Security Inspection (`pdf_guards` + `scan_retrieved_text`):**
    - Calls `inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)` from `App/backend/app/pdf_guards.py` (verifies `%PDF-` magic header, rejects encrypted PDFs, rejects `/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFiles`, and enforces `max_xrefs`).
-   - Runs `scan_retrieved_text` (`App/backend/app/guardrails.py`) and `screen_tool_result` (`App/backend/app/mcp/validation.py`) on every extracted page to strip any indirect prompt injection or Unicode bidi smuggling.
+   - Runs `scan_retrieved_text` (`App/backend/app/guardrails/`) and `screen_tool_result` (`App/backend/app/mcp/validation.py`) on every extracted page to strip any indirect prompt injection or Unicode bidi smuggling.
 4. **Page-Level Extraction, Metadata Parsing & GPU 2 Micro-Reranking:**
    - Extracts text and tables per page via `fitz.open(stream=raw_bytes, filetype="pdf")` (or `openpyxl` for `.xlsx` valuation schedules).
    - Parses document metadata from the title, filename, and first 2 pages:

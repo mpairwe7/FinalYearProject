@@ -34,7 +34,7 @@ import re
 import time
 from typing import Any
 
-from ..guardrails import redact_pii_text
+from ..guardrails.pii import redact_pii_text
 from .config import get_brief_every_turns
 from .hub import hub
 from .language import LANGUAGE_NAMES

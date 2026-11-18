@@ -9,7 +9,7 @@ import uuid
 from unittest.mock import patch
 
 from app.calculator_router import format_rate_reply, plan_rate_lookup
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 from app.rag.pipeline import ChatModel
 from app.tax.tables import get_table as get_table_in_force
 

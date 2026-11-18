@@ -79,7 +79,7 @@ def english_view(turns: list[dict[str, str]]) -> list[dict[str, str]]:
     again (G123, :func:`app.guardrails.scan_replayed_text`). Transcripts,
     exports and the audit trail read the stored turns, not this view.
     """
-    from ..guardrails import scan_replayed_text
+    from ..guardrails.input_checks import scan_replayed_text
 
     out: list[dict[str, str]] = []
     for turn in turns:

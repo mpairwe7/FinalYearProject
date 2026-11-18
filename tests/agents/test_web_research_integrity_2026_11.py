@@ -15,7 +15,8 @@ import pytest
 from app import egress
 from app import ephemeral_pdf_sandbox as sbx
 from app import web_research as wr
-from app.guardrails import contains_pii, injection_present, pii_values, scan_retrieved_text
+from app.guardrails.input_checks import injection_present, scan_retrieved_text
+from app.guardrails.pii import contains_pii, pii_values
 
 PDF_URL = "https://ura.go.ug/media/2026/11/penalty-waiver-public-notice.pdf"
 PDF_RESULT = (

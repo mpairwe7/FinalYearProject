@@ -44,7 +44,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .faq_corpus import CorpusValidationError
-from ..guardrails import injection_present, redact_pii_text
+from ..guardrails.input_checks import injection_present
+from ..guardrails.pii import redact_pii_text
 from .pdf_corpus import TRUST_MANIFEST, normalise_extracted_text, normalise_heading
 
 if TYPE_CHECKING:

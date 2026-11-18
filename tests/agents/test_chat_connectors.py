@@ -8,7 +8,7 @@ from typing import Any
 
 from app.rag import generator
 from app.config.flags import flags
-from app.guardrails import scan_external_tool_text
+from app.guardrails.input_checks import scan_external_tool_text
 from app.mcp import MCPClient
 from app.mcp.chat_connectors import (
     chat_connector_catalog,

@@ -8,7 +8,7 @@ confirms it.
 Section 2.3 of the
 [acceptable use policy](../../docs/capstone/week04-privacy-and-aup.md) lists the
 uses taxpayers may not make of the assistant. `InputGuard` in
-[guardrails.py](../../App/backend/app/guardrails.py) blocks prompt injection and
+[input_checks.py](../../App/backend/app/guardrails/input_checks.py) blocks prompt injection and
 abuse at runtime.
 
 ## What the system must never do: EU AI Act Article 5

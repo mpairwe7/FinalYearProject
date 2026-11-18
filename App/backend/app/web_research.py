@@ -59,7 +59,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .db import database as db
-from .guardrails import AI_ORGANISATION_SUFFIX, redact_pii_text, scan_retrieved_text
+from .guardrails.input_checks import AI_ORGANISATION_SUFFIX, scan_retrieved_text
+from .guardrails.pii import redact_pii_text
 from .linear_text import strip_spans
 from .tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES

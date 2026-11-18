@@ -198,7 +198,8 @@ async def chat_stream(
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
         # summary emitted just before ``grounding``.  Live tool-call frames
         # are exclusive to the WS path.
-        from ..guardrails import OutputGuard, StreamingDLPFilter, user_stated_identifiers
+        from ..guardrails.output_checks import OutputGuard
+        from ..guardrails.pii import StreamingDLPFilter, user_stated_identifiers
 
         agent_trace: list[dict[str, Any]] = []
         stated_ids = user_stated_identifiers(body.message)

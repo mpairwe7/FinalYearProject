@@ -26,7 +26,7 @@ import numpy as np
 from app.rag import cache as cache_mod
 from app.rag import retriever as retriever_mod
 from app.rag.corrective_rag import _avg_relevance
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 from app.rag.retriever import (
     LEXICAL_RELEVANCE_FLOOR,
     BM25SparseEncoder,

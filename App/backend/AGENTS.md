@@ -26,7 +26,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `db/` | `database.py` (the store and its backend seam) and `postgres.py` |
 | `tools/` | Registered tools (`ToolRegistry`) |
 | `mcp/` | MCP client + tax-calculator server |
-| `guardrails.py` | Input/output OWASP LLM01–09 |
+| `guardrails/` | OWASP LLM01–09 (ADR-0061): `input_checks.py` (`InputGuard`, `scan_*_text`), `fences.py` (spotlight fences), `pii.py` (redaction, streaming DLP), `output_checks.py` (`OutputGuard`, the figure release gate, link provenance), `normalize.py` (shared canonicalisation) |
 | `middleware/` | `logger.py` (root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks), `rate_limiter.py` (the shared slowapi `limiter` and per-route ceilings), `error_handler.py` (the 401 challenge on every HTTP error) |
 | `observability/` | `analytics.py` (the one metrics facade: prometheus_client, all workers; `record_chat_turn`), `tracing.py` (OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage), `client_telemetry.py` (Web Vitals and client errors from the browser), `security_events.py` (OWASP Logging Vocabulary events) (ADR-0060) |
 | `memory/` | Working, episodic, semantic and procedural memory and the resolution ledger; `case_facts.py` (facts the taxpayer stated in this conversation) and `language_state.py` (the conversation's answer language) (ADR-0060) |

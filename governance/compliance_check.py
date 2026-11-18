@@ -29,7 +29,11 @@ REQUIRED_FILES = [
     "governance/evidence/incident_log/README.md",
     "governance/monitoring/cost_per_decision.csv",
     "SECURITY.md",
-    "App/backend/app/guardrails.py",
+    "App/backend/app/guardrails/input_checks.py",
+    "App/backend/app/guardrails/output_checks.py",
+    "App/backend/app/guardrails/pii.py",
+    "App/backend/app/guardrails/fences.py",
+    "App/backend/app/guardrails/normalize.py",
     "App/backend/app/observability/tracing.py",
     "App/backend/app/rag/retriever.py",
     "ml/pipelines/evaluate_rag.py",
@@ -93,15 +97,15 @@ REQUIRED_FILES = [
 
 # Content keywords that MUST appear in specific files.
 REQUIRED_CONTENT: dict[str, list[str]] = {
-    "App/backend/app/guardrails.py": [
-        "InputGuard",
+    "App/backend/app/guardrails/input_checks.py": ["InputGuard"],
+    "App/backend/app/guardrails/output_checks.py": [
         "OutputGuard",
         "redact_pii",
         "check_grounding",
         "should_abstain",
         "should_escalate",
-        "STORE_RAW_PROMPTS",
     ],
+    "App/backend/app/guardrails/pii.py": ["redact_pii_text", "STORE_RAW_PROMPTS"],
     "App/backend/app/observability/tracing.py": [
         "init_tracing",
         "trace_rag_pipeline",

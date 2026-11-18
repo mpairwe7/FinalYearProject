@@ -138,7 +138,7 @@ class TestConversationalIntelligenceEngine:
 
     def test_october_2026_qa_audit_conversational_eq_structuring_and_mcp_gaps(self, monkeypatch):
         """Verify all 5 phases of the October 2026 QA & Audit remediation."""
-        from app.guardrails import OutputGuard
+        from app.guardrails.output_checks import OutputGuard
         from app.mcp import get_client, reset_client
         from app.mcp.validation import (
             coerce_arguments_to_schema,

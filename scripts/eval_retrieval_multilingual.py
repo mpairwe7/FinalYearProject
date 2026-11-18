@@ -445,7 +445,7 @@ class Harness:
 
 
 def abstains(hits: list[dict[str, Any]], lang: str) -> bool:
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
 
     return bool(OutputGuard.should_abstain(hits, locale=lang))
 
@@ -587,7 +587,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def env_summary(h: Harness) -> dict[str, Any]:
     from app.config.flags import flags
-    from app.guardrails import ABSTENTION_THRESHOLD_NORM
+    from app.guardrails.output_checks import ABSTENTION_THRESHOLD_NORM
     from app.rag.retriever import (
         DENSE_MODEL_NAME,
         LEXICAL_RELEVANCE_FLOOR,

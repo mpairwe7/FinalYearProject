@@ -39,7 +39,7 @@ from urllib.parse import unquote, urlparse
 
 from . import egress
 from .document_worker import try_isolated
-from .guardrails import _record_guardrail_security_event, injection_present
+from .guardrails.input_checks import _record_guardrail_security_event, injection_present
 from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
 from .ingestion.pdf_corpus import CORPUS_FETCH_USER_AGENT

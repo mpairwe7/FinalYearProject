@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ..guardrails import redact_pii_text
+from ..guardrails.pii import redact_pii_text
 from ..speech_service import pcm16_to_wav
 from .hub import hub
 from .language import LANGUAGE_NAMES, Decision, LanguagePolicy, LanguageVote

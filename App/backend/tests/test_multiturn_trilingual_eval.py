@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from app.rag.context_manager import english_view, normalize_history_turns
-from app.guardrails import REPLAY_WITHHELD, scan_replayed_text
+from app.guardrails.input_checks import REPLAY_WITHHELD, scan_replayed_text
 from app.memory.language_state import LanguageDecision, resolve_turn_locale
 from app.memory.extractor import FactExtractor
 

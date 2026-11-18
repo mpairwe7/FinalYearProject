@@ -7,7 +7,7 @@ from app.rag import pipeline
 
 def test_claim_verifier_failure_is_reported_as_unavailable_and_disclosed(monkeypatch) -> None:
     """G370: a verifier outage must not be mistaken for a passed comparison."""
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
 
     def verifier_down(*_args, **_kwargs):
         raise RuntimeError("claim verifier unavailable")

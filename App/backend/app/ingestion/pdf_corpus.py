@@ -1224,7 +1224,7 @@ def _assert_public_host(url: str) -> None:
 
 def inspect_pdf_for_prompt_injection(raw_bytes: bytes) -> None:
     """Reject PDFs carrying embedded prompt-injection directives in metadata or text streams (OWASP ASI06)."""
-    from ..guardrails import injection_present
+    from ..guardrails.input_checks import injection_present
 
     sample = b"\n".join(re.findall(rb"[\x20-\x7e]{16,}", raw_bytes[:524288]))
     if not sample:

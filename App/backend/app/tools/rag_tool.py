@@ -171,7 +171,7 @@ class SearchKnowledgeBaseTool(Tool):
             logger.exception("RAG tool: search failed")
             return {"ok": False, "error": f"search failed: {e}", "results": []}
 
-        from ..guardrails import scan_retrieved_text
+        from ..guardrails.input_checks import scan_retrieved_text
         from ..vision.ocr import strip_hidden_control_and_bidi
 
         results: list[dict[str, Any]] = []

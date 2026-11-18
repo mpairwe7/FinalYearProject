@@ -163,7 +163,7 @@ class TestContextRotAnalytics(unittest.TestCase):
 
 class TestScopedRedactionAndVernacularRewrite(unittest.TestCase):
     def test_user_stated_identifier_is_exempt_from_output_redaction(self) -> None:
-        from app.guardrails import redact_pii_text
+        from app.guardrails.pii import redact_pii_text
 
         text = "Your TIN is 1000123456 and email is user@example.com."
         # Without allowed_values, TIN is redacted

@@ -600,7 +600,7 @@ def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.M
 
 
 def _rate_model():
-    from app.guardrails import OutputGuard
+    from app.guardrails.output_checks import OutputGuard
     from app.rag.pipeline import ChatModel
 
     model = ChatModel.__new__(ChatModel)

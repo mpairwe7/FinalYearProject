@@ -695,7 +695,7 @@ def save_feedback(
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     comment = redact_pii_text(comment)
     user_query = redact_pii_text(user_query)
@@ -724,7 +724,7 @@ def update_feedback_comment(message_id: str, comment: str, user_id: str = "") ->
     pool = _get_pool()
     if pool is None:
         return False
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -840,7 +840,7 @@ def track_event(
     pool = _get_pool()
     if pool is None:
         return
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -961,7 +961,7 @@ def log_conversation(
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
@@ -2378,7 +2378,7 @@ def create_or_increment_discrepancy(
     cited_sources: list[str] | None = None,
     priority: str = "normal",
 ) -> dict[str, Any]:
-    from ..guardrails import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     bot_statement = redact_pii_text(str(bot_statement or "").strip())
     user_correction = redact_pii_text(str(user_correction or "").strip())

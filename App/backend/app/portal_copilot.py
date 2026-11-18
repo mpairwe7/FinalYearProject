@@ -1272,7 +1272,9 @@ def _dom_text(value: Any, max_len: int) -> str:
     somewhere else does not get that address passed on to the taxpayer or to
     whatever runs the card.
     """
-    from .guardrails import fence_spotlight_body, neutralize_untrusted_links, scan_retrieved_text
+    from .guardrails.fences import fence_spotlight_body
+    from .guardrails.input_checks import scan_retrieved_text
+    from .guardrails.output_checks import neutralize_untrusted_links
     from .vision.ocr import strip_hidden_control_and_bidi
 
     raw = strip_hidden_control_and_bidi(str(value or ""))[:max_len]

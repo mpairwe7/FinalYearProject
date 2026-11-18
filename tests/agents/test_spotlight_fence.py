@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from app.guardrails import fence_prompt_header_field, fence_spotlight_body
+from app.guardrails.fences import fence_prompt_header_field, fence_spotlight_body
 from app.rag.generator import _build_messages, _build_tool_messages
 from app.rag.prompt_builder import passage_header
 from app.rag.pipeline import _build_fallback_prompt

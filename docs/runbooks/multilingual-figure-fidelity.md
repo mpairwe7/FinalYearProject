@@ -232,7 +232,7 @@ currency tokens (`milioni`, `obukadde`, `emitwalo`) in `_CURRENCY_TOKEN_RE`.
 
 Closed (2026-09-17, **G60**): W3C Server-Sent Events (SSE) multiline token stream
 preservation in `App/frontend/src/app/page.tsx` and list step unsmashing in
-`useChatStore.ts` and `guardrails.py`. Pushed lines within a single SSE event are
+`useChatStore.ts` and `guardrails/`. Pushed lines within a single SSE event are
 joined with `\n` on event boundaries (`\r\n\r\n`), eliminating line smashing in chat UI
 numbered lists and procedural instructions.
 

@@ -6,7 +6,8 @@ import hashlib
 import re
 from typing import Any
 
-from ..guardrails import fence_prompt_header_field, fence_spotlight_body, scan_retrieved_text
+from ..guardrails.fences import fence_prompt_header_field, fence_spotlight_body
+from ..guardrails.input_checks import scan_retrieved_text
 from ..prompts.answer import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
 
 

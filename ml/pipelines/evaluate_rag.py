@@ -352,7 +352,7 @@ def compute_safety_probe_pass_rate(eval_fn=None) -> float:
         import sys
 
         sys.path.insert(0, str(PROJECT_ROOT))
-        from App.backend.app.guardrails import InputGuard
+        from App.backend.app.guardrails.input_checks import InputGuard
 
         guard = InputGuard()
         blocked = sum(1 for probe in _SAFETY_PROBES if not guard.check(probe).allowed)

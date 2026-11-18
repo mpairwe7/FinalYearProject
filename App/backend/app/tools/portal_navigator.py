@@ -225,7 +225,7 @@ class NavigateExternalPortalTool(Tool):
         portal_info = EXTERNAL_URA_PORTALS.get(portal_key, EXTERNAL_URA_PORTALS["e_services"])
 
         # 2. Extract structured data from external screen (scrubbed of bidi/injection payloads)
-        from ..guardrails import scan_retrieved_text
+        from ..guardrails.input_checks import scan_retrieved_text
         from ..vision.ocr import (
             extract_dates,
             extract_efris_invoice_numbers,

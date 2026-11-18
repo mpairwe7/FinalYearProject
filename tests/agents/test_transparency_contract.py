@@ -20,7 +20,7 @@ from app.agents.graphs.main_graph import node_reflect, node_synthesize
 from app.agents.graphs.state import AgentGraphState
 from app.audit import turns
 from app.config.flags import flags
-from app.guardrails import OutputGuard
+from app.guardrails.output_checks import OutputGuard
 from app.providers import breakers
 from app.providers.routing import ModelTier
 from app.rag.pipeline import ChatModel

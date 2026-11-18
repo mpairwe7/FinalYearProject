@@ -386,7 +386,7 @@ def escape_untrusted_document_markers(text: str) -> str:
     """
     if not text:
         return ""
-    from ..guardrails import fence_untrusted_document_body
+    from ..guardrails.fences import fence_untrusted_document_body
 
     return fence_untrusted_document_body(text)
 

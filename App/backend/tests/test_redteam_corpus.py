@@ -13,7 +13,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from app.guardrails import InputGuard, OutputGuard, injection_present
+from app.guardrails.input_checks import InputGuard, injection_present
+from app.guardrails.output_checks import OutputGuard
 
 _DATA = Path(__file__).resolve().parents[3] / "Data" / "eval"
 _CORPUS = _DATA / "redteam_corpus.jsonl"

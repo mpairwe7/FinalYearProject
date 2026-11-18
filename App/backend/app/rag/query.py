@@ -976,7 +976,8 @@ def _rewrite_history_block(history: list[dict[str, Any]]) -> str:
     is retrieved, and a scrubbed phrase leaves its payload behind.
     """
     from .context_manager import english_view
-    from ..guardrails import fence_spotlight_body, injection_present
+    from ..guardrails.fences import fence_spotlight_body
+    from ..guardrails.input_checks import injection_present
 
     lines: list[str] = []
     for raw, turn in list(zip(history, english_view(history), strict=False))[-3:]:
@@ -998,7 +999,8 @@ def accept_rewrite(candidate: str, query: str, history_text: str) -> str | None:
     citations or links), free of injection, and carrying no identifier the
     taxpayer did not type: the rewrite reaches retrieval and its logs.
     """
-    from ..guardrails import InputGuard, injection_present, pii_values
+    from ..guardrails.input_checks import InputGuard, injection_present
+    from ..guardrails.pii import pii_values
 
     out = (candidate or "").strip().split("\n")[0].strip()
     if out.lower().startswith("rewritten:"):
@@ -1040,7 +1042,7 @@ def _llm_rewrite_query(query: str, history: list[dict[str, Any]]) -> str | None:
         if not history_summary.strip():
             return None
 
-        from ..guardrails import fence_spotlight_body
+        from ..guardrails.fences import fence_spotlight_body
 
         prompt = REWRITE_PROMPT.format(history_summary=history_summary, query=fence_spotlight_body(query))
         messages = [

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.guardrails import InputGuard
+from app.guardrails.input_checks import InputGuard
 
 # Verbatim / representative questions from the curated FAQ corpus.
 LEGITIMATE = [
