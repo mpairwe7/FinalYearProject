@@ -3,7 +3,8 @@
 Three-tier memory model per
 ``docs/URA_Chatbot_Roadmap_2026_Enhanced.md`` §5:
 
-- **Working** (30 min TTL)     — current conversation, in the shared analytics database
+- **Working** (last write sets the expiry) — the taxpayer's short-term state across
+                                 conversations, in the shared analytics database
 - **Episodic** (90 day TTL)    — summaries of past conversations
 - **Semantic** (indefinite)    — extracted user facts with provenance,
                                  confidence score, and temporal decay

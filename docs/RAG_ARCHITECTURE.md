@@ -517,7 +517,7 @@ App/backend/app/
 │   ├── service.py           #   Unified memory interface (MemoryService)
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
-│   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
+│   ├── working.py       #   TTL that update_working sets on the shared working-memory row
 │   ├── handoff.py       #   Standardized HandoffEnvelope v2 (SLAContext, ToolExecutionReceipt)
 │   ├── resolution_ledger.py # Longitudinal ResolutionCase persistence across Voice & Web
 │   ├── extractor.py     #   Rule-based fact extraction from turns
