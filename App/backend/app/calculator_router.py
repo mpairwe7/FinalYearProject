@@ -96,7 +96,8 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
         (m.start(), m.end())
         for m in re.finditer(
             r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form|dt|hs|code|cap\.?|tin|prn|brn|nin|fdn|efd)"
-            r"(?:[ \t]+(?:dt|no\.?|number|id|code))?(?:[ \t]*[-:#][ \t]*|[ \t]+)"
+            # "TIN is 1000…": a linking word may sit between the label and the number (G670).
+            r"(?:[ \t]+(?:dt|no\.?|number|id|code))?(?:[ \t]+(?:is|was))?(?:[ \t]*[-:#][ \t]*|[ \t]+)"
             r"(?:\d{4}[ \t]+\d{3}[ \t]+\d{3}|\d{3}[ \t]+\d{3}[ \t]+\d{4}|\d{4}[ \t]+\d{4}[ \t]+\d{4,5}|\d+(?:-\d+)*[a-zA-Z]?)\b",
             text or "",
             re.IGNORECASE,
