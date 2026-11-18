@@ -57,7 +57,9 @@ Option 1, chosen by the service owner over the narrower option 2.
   `duplicate_of`, so the copies removed are exactly the ones it skipped: the indexed
   corpus and every passage's source name stay the same. `crawl_state.json`'s
   entries for the removed names now name the kept copy, so the crawler's hash
-  record matches the files, and its hash check still skips a re-download.
+  record matches the files. The crawler hashes each PDF after downloading it, so
+  a fetched copy of a removed name is recognised as the kept file and not saved
+  again.
 - **Phases B and C.** Each gets its own pull request, so CI and a reverting commit
   cover one step at a time. Phase C moves folders with a rerunnable script that
   rewrites every path reference. 535 files and 12 workflows name those folders.

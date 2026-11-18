@@ -440,7 +440,7 @@ App/backend/app/
 ├── ingestion/           # Load, parse and chunk sources into the corpus (ADR-0056)
 │   ├── indexer.py       #   JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
 │   ├── faq_corpus.py    #   ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
-│   ├── pdf_corpus.py    #   Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (177 PDFs → 5,639 chunks)
+│   ├── pdf_corpus.py    #   Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (173 PDFs → 5,639 chunks)
 │   ├── crawl_corpus.py  #   Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
 │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
 │   └── document_normalization.py # Document input normalization
