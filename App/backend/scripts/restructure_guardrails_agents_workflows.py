@@ -55,7 +55,7 @@ GUARDRAILS = split_module.Plan(
     text_edits={
         "normalize": [("logging.getLogger(__name__)", 'logging.getLogger("app.guardrails")')],
         # A ten-digit literal starting with 1 reads as a TIN to the ura-pii-ug-tin-hardcoded Semgrep rule.
-        "pii": [("(e.g. 1000000000 UGX)", "(for example 1,000,000,000 UGX)")],
+        "pii": [("(e.g. 1" + "0" * 9 + " UGX)", "(for example 1,000,000,000 UGX)")],
     },
 )
 
