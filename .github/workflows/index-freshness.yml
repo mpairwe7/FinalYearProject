@@ -38,7 +38,7 @@ jobs:
       - name: The last full crawl is recent enough
         working-directory: App/backend
         env:
-          PYTHONPATH: .
+          PYTHONPATH: .:${{ github.workspace }}/App
         run: python -m app.crawl_gate slo --crawl-dir ../../Data/crawl
       - name: No proposal is waiting too long
         env:

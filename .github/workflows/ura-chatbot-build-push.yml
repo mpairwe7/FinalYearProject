@@ -127,7 +127,7 @@ jobs:
       - name: Export corpora
         working-directory: App/backend
         env:
-          PYTHONPATH: .:${{ github.workspace }}
+          PYTHONPATH: .:${{ github.workspace }}/App
           PDF_CACHE_HIT: ${{ steps.pdf-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
@@ -164,7 +164,7 @@ jobs:
         if: steps.dense-cache.outputs.cache-hit != 'true'
         working-directory: App/backend
         env:
-          PYTHONPATH: .:${{ github.workspace }}
+          PYTHONPATH: .:${{ github.workspace }}/App
           # Every runner core: the first build after a corpus change embeds it all.
           LOCAL_DENSE_THREADS: "4"
         run: |
