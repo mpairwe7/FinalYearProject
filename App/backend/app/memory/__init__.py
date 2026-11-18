@@ -3,7 +3,8 @@
 Three-tier memory model per
 ``docs/URA_Chatbot_Roadmap_2026_Enhanced.md`` §5:
 
-- **Working** (30 min TTL)     — current conversation, in-process/Redis
+- **Working** (last write sets the expiry) — the taxpayer's short-term state across
+                                 conversations, in the shared analytics database
 - **Episodic** (90 day TTL)    — summaries of past conversations
 - **Semantic** (indefinite)    — extracted user facts with provenance,
                                  confidence score, and temporal decay
@@ -34,7 +35,6 @@ from .procedural import ProceduralMemory, ProceduralSkill, TrajectoryExemplar
 from .resolution_ledger import ResolutionCase, ResolutionLedger, build_resumption_prompt
 from .semantic import SemanticMemory, UserFact
 from .service import MemoryService, get_memory_service
-from .working import WorkingMemory
 
 __all__ = [
     "EpisodicMemory",
@@ -55,7 +55,6 @@ __all__ = [
     "ToolExecutionReceipt",
     "TrajectoryExemplar",
     "UserFact",
-    "WorkingMemory",
     "build_resumption_prompt",
     "compute_decayed_confidence",
     "decay_factor",

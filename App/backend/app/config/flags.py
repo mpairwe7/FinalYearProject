@@ -526,7 +526,7 @@ _REGISTRY: dict[str, Flag] = {
             "zero_effort_slot_prefill",
             False,
             "Pre-fill WorkflowSession and calculator slots from consented "
-            "SemanticMemory, WorkingMemory.verified_slot_bank, and scanned documents.",
+            "SemanticMemory, the working-memory verified_slot_bank, and scanned documents.",
         ),
         Flag(
             "workflow_specialist_bridge",

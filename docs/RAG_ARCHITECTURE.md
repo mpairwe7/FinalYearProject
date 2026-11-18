@@ -517,7 +517,7 @@ App/backend/app/
 │   ├── service.py           #   Unified memory interface (MemoryService)
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
-│   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
+│   ├── working.py       #   TTL that update_working sets on the shared working-memory row
 │   ├── handoff.py       #   Standardized HandoffEnvelope v2 (SLAContext, ToolExecutionReceipt)
 │   ├── resolution_ledger.py # Longitudinal ResolutionCase persistence across Voice & Web
 │   ├── extractor.py     #   Rule-based fact extraction from turns
@@ -809,7 +809,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
 | `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
 | `eq_adaptive_retrieval` | off | Stage 0c/0b2 EQ assessment (`tools/empathy.py`, `rag/query.py`) boosting statutory relief/instalment/waiver passages (`TPCA s.39, s.66`) on hardship/anxiety |
-| `zero_effort_slot_prefill` | off | Pre-fills `WorkflowSession` and calculator slots from consented `SemanticMemory`, `WorkingMemory.verified_slot_bank`, and scanned documents |
+| `zero_effort_slot_prefill` | off | Pre-fills `WorkflowSession` and calculator slots from consented `SemanticMemory`, the working-memory `verified_slot_bank`, and scanned documents |
 | `workflow_specialist_bridge` | off | Allows active guided workflows (`workflows/registry.py`) to delegate mid-flow calculations to MCP calculator tools and bind results into pending slots |
 | `proactive_resolution_continuation` | off | Writes localized continuation cards to `reminder_inbox` when background `mcp_tasks` or officer reviews complete on an open `ResolutionCase` |
 | `officer_ai_co_execution` | off | Enables figure-protected bilingual draft replies (`officer_chat.py`) and `Officer -> AI` procedural workflow delegation |

@@ -564,7 +564,7 @@ tests/agents/
 │                                         mandatory rails, fallback path
 ├── test_graph.py            —  14 tests: AgentGraphState, GraphRuntime bounded dispatch, error capture,
 │                                         node exception handling, main graph CLARIFY/ESCALATED outcomes
-├── test_memory.py           —  35 tests: decay math (half-life, clamping), working memory TTL,
+├── test_memory.py           —  37 tests: decay math (half-life, clamping),
 │                                         episodic + semantic CRUD with user isolation, supersede, forget,
 │                                         fact extractor patterns, MemoryService consent-gated reads
 ├── test_audit.py            —  25 tests: Merkle root (empty/single/odd), hash-chained append with
