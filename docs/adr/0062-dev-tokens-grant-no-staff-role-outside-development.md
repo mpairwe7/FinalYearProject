@@ -36,19 +36,24 @@ local development. Option 1 closes the escalation and keeps both.
 
 Option 1. `jwt_auth.DEV_TOKEN_STAFF_ENVS` is `{"development", "test"}`.
 `_hs256_verify`, which every dev-token path goes through (the HS256 verifier and the
-three RS256 fallbacks), refuses a token whose `resolve_role` is `ura_*` outside those
-environments. Outside them, `/v1/auth/dev-token` mints only the demo taxpayer
-`verified_taxpayer` the portal asks for, and answers 403 otherwise.
+three RS256 fallbacks), applies three rules outside those environments. The token must
+name the portal demo taxpayer (`jwt_auth.PORTAL_DEMO_TAXPAYER_ID`). Its role, read with
+the verifier's audience exactly as `_claims_to_user` reads it, must not be `ura_*`. And
+its `exp` and `nbf` must hold, which the fallbacks did not check before. Outside them,
+`/v1/auth/dev-token` mints only that demo taxpayer as `verified_taxpayer`, and answers
+403 otherwise.
 
 ## Consequences
 
 - Staff on the Space sign in through the OIDC provider only, as they already do.
-- A token forged with the default secret can still claim a taxpayer role outside
-  development. Setting `AUTH_DEV_SECRET` to a random value on each deployment
-  closes that, and the production gate already requires it.
+- A token forged with the default secret can name only the demo taxpayer outside
+  development, whose account holds demo data. A random `AUTH_DEV_SECRET` on each
+  deployment is still advised; the production gate already requires it.
 
 ## Confirmation
 
 - `App/backend/tests/test_dev_token_staff_roles.py`: under `APP_ENV=staging` the
   endpoint refuses staff bodies and any user but the demo taxpayer, and a dev-signed
-  staff token is refused. Under `development` both still work.
+  token is refused when it names another taxpayer, carries a staff role (flat or under
+  `resource_access.<audience>.roles`), or has expired. Under `development` staff dev
+  tokens still work. Removing any of the three rules fails its test.

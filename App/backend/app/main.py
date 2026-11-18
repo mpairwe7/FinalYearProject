@@ -4992,10 +4992,6 @@ def get_officers_presence_endpoint(
     return presence.get_presence_board(tenant_id=_receptionist_tenant_scope(ctx))
 
 
-#: The demo taxpayer the portal signs in as; built in two parts, as in the frontend.
-_PORTAL_DEMO_TAXPAYER_ID = "10000" + "23456"
-
-
 @app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)
 def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevTokenRequest)) -> DevTokenResponse:
     """Mint a development/prototype token for staff or taxpayer access.
@@ -5008,7 +5004,7 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Dev token generation is disabled under APP_ENV=production. Use a real OIDC provider.",
         )
-    from .auth.jwt_auth import DEV_TOKEN_STAFF_ENVS, make_dev_token
+    from .auth.jwt_auth import DEV_TOKEN_STAFF_ENVS, PORTAL_DEMO_TAXPAYER_ID, make_dev_token
 
     requested_role = (req.role or "").strip().lower()
     email = (req.email or "").strip().lower()
@@ -5017,7 +5013,7 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
     # Outside development this endpoint answers anyone, so it mints only the
     # portal's demo taxpayer (the quick sign-in in portal/[portalKey]/page.tsx).
     if os.getenv("APP_ENV", "development").lower() not in DEV_TOKEN_STAFF_ENVS:
-        if user_id != _PORTAL_DEMO_TAXPAYER_ID or requested_role != "verified_taxpayer" or email:
+        if user_id != PORTAL_DEMO_TAXPAYER_ID or requested_role != "verified_taxpayer" or email:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Outside development only the portal demo taxpayer gets a dev token. Use the OIDC provider.",

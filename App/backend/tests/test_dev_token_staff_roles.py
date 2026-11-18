@@ -7,7 +7,9 @@ an unauthenticated request. The HF Space runs with such an ``APP_ENV``.
 
 from __future__ import annotations
 
+import json
 import os
+import time
 
 os.environ.setdefault("LLM_ENABLED", "false")
 os.environ.setdefault("SPEECH_ENABLED", "false")
@@ -53,12 +55,45 @@ def test_in_development_a_staff_dev_token_is_still_minted(monkeypatch, client):
     assert response.status_code == 200 and response.json()["role"] == "ura_admin"
 
 
+def _signed(claims: dict) -> str:
+    header = jwt_auth._b64url_encode(b'{"alg":"HS256","typ":"JWT"}')
+    payload = jwt_auth._b64url_encode(json.dumps(claims).encode())
+    return f"{header}.{payload}.{jwt_auth._hs256_sign(header, payload, jwt_auth.AUTH_DEV_SECRET)}"
+
+
 def test_outside_development_a_dev_signed_staff_token_is_refused(staging):
-    staff = jwt_auth.make_dev_token(user_id="u1", role="ura_admin")
+    staff = jwt_auth.make_dev_token(user_id=DEMO["user_id"], role="ura_admin")
     with pytest.raises(jwt_auth.JWTAuthError, match="staff"):
         jwt_auth._hs256_verify(staff, jwt_auth.AUTH_DEV_SECRET)
-    taxpayer = jwt_auth.make_dev_token(user_id="u1", role="verified_taxpayer")
-    assert jwt_auth._hs256_verify(taxpayer, jwt_auth.AUTH_DEV_SECRET)["sub"] == "u1"
+    demo = jwt_auth.make_dev_token(user_id=DEMO["user_id"], role="verified_taxpayer")
+    assert jwt_auth._hs256_verify(demo, jwt_auth.AUTH_DEV_SECRET)["sub"] == DEMO["user_id"]
+
+
+def test_outside_development_a_dev_token_cannot_name_another_taxpayer(staging):
+    forged = jwt_auth.make_dev_token(user_id="someone-else", role="verified_taxpayer")
+    with pytest.raises(jwt_auth.JWTAuthError, match="demo taxpayer"):
+        jwt_auth._hs256_verify(forged, jwt_auth.AUTH_DEV_SECRET)
+
+
+def test_outside_development_a_staff_role_under_the_audience_is_refused(staging):
+    """The gate reads roles as _claims_to_user does, audience-scoped paths included."""
+    from app.auth.dependencies import _get_verifier
+
+    audience = _get_verifier().audience or jwt_auth.OIDC_AUDIENCE
+    now = int(time.time())
+    hidden = _signed({
+        "sub": DEMO["user_id"], "iat": now, "exp": now + 600, "role": "public",
+        "resource_access": {audience: {"roles": ["ura_admin"]}},
+    })
+    with pytest.raises(jwt_auth.JWTAuthError, match="staff"):
+        jwt_auth._hs256_verify(hidden, jwt_auth.AUTH_DEV_SECRET)
+
+
+def test_outside_development_an_expired_dev_token_is_refused(staging):
+    now = int(time.time())
+    expired = _signed({"sub": DEMO["user_id"], "iat": now - 7200, "exp": now - 3600, "role": "verified_taxpayer"})
+    with pytest.raises(jwt_auth.JWTAuthError, match="expired"):
+        jwt_auth._hs256_verify(expired, jwt_auth.AUTH_DEV_SECRET)
 
 
 def test_in_development_a_dev_signed_staff_token_is_accepted(monkeypatch):
