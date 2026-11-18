@@ -55,7 +55,7 @@ Option 1, in `app/db/snapshot.py`.
   `DB_SNAPSHOT_INTERVAL_SECONDS` (default 300, minimum 60) and once more on SIGTERM.
   It waits with `sigtimedwait` rather than a signal handler. Its priority stops it
   after both API roles, so the last export sees their last writes, and it logs
-  `final export starting` so an export cut short by the platform's stop timeout
+  `final export begins` so an export cut short by the platform's stop timeout
   shows in the logs.
 - **Privacy.** The HF transport refuses a bucket that is not private.
 

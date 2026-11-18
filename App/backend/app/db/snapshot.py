@@ -316,7 +316,7 @@ def export() -> dict[str, Any] | None:
 
 def _export_logged(final: bool = False) -> None:
     if final:
-        logger.info("final export starting")
+        logger.info("final export begins")
     try:
         manifest = export()
     except Exception as exc:
