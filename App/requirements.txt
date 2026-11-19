@@ -9,7 +9,10 @@ httpx>=0.28.1,<0.29
 
 # Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
 pandas>=3.0.5,<4.0
-numpy==1.26.4
+# The production image's range (App/backend/requirements-cranecloud.txt). CI installs this
+# file with that image's lock as constraints, so tests run on the numpy that ships;
+# `==1.26.4` here kept them on a version production does not run (ADR-0066).
+numpy>=1.26,<2.5
 # Pinned as a cluster with transformers/huggingface-hub below — see the note
 # there. 3.4.1 caps `transformers<5.0.0`, so it could not stay while the CVE
 # fix required moving to 5.x.

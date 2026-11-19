@@ -141,6 +141,23 @@ docker push landwind/ura-chatbot:latest
 
 ---
 
+### 3.1 Changing a Python dependency of the image
+
+The image installs `App/backend/requirements-cranecloud.lock.txt`, hash-checked and from wheels only (ADR-0066). CI installs the same lock.
+
+1. Edit the range in `App/backend/requirements-cranecloud.txt`.
+2. Re-run the command in the lock's header from the repository root. To move one package and keep the rest, add `--upgrade-package <name>`:
+
+   ```bash
+   uv pip compile App/backend/requirements-cranecloud.txt --generate-hashes \
+     --python-version 3.11.17 --python-platform x86_64-unknown-linux-gnu \
+     -o App/backend/requirements-cranecloud.lock.txt
+   ```
+
+3. Commit both files. `App/tests/test_ci_supply_chain_policy.py` fails if the lock no longer satisfies a range, or if a root pin in `App/requirements.txt` excludes a version the lock ships.
+
+If the image build fails with "no matching distribution" under `--only-binary`, the chosen version has no wheel for Python 3.11 on Linux x86-64. Pick a version that has one.
+
 ## 4. nginx routing (baked into the image)
 
 The snippet below is the original, simplified routing. The shipped file is

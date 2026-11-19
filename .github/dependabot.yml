@@ -14,7 +14,7 @@ updates:
   # CRAWLER - hash-locked, read-only job (App/ml/requirements-crawl.txt) -> Sunday 01:00 UTC
   # =============================================================================
   - package-ecosystem: "pip"
-    directory: "/ml"
+    directory: "/App/ml"
     target-branch: "dev"
     schedule:
       interval: "weekly"
@@ -82,7 +82,7 @@ updates:
   # ROOT TOOLS - Python Root Requirements -> Sunday 03:00 UTC
   # =============================================================================
   - package-ecosystem: "pip"
-    directory: "/"
+    directory: "/App"
     target-branch: "dev"
     schedule:
       interval: "weekly"
@@ -146,7 +146,6 @@ updates:
   # actually run; it was not covered, so its base images never got bumped.
   - package-ecosystem: "docker"
     directories:
-      - "/"
       - "/App"
       - "/App/backend"
       - "/App/backend/orpheus_sidecar"

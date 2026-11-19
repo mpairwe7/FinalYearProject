@@ -279,7 +279,7 @@ def test_dependabot_cooldown_and_coverage():
         assert int(cooldown.get("default-days", 0)) >= 7, f"{eco} {dirs}: cooldown under 7 days"
     assert "npm" not in ecosystems, "the frontend lockfile is bun.lock; npm updates skip it"
     assert "/App/frontend" in ecosystems.get("bun", [])
-    for needed in ("/", "/App", "/App/frontend"):
+    for needed in ("/App", "/App/frontend"):  # no Dockerfile is left at the root (ADR-0064)
         assert needed in ecosystems.get("docker", []), f"Dependabot docker does not cover {needed}"
     # A digest pin nobody bumps goes stale, so every Dockerfile's directory is watched.
     for path in _dockerfiles():
@@ -419,7 +419,69 @@ def test_crane_cloud_requirements_install_on_the_python_they_ship_with():
         lines = _requirement_lines(ROOT / "App" / "backend" / "requirements-cranecloud.txt")
         numpy = Requirement(next(line for line in lines if line.lower().startswith("numpy")))
         assert not numpy.specifier.contains("2.5.0"), f"{numpy}: numpy 2.5 requires Python 3.12"
-        assert numpy.specifier.contains("1.26.4"), f"{numpy}: CI shares an env with the root numpy==1.26.4"
+
+
+_IMAGE_REQUIREMENTS = ROOT / "App" / "backend" / "requirements-cranecloud.txt"
+_IMAGE_LOCK = ROOT / "App" / "backend" / "requirements-cranecloud.lock.txt"
+
+
+def _image_lock() -> dict[str, str]:
+    """Package to pinned version, as the production image installs them."""
+    from packaging.utils import canonicalize_name
+
+    return {
+        canonicalize_name(name): version
+        for name, version in re.findall(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)", _IMAGE_LOCK.read_text(encoding="utf-8"), re.M)
+    }
+
+
+def test_the_production_image_installs_only_its_hashed_lock():
+    """The image installed version ranges with no hashes, so two builds of one commit
+    could ship different packages, and nothing checked a downloaded file (ADR-0066)."""
+    dockerfile = (ROOT / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8")
+    assert "pip install --require-hashes --only-binary :all: -r requirements-cranecloud.lock.txt" in dockerfile
+    assert "-r requirements-cranecloud.txt" not in dockerfile, "the ranges file must not be installed"
+    context = (ROOT / "App" / "Dockerfile.cranecloud.dockerignore").read_text(encoding="utf-8")
+    assert "!App/backend/requirements-cranecloud.lock.txt" in context, "the lock must reach the build context"
+    build = (ROOT / ".github" / "workflows" / "ura-chatbot-build-push.yml").read_text(encoding="utf-8")
+    assert '"App/backend/requirements-cranecloud.lock.txt"' in build, "a lock change must rebuild the image"
+
+
+def test_the_production_lock_satisfies_its_requirements_and_hashes_every_package():
+    """A range raised without a new lock, or a hand-edited pin, fails here."""
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    pinned = _image_lock()
+    for line in _requirement_lines(_IMAGE_REQUIREMENTS):
+        req = Requirement(line)
+        version = pinned.get(canonicalize_name(req.name))
+        assert version is not None, f"the lock is missing {req.name}"
+        assert req.specifier.contains(version, prereleases=True), f"the lock pins {req.name}=={version}, outside {req}"
+    blocks = re.split(r"\n(?=[A-Za-z0-9])", _IMAGE_LOCK.read_text(encoding="utf-8"))
+    unhashed = [b.splitlines()[0] for b in blocks if re.match(r"^[A-Za-z0-9_.-]+==", b) and "--hash=sha256:" not in b]
+    assert unhashed == []
+    assert len(pinned) >= 80, "the lock holds the whole dependency closure, not only the top level"
+
+
+def test_ci_tests_run_on_the_versions_the_image_ships():
+    """CI tested numpy 1.26.4 while the image shipped 2.4.6; four more packages differed too."""
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    ci = (ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml").read_text(encoding="utf-8")
+    constrained = "-r App/requirements.txt -c App/backend/requirements-cranecloud.lock.txt"
+    assert ci.count(constrained) == ci.count("-r App/requirements.txt"), "every root install is constrained by the lock"
+    assert "--require-hashes -r App/backend/requirements-cranecloud.lock.txt" in ci
+    assert "-r App/backend/requirements-cranecloud.txt" not in ci, "CI must install the lock, not the ranges"
+    pinned = _image_lock()
+    excluded = {}
+    for line in _requirement_lines(ROOT / "App" / "requirements.txt"):
+        req = Requirement(line)
+        version = pinned.get(canonicalize_name(req.name))
+        if version is not None and not req.specifier.contains(version, prereleases=True):
+            excluded[req.name] = f"{req.specifier} excludes the shipped {version}"
+    assert excluded == {}, "a root pin that excludes a shipped version makes the constrained install fail"
 
 
 def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
@@ -506,7 +568,25 @@ def test_a_crawl_is_never_cancelled_by_the_next_one():
 
 def test_the_crawl_lock_is_watched_by_dependabot():
     config = _load(ROOT / ".github" / "dependabot.yml")
-    assert "/ml" in {update.get("directory") for update in config["updates"] if update["package-ecosystem"] == "pip"}
+    assert "/App/ml" in {update.get("directory") for update in config["updates"] if update["package-ecosystem"] == "pip"}
+
+
+_MANIFESTS = {"pip": "requirements*.txt", "docker": "Dockerfile*", "bun": "package.json", "npm": "package.json"}
+
+
+def test_dependabot_watches_folders_that_hold_a_manifest():
+    """ADR-0064 moved `ml/` and the root requirements under App/. Dependabot kept watching
+    `/ml` and `/`, found nothing there and said nothing, and the old test asserted the string."""
+    config = _load(ROOT / ".github" / "dependabot.yml")
+    empty = []
+    for update in config["updates"]:
+        pattern = _MANIFESTS.get(update["package-ecosystem"])
+        if pattern is None:
+            continue
+        for directory in [update["directory"]] if "directory" in update else update["directories"]:
+            if not list((ROOT / directory.lstrip("/")).glob(pattern)):
+                empty.append(f"{update['package-ecosystem']}: {directory}")
+    assert empty == []
 
 
 def test_the_freshness_check_can_fail():
