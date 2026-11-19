@@ -10,8 +10,8 @@
 # To run the local-GPU stack instead, use App/backend/requirements.txt.
 
 # Core API
-fastapi>=0.141.1,<0.142
-uvicorn[standard]>=0.52.4,<0.53
+fastapi>=0.162.5,<0.163
+uvicorn[standard]>=0.54.0,<0.55
 pydantic>=2.13.4,<2.14
 
 # Rate limiting + cache (Redis optional, falls back to in-process)
@@ -55,7 +55,7 @@ sse-starlette>=2.0.0
 
 # Qdrant client kept so QDRANT_ENABLED=true is a future-flag toggle.
 # Without QDRANT_URL set, HybridRetriever falls back to keyword search.
-qdrant-client>=1.19.1,<1.20
+qdrant-client>=1.20.0,<1.21
 
 # Misc utilities used outside the LLM path
 cryptography>=44.0.0
@@ -101,4 +101,4 @@ dnspython>=2.9.0
 edge-tts>=7.3.1,<8
 # Native libsndfile container decoder (MP3/OGG/WAV/FLAC) so Call Receptionist
 # UraSpeechTTS can decode 24 kHz edge-tts MP3 into 16 kHz PCM16 frames without ffmpeg/scipy.
-soundfile>=0.12.0
+soundfile>=0.14.0
