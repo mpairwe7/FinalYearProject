@@ -458,11 +458,10 @@ jobs:
           COMPOSE_FILE: App/docker-compose.yml:App/docker-compose.full.yml
           API_PORT: "8087"
           APP_ENV: "development"
-          SPEECH_ENABLED: "false"
-          LLM_ENABLED: "false"
           WORKERS: "1"
         run: |
-          touch .env
+          # The api service lists no SPEECH_ENABLED or LLM_ENABLED, so only its env_file passes them in.
+          printf 'SPEECH_ENABLED=false\nLLM_ENABLED=false\n' > .env
           docker compose build api || {
             echo "::error::failed to build the api image under test"
             exit 1

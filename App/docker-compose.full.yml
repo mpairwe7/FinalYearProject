@@ -9,6 +9,12 @@
 #   cd App && docker compose -f docker-compose.yml -f docker-compose.full.yml up -d
 #   export COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml   # from the root
 #
+# Needs Docker Compose v2.24.4 or later, for `!override`.
+#
+# A full stack started before this layout runs on the old `ura-network`. Stop it
+# once with `docker compose -p app down`, before the first `up`: it needs no Compose file, stops
+# the containers of every profile, removes the old network and keeps the volumes.
+#
 # `!override` replaces the base's value outright, where Compose would otherwise
 # merge the two lists. `!reset` removes a key the base sets. Dropping either tag
 # lets the base's settings into this variant (ADR-0064).

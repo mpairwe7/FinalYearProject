@@ -124,6 +124,7 @@ def test_the_full_stack_resolves_to_the_hardened_variant(tmp_path: Path) -> None
     for name in ("api", "frontend"):
         assert services[name]["read_only"] is True, name
     assert services["redis"]["user"] == "999:1000"
+    assert [volume["target"] for volume in services["qdrant"]["volumes"]] == ["/qdrant/storage"]
 
     # `!override` replaces the base's lists. Without it Compose appends, and the base's settings leak in.
     api = services["api"]

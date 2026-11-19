@@ -171,8 +171,11 @@ Option 1, chosen by the service owner over the narrower option 2.
   - **`vllm` stays in the overlay.** `docker-compose.local-sunflower.yml` defines its
     own `vllm` on the base, and Compose would merge the two.
   - **One network.** The full stack's `ura-network` is now the base's `app-network`. A
-    full stack that is already running keeps its old network until
-    `docker compose down`; bring it down before the first `up` on this layout.
+    running full stack stays on the old network, and a `down` with the new files does
+    not remove it. Stop it once with `docker compose -p app down` before the first `up`. That needs no
+    Compose file, stops the containers of every profile, removes the old network and
+    keeps the volumes.
+  - **Compose v2.24.4 or later.** The overlay uses `!override`.
   - **The overlay alone is not a stack.** `docker compose -f App/docker-compose.full.yml`
     now stops with "service redis has neither an image nor a build context".
   - **The OWASP ZAP job runs again.** It called `docker compose` from the repository
@@ -202,6 +205,11 @@ Option 1, chosen by the service owner over the narrower option 2.
   overlay. Nothing differs except the network's name, the profile-gated definitions the
   base gained, and one volume the full model now declares and does not mount
   (`qdrant_backups`). The services each combination starts are the same.
+- The review then changed `api-dev` (dev profile) on purpose (G693). It had not worked:
+  the image's entrypoint ignores `command`, so its `--reload` never applied, and its
+  read-only source mount hid the folder the database is created in. It now sets its own
+  entrypoint with `--reload` and keeps the database in `/tmp/ura-data`. The comparison,
+  rerun, differs in `api-dev` alone.
 - `App/tests/test_compose_build_paths.py` keeps the overlay an overlay: it may only change
   services the base defines (and add `vllm`), it may not repeat a setting the base already
   has, and the pair must resolve to the hardened variant. That last test merges the two

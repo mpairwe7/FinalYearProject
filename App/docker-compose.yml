@@ -222,7 +222,10 @@ services:
   # ---------------------------------------------------------------------------
   # PostgreSQL — optional multi-replica analytics store
   # Enable with: docker compose --profile postgres up
-  # Then set in .env: ANALYTICS_BACKEND=postgres
+  # Then set in .env: ANALYTICS_BACKEND=postgres, POSTGRES_PASSWORD, and
+  # POSTGRES_DSN=postgresql://ura:<POSTGRES_PASSWORD>@postgres:5432/ura_analytics
+  # The API does not wait for this service, so on a cold start it can exit and
+  # restart until Postgres accepts connections.
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16.6-alpine
@@ -266,12 +269,14 @@ services:
     environment:
       - APP_ENV=development
       - PORT=8000
-      - WORKERS=1
       - LOG_LEVEL=debug
+      # The source mount hides the image's /app/data_store, and /app is read-only.
+      - ANALYTICS_DB_DIR=/tmp/ura-data
     volumes:
       - ./backend:/app:ro
       - ../artifacts/models:/app/models:ro
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # The image's entrypoint ignores `command` and starts workers without --reload.
+    entrypoint: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     profiles:
       - dev
     networks:
