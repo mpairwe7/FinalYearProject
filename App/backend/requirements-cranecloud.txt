@@ -10,15 +10,15 @@
 # To run the local-GPU stack instead, use App/backend/requirements.txt.
 
 # Core API
-fastapi>=0.141.1,<0.142
-uvicorn[standard]>=0.52.4,<0.53
+fastapi>=0.162.5,<0.163
+uvicorn[standard]>=0.54.0,<0.55
 pydantic>=2.13.4,<2.14
 
 # Rate limiting + cache (Redis optional, falls back to in-process)
 slowapi>=0.1.10
 limits[redis]>=3.13
 redis>=5.0.0
-psycopg[binary]>=3.2.0
+psycopg[binary]>=3.3.9
 psycopg-pool>=3.2.0
 
 # Data loading
@@ -51,11 +51,11 @@ fpdf2>=2.8.8
 Pillow>=13.0.0
 
 # SSE streaming
-sse-starlette>=2.0.0
+sse-starlette>=3.5.1
 
 # Qdrant client kept so QDRANT_ENABLED=true is a future-flag toggle.
 # Without QDRANT_URL set, HybridRetriever falls back to keyword search.
-qdrant-client>=1.19.1,<1.20
+qdrant-client>=1.20.0,<1.21
 
 # Misc utilities used outside the LLM path
 cryptography>=44.0.0
@@ -87,7 +87,7 @@ websockets>=17.2
 # (via fastapi / qdrant-client); only these two are new. boto3 is used only by
 # the R2 client (lazy-imported), so it does not bloat cold-start.
 pydantic-settings>=2.15.0
-boto3>=1.43.114
+boto3>=1.44.1
 
 # DNS-over-HTTPS resolver (doh_resolver.py) — RENU pods have no working upstream
 # DNS; this resolves external hostnames via 1.1.1.1 over TCP/443 when USE_DOH=true.
