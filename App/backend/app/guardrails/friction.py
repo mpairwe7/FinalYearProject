@@ -115,20 +115,24 @@ class StrikeTracker:
         """Seconds left in *key*'s cool-down, ``0.0`` when there is none."""
         if not key:
             return 0.0
+        shared_left = 0.0
         r = self._shared()
         if r is not None:
             try:
                 ms = r.pttl(f"{_SHARED_PREFIX}cooldown:{key}")
-                return ms / 1000 if ms and ms > 0 else 0.0
+                shared_left = ms / 1000 if ms and ms > 0 else 0.0
             except Exception:  # noqa: BLE001 - fall back to this process's own state
                 logger.debug("shared strike store unavailable; using this process's", exc_info=True)
+        # A pause this process started while the store was down still runs after it recovers.
         now = self._clock()
         with self._lock:
             until = self._cooldown_until.get(key, 0.0)
             if until <= now:
                 self._cooldown_until.pop(key, None)
-                return 0.0
-            return until - now
+                local_left = 0.0
+            else:
+                local_left = until - now
+        return max(shared_left, local_left)
 
     def record_strike(self, key: str) -> bool:
         """Count one guard block for *key*. True when this strike starts a cool-down."""
@@ -200,28 +204,36 @@ class StrikeTracker:
 
 
 _SHARED_PREFIX = "guard:friction:"
+#: Seconds between attempts to reach Redis after one failed.
+_REDIS_RETRY_S = 30.0
 _redis_client: Any = None
-_redis_checked = False
+_redis_retry_at = 0.0
 
 
 def _shared_redis() -> Any:
-    """The Redis client at ``REDIS_URL``, once per process, or None."""
-    global _redis_client, _redis_checked
-    if _redis_checked:
+    """The Redis client at ``REDIS_URL``, or None until it can be reached.
+
+    A failed connection is retried every ``_REDIS_RETRY_S``, so a Redis that comes
+    up after this process resumes shared counting without a restart.
+    """
+    global _redis_client, _redis_retry_at
+    if _redis_client is not None:
         return _redis_client
-    _redis_checked = True
     url = os.getenv("REDIS_URL", "")
-    if not url:
+    if not url or time.monotonic() < _redis_retry_at:
         return None
     try:
         import redis
 
         client = redis.from_url(url, socket_timeout=1)
         client.ping()
-        _redis_client = client
-    except Exception:  # noqa: BLE001 - no Redis means per-process state, as before
-        logger.warning("REDIS_URL is set but unreachable; guard strikes stay per process")
-    return _redis_client
+    except Exception:  # noqa: BLE001 - no Redis means per-process state until it answers
+        if not _redis_retry_at:
+            logger.warning("REDIS_URL is set but unreachable; guard strikes stay per process until it answers")
+        _redis_retry_at = time.monotonic() + _REDIS_RETRY_S
+        return None
+    _redis_client = client
+    return client
 
 
 #: The process-wide tracker the chat service consults.

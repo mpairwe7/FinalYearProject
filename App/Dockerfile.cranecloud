@@ -343,11 +343,15 @@ ENV APP_BUILD_SHA=${GIT_SHA}
 # tables, their evidence and the kernel release record, hashed as built. Nothing
 # wrote one, so APP_ENV=production could not start (G681). It stays fresh for
 # AUTHORITY_MAX_AGE_DAYS (30) after the build; named here because this image does
-# not set PROJECT_ROOT, which the default location hangs off.
+# not set PROJECT_ROOT, which the default location hangs off. AUTHORITY_BUILD_ID
+# changes with every workflow run, so a rebuild of the same commit renews the
+# manifest instead of reusing this layer from the cache.
+ARG AUTHORITY_BUILD_ID=""
 ENV URA_AUTHORITY_MANIFEST=/app/artifacts/authority/manifest.json
-RUN cd /app/backend && python -m app.authority write \
+RUN PYTHONPATH=/app/backend python -m app.authority write \
         --out /app/artifacts/authority/manifest.json --version "${GIT_SHA:-unknown}" \
-        app/tax/data/*.json app/tax/evidence/rate_evidence.json app/kernel/releases.json
+        /app/backend/app/tax/data/*.json /app/backend/app/tax/evidence/rate_evidence.json \
+        /app/backend/app/kernel/releases.json
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

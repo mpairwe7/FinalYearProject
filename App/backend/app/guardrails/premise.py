@@ -508,8 +508,6 @@ _TAX_HEADS_IN_FORCE = (
 
 _TAX_NAME = "|".join(f"(?:{head.names})" for head in _TAX_HEADS_IN_FORCE)
 _ENDED = r"(?:abolished|scrapped|repealed|removed|eliminated|cancell?ed|withdrawn|phased out|done away with)"
-# One taxpayer's account ("my PAYE was stopped") is not the tax.
-_NOT_THEIRS = r"(?<!\bmy\s)(?<!\bour\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bher\s)(?<!\btheir\s)"
 # One relief or item ("the VAT exemption", "VAT on sugar") is not the tax either.
 _THE_TAX_ITSELF = (
     r"(?!\s+(?:exemptions?|refunds?|registration|returns?|deductions?|deferments?|waivers?|relief|"
@@ -520,7 +518,7 @@ _ABOLISHED_CLAIMS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         # "VAT was abolished", "has PAYE been scrapped?", "VAT abolished"
-        rf"{_NOT_THEIRS}\b(?P<tax>{_TAX_NAME})\b(?:\s+(?:has|have|had)\s+been|\s+(?:was|were|is|are|got|been|being))?"
+        rf"\b(?P<tax>{_TAX_NAME})\b(?:\s+(?:has|have|had)\s+been|\s+(?:was|were|is|are|got|been|being))?"
         rf"\s+(?:now\s+|officially\s+|finally\s+)?{_ENDED}\b{_NOT_AN_ITEM}",
         # "the abolition of VAT"
         rf"\b(?:abolition|scrapping|repeal|removal|elimination|cancell?ation)\s+of\s+(?:the\s+)?"
@@ -528,12 +526,16 @@ _ABOLISHED_CLAIMS = tuple(
         # "the government scrapped withholding tax"
         rf"\b{_ENDED}\s+(?:the\s+)?(?P<tax>{_TAX_NAME})\b{_THE_TAX_ITSELF}",
         # "VAT no longer exists"
-        rf"{_NOT_THEIRS}\b(?P<tax>{_TAX_NAME})\b\s+(?:no\s+longer\s+(?:exists?|applies|apply)(?!\s+(?:to|on|for)\b)"
+        rf"\b(?P<tax>{_TAX_NAME})\b\s+(?:no\s+longer\s+(?:exists?|applies|apply)(?!\s+(?:to|on|for)\b)"
         rf"|(?:does\s+not|doesn't)\s+exist\s+any\s?more)",
     )
 )
 # A question about a hypothetical is not a claim: "if VAT were abolished, would prices fall?"
 _HYPOTHETICAL = re.compile(r"\b(?:if|suppose|supposing|imagine|hypothetically|were\s+to)\b", re.IGNORECASE)
+# One taxpayer's account is not the tax: "my PAYE was removed", "my corporate income tax".
+_PERSONAL = re.compile(r"\b(?:my|our|your|his|her|their)\s+(?:\S+\s+)?$", re.IGNORECASE)
+_YEAR = re.compile(r"\b(?:19|20)\d\d\b")
+_CLAUSE_MARKS = ".?!;\n"
 
 
 def _head_for(name: str) -> _TaxHead:
@@ -547,39 +549,49 @@ def check_abolished_claim(query: str) -> FalsePremiseResult:
     the portal co-pilot, which answered with a sign-in card and never said VAT
     still applies. A tax counts as in force when the current rate table holds
     its key; a tax that really ended, such as the social media (OTT) tax, has
-    none, so a claim about it passes.
+    none, so a claim about it passes. Another country's tax, a hypothetical, one
+    taxpayer's own account and a year the tables do not reach pass too.
     """
     from ..tax import tables
+    from ..text_signals import detect_foreign_jurisdiction
 
     text = query or ""
+    if detect_foreign_jurisdiction(text):
+        return FalsePremiseResult(is_false_premise=False)  # the jurisdiction guard answers it
+    table = None
     for claim in _ABOLISHED_CLAIMS:
-        match = claim.search(text)
-        if match is None:
-            continue
-        clause_start = max(text.rfind(mark, 0, match.start()) for mark in ".?!;\n") + 1
-        if _HYPOTHETICAL.search(text[clause_start : match.start()]):
-            continue
-        head = _head_for(match.group("tax"))
-        try:
-            table = tables.get_table()
-        except tables.RateTableError:
-            return FalsePremiseResult(is_false_premise=False)
-        if head.key not in table.rates:
-            continue
-        value = table.rates[head.key]
-        rate = (
-            head.rate_phrase.format(rate=f"{value * 100:g}%")
-            if head.rate_phrase and isinstance(value, (int, float))
-            else ""
-        )
-        reply = (
-            f"{head.display} has not been abolished. It still applies in Uganda in {table.fiscal_year}{rate}. "
-            "Keep registering, filing and paying as before: stopping leads to penalties and interest. "
-            "If you read about a change, it may be an exemption for particular goods or services. "
-            "Ask me about that change and I will check it."
-        )
-        logger.warning("abolished-tax premise corrected (tax: %s)", head.display)
-        return FalsePremiseResult(is_false_premise=True, concept=head.display, reply=reply)
+        for match in claim.finditer(text):
+            clause_start = max(text.rfind(mark, 0, match.start()) for mark in _CLAUSE_MARKS) + 1
+            ends = [i for i in (text.find(mark, match.end()) for mark in _CLAUSE_MARKS) if i != -1]
+            clause = text[clause_start : min(ends, default=len(text)) + 1]
+            before = text[clause_start : match.start()]
+            if _HYPOTHETICAL.search(before) or _PERSONAL.search(before):
+                continue
+            if table is None:
+                try:
+                    table = tables.get_table()
+                except tables.RateTableError:
+                    return FalsePremiseResult(is_false_premise=False)
+            last_year = int(table.fiscal_year[2:6]) + 1  # FY2026-27 ends in 2027
+            if any(int(year) > last_year for year in _YEAR.findall(clause)):
+                continue  # a year no loaded table covers: not ours to correct
+            head = _head_for(match.group("tax"))
+            if head.key not in table.rates:
+                continue
+            value = table.rates[head.key]
+            rate = (
+                head.rate_phrase.format(rate=f"{value * 100:g}%")
+                if head.rate_phrase and isinstance(value, (int, float))
+                else ""
+            )
+            reply = (
+                f"{head.display} has not been abolished. It still applies in Uganda in {table.fiscal_year}{rate}. "
+                "Keep registering, filing and paying as before: stopping leads to penalties and interest. "
+                "If you read about a change, it may be an exemption for particular goods or services. "
+                "Ask me about that change and I will check it."
+            )
+            logger.warning("abolished-tax premise corrected (tax: %s)", head.display)
+            return FalsePremiseResult(is_false_premise=True, concept=head.display, reply=reply)
     return FalsePremiseResult(is_false_premise=False)
 
 

@@ -254,13 +254,17 @@ def test_the_lifespan_runs_the_sync_in_every_process() -> None:
     from app import receptionist
 
     revocation = _revocation()
-    synced = threading.Event()
+    periodic_sync = threading.Event()  # the strict read at startup does not count
     with (
-        mock.patch.object(revocation, "sync", side_effect=lambda *_args, **_kwargs: synced.set()),
+        mock.patch.object(
+            revocation,
+            "sync",
+            side_effect=lambda *_args, strict=False, **_kwargs: None if strict else periodic_sync.set(),
+        ),
         mock.patch.object(receptionist, "start"),
         TestClient(main_mod.app),
     ):
-        ran = synced.wait(timeout=5)
+        ran = periodic_sync.wait(timeout=5)
     assert ran
     assert main_mod._SESSION_REVOCATION_SYNC_INTERVAL_SECONDS <= 5
 

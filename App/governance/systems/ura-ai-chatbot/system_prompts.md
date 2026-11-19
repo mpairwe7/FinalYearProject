@@ -7,7 +7,7 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 
 | Prompt | Text | Sent by | Pinned by |
 | --- | --- | --- | --- |
-| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | Partly: `App/tests/agents/test_harness_prompt_contract.py` checks each ADR-0030 guarding rule: grounding, citation, abstention, exact figures and their fiscal year, data-not-commands for passages and uploads, the refusal and its wording, the persona lock, confidentiality and simulated connectors. History is fenced where `_build_messages` adds it (G667) |
+| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | Partly: `App/tests/agents/test_harness_prompt_contract.py` checks each ADR-0030 guarding rule: grounding, citation, abstention, exact figures and their fiscal year, data-not-commands for passages and uploads, the refusal and its wording, the persona lock, confidentiality and simulated connectors. History is fenced where `_build_messages` adds it (G667). A draft the response judge sends back is revised by `pipeline._reflect_llm` under its own editor instruction |
 | FAQ judge | `answer.py` `FAQ_JUDGE_PROMPT` | `rag/pipeline`, ranking FAQ candidates (ADR-0037) | None |
 | Follow-up rewriter | `query.py` `REWRITE_SYSTEM`, `REWRITE_PROMPT` | `rag/query`, behind a default-off flag (ADR-0031) | `App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py` |
 | Call query extraction | `receptionist.py` `QUERY_EXTRACT_SYSTEM` | `receptionist/brain` | `App/backend/tests/test_call_carryover.py` |

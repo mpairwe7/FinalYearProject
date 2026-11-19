@@ -94,6 +94,45 @@ class SharedStrikeTests(unittest.TestCase):
         self.assertEqual([worker.record_strike("probe"), worker.record_strike("probe")], [False, True])
         self.assertGreater(worker.cooldown_remaining("probe"), 0)
 
+    def test_a_pause_started_while_redis_was_down_outlives_its_recovery(self) -> None:
+        store = _FakeRedis()
+        state = {"up": False}
+        worker = StrikeTracker(threshold=2, window_s=60, cooldown_s=30, shared=lambda: store if state["up"] else _Down())
+        worker.record_strike("probe")
+        self.assertTrue(worker.record_strike("probe"))  # paused in this process
+
+        state["up"] = True
+
+        self.assertGreater(worker.cooldown_remaining("probe"), 0)
+
+    def test_redis_is_tried_again_after_a_failed_connection(self) -> None:
+        from unittest import mock
+
+        from app.guardrails import friction
+
+        calls = {"n": 0}
+
+        def from_url(*_args, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionError("redis down")
+            return mock.Mock(ping=mock.Mock(return_value=True))
+
+        clock = {"now": 1000.0}
+        with (
+            mock.patch.dict("os.environ", {"REDIS_URL": "redis://redis:6379/0"}),
+            mock.patch("redis.from_url", side_effect=from_url),
+            mock.patch.object(friction.time, "monotonic", side_effect=lambda: clock["now"]),
+            mock.patch.object(friction, "_redis_client", None),
+            mock.patch.object(friction, "_redis_retry_at", 0.0),
+        ):
+            self.assertIsNone(friction._shared_redis())
+            self.assertIsNone(friction._shared_redis())  # within the retry interval: no new attempt
+            clock["now"] += friction._REDIS_RETRY_S + 1
+            self.assertIsNotNone(friction._shared_redis())
+
+        self.assertEqual(calls["n"], 2)
+
     def test_reset_clears_the_shared_store(self) -> None:
         store = _FakeRedis()
         worker = self._worker(store)

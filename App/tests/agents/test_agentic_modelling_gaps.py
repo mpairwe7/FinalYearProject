@@ -319,6 +319,11 @@ class TestEpistemicFalsePremiseRejection:
             "I heard the government scrapped withholding tax",
             "After the abolition of VAT, what replaced it?",
             "Corporate income tax was repealed in 2025",
+            "Since my employer said VAT was abolished, do I stop?",
+            # A hypothetical first does not hide the claim after it.
+            "If VAT were abolished, prices would fall. PAYE was abolished.",
+            # Uganda named alongside another country is still a Uganda question.
+            "VAT was abolished in Kenya and Uganda, right?",
         ],
     )
     def test_a_tax_in_force_said_to_be_abolished_is_corrected(self, query):
@@ -336,6 +341,13 @@ class TestEpistemicFalsePremiseRejection:
             "VAT no longer applies to exports?",
             "Was the OTT social media tax abolished?",
             "What is the VAT rate?",
+            # One taxpayer's account, however long the tax's name.
+            "My corporate income tax was removed by my employer",
+            "My rental income tax was removed",
+            # Another country's tax is the jurisdiction guard's to answer.
+            "Since VAT was abolished in Kenya, do I still need to file VAT returns there?",
+            # A year no loaded rate table covers.
+            "Since VAT was abolished in 2031, what VAT rate applies in 2032?",
         ],
     )
     def test_an_item_a_hypothetical_or_an_ended_tax_is_not_corrected(self, query):
