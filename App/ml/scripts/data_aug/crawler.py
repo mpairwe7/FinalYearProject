@@ -248,8 +248,8 @@ class CrawlConfig:
     #: Links followed from a seed. A notice is one click from its listing.
     link_depth: int = 2
     checkpoint_every: int = 50
-    pdf_output_dir: Path = Path("Data/pdfs")
-    crawl_output_dir: Path = Path("Data/crawl")
+    pdf_output_dir: Path = Path("App/Data/pdfs")
+    crawl_output_dir: Path = Path("App/Data/crawl")
     state_file: Path | None = None
     include_mda_pdfs: bool = False
 
@@ -1746,12 +1746,12 @@ def _extract_tag(url: str) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Crawl URA's live site into Data/crawl (ADR-0023)")
+    parser = argparse.ArgumentParser(description="Crawl URA's live site into App/Data/crawl (ADR-0023)")
     parser.add_argument("--tier", choices=("full", "changes"), default="full")
     parser.add_argument("--max-fetches", type=int, default=None)
     parser.add_argument("--max-seconds", type=float, default=None)
-    parser.add_argument("--crawl-dir", type=Path, default=Path("Data/crawl"))
-    parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
+    parser.add_argument("--crawl-dir", type=Path, default=Path("App/Data/crawl"))
+    parser.add_argument("--pdf-dir", type=Path, default=Path("App/Data/pdfs"))
     parser.add_argument("--include-mda-pdfs", action="store_true", help="Also queue the 11-MDA statutory PDF URLs")
     args = parser.parse_args(argv)
 

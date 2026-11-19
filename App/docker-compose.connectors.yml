@@ -22,7 +22,7 @@
 # unavailable — so `docker compose down` and friends still work without it.
 #
 # The six-container form of this, one server per system, is
-# ../docker-compose.mcp.yml. See App/docs/runbooks/enterprise-connectors-and-mcp.md.
+# ./docker-compose.mcp.yml. See App/docs/runbooks/enterprise-connectors-and-mcp.md.
 # ===========================================================================
 
 services:

@@ -51,7 +51,7 @@ log = logging.getLogger("quality_gate")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = PROJECT_ROOT / "artifacts" / "quantized" / "Qwen3-8B" / "manifest.json"
-DEFAULT_EVAL_RESULTS = PROJECT_ROOT / "Results" / "quantized_eval.json"
+DEFAULT_EVAL_RESULTS = PROJECT_ROOT / "App" / "Results" / "quantized_eval.json"
 
 # Production acceptance criteria
 DEFAULT_MAX_FAITHFULNESS_DROP_PCT = 4.0  # ≤ 4% drop from bfloat16

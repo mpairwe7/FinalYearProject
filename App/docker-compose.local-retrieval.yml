@@ -91,8 +91,8 @@ services:
       - ./Data/teacher_qa:/app/Data/teacher_qa:ro
       - ./Data/pdf_jsonl:/app/Data/pdf_jsonl:ro
       - ./Data/crawl_jsonl:/app/Data/crawl_jsonl:ro
-      - ../Data/pdfs:/app/Data/pdfs:ro
-      - ../Data/crawl/pages:/app/Data/crawl/pages:ro
+      - ./Data/pdfs:/app/Data/pdfs:ro
+      - ./Data/crawl/pages:/app/Data/crawl/pages:ro
       - qdrant_index_state:/app/index_state
     depends_on:
       qdrant:

@@ -3,7 +3,7 @@
 > **Historical record — two conclusions below have since been overturned.**
 > §3 accepts CPU fallback for both SALT tiers and §7 calls GPU execution
 > "blocked on this host's driver ceiling". That diagnosis was wrong: it was a
-> wheel problem, not a driver problem. `Dockerfile.gpu` now pins a matched
+> wheel problem, not a driver problem. `App/Dockerfile.gpu` now pins a matched
 > `torch`/`torchaudio` 2.11.0+cu128 pair and both tiers run on the GPU on this
 > same host. `docker-compose.gpu-salt.yml` sets `cuda:0`, not `cpu`. See
 > `local-gpu-salt-ngrok-2026-09-04.md` for the current bring-up and numbers.
@@ -37,7 +37,7 @@ than only in scrollback.
 | Host | shared 8x NVIDIA RTX A6000 48 GiB sandbox; driver reports CUDA 12.2 |
 | Pinned GPU | **GPU 2** (`GPU_ID=2`), selected idle at the time via `nvidia-smi` |
 | Compose overlay order | `docker-compose.yml` → `docker-compose.local-sunflower.yml` → `docker-compose.gpu-salt.yml` |
-| API image | built from `Dockerfile.gpu` (repo root) — bakes in the pinned-commit Spark-TTS BiCodec checkout; see that file's own header comments for the torch/torchaudio CUDA-generation mismatch it works around |
+| API image | built from `App/Dockerfile.gpu` (repo root) — bakes in the pinned-commit Spark-TTS BiCodec checkout; see that file's own header comments for the torch/torchaudio CUDA-generation mismatch it works around |
 | LLM | local on-disk `App/Model/Sunflower-14B-FP8`, served by `vllm/vllm-openai:v0.8.5` as `Sunbird/Sunflower-14B-FP8`, real GPU (Marlin FP8 kernel) |
 | ASR | `Sunbird/asr-whisper-large-v3-salt`, `WHISPER_SALT_DEVICE=cpu` |
 | TTS | `Sunbird/spark-tts-salt` + BiCodec, `SPARK_TTS_DEVICE=cpu` |
@@ -58,21 +58,21 @@ GPU_ID=2 docker compose \
 own header comment for the full rationale of each override); the two
 things it does that the base + `local-sunflower` files don't:
 
-1. Builds `api` from `Dockerfile.gpu` instead of the base `Dockerfile`, so
+1. Builds `api` from `App/Dockerfile.gpu` instead of the base `Dockerfile`, so
    Spark-TTS-SALT's `SPARK_TTS_REPO_DIR` checkout is actually present.
 2. Pins both GPU consumers (`api`, `vllm`) to `${GPU_ID:-2}` via
    `NVIDIA_VISIBLE_DEVICES` and `deploy.resources.reservations.devices`.
 
 ## 3. Decision: CPU fallback for both SALT tiers, accepted deliberately
 
-`Dockerfile.gpu` bakes `SPARK_TTS_DEVICE=cuda` / `WHISPER_SALT_DEVICE=cuda`
+`App/Dockerfile.gpu` bakes `SPARK_TTS_DEVICE=cuda` / `WHISPER_SALT_DEVICE=cuda`
 by default. On this host that raises at `load()` instead of degrading
 gracefully — `App/docs/runbooks/salt-speech-backends.md` already documents why:
 `App/backend/requirements.txt` pins `torch==2.12.1`, whose only published
 Linux wheel bundles CUDA 13.0-generation runtime libs, and this host's
 driver reports CUDA 12.2 (`RuntimeError: The NVIDIA driver on your system
 is too old (found version 12020)`). This is a host driver ceiling, not a
-config bug — no compose/Dockerfile knob fixes it (see `Dockerfile.gpu`'s
+config bug — no compose/Dockerfile knob fixes it (see `App/Dockerfile.gpu`'s
 own header for why a build-arg attempt at this was tried and reverted).
 
 Given that constraint, the explicit choice for this run was: **enable both

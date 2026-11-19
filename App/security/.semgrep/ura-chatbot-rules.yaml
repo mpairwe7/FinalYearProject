@@ -220,7 +220,7 @@ rules:
         - "*.test.*"
         - "*test_*"
         - "App/tests/*"
-        - "Data/*"
+        - "App/Data/*"
         - "*.md"
         - "App/threat-model/*"
     message: >
@@ -242,7 +242,7 @@ rules:
         - "*.test.*"
         - "*test_*"
         - "App/tests/*"
-        - "Data/*"
+        - "App/Data/*"
         - "*.md"
         - "App/threat-model/*"
     message: >

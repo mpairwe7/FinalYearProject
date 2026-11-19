@@ -606,7 +606,7 @@ def main() -> int:
 
     results["flaw_diagnosis"] = flaws
 
-    out_file = Path("Results/document_analysis_ngrok_evaluation.json")
+    out_file = Path("App/Results/document_analysis_ngrok_evaluation.json")
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
     log(f"\nFull evaluation results saved to {out_file}")

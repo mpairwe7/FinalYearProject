@@ -119,8 +119,8 @@ paths = [
     '''go\.sum$''',
     '''.*_test\.py$''',
     '''App/tests/.*''',
-    '''Results/.*''',
-    '''Data/.*''',
+    '''App/Results/.*''',
+    '''App/Data/.*''',
     '''.*\.ipynb$''',
     '''App/docs/capstone/sbom-cyclonedx\.json$''',
 ]

@@ -101,7 +101,7 @@ def _export_onnx(source: Path, out_dir: Path, quantize: bool) -> list[Path]:
             "environment, because it cannot be installed alongside the transformers "
             "5.x that CVE-2026-9856 requires. Install the export toolchain in its "
             "own environment, never this one: python -m venv .venv-onnx && "
-            ".venv-onnx/bin/pip install -r requirements-onnx-export.txt"
+            ".venv-onnx/bin/pip install -r App/requirements-onnx-export.txt"
         ) from exc
 
     out_dir.mkdir(parents=True, exist_ok=True)

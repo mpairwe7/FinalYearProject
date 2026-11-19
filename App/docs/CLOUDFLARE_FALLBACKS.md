@@ -47,7 +47,7 @@ Gemini uses `x-goog-api-key`. **No key is ever placed in a URL query string.**
    --export-pdf-jsonl --export-crawl-jsonl`). Per-vector metadata is
    `{text, source, page, section, tag, chunk_id, doc_type, fiscal_year}`.
 
-Set values in the gitignored `.env` (template: `.env.example`) for local dev, or
+Set values in the gitignored `.env` (template: `App/.env.example`) for local dev, or
 as Crane Cloud deployment env. To activate on Crane Cloud:
 
 ```bash

@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_portal_copilot_flag_registered_in_all_three_places() -> None:
-    """`portal_copilot` must land in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`."""
+    """`portal_copilot` must land in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`."""
     assert "portal_copilot" in _REGISTRY
     spec = _REGISTRY["portal_copilot"]
     assert spec.default is True
@@ -43,7 +43,7 @@ def test_portal_copilot_flag_registered_in_all_three_places() -> None:
     assert "`portal_copilot` (`FLAG_PORTAL_COPILOT`)" in rag_arch
     assert f"**{len(_REGISTRY)}** in total" in rag_arch
 
-    env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    env_example = (REPO_ROOT / "App/.env.example").read_text(encoding="utf-8")
     assert "FLAG_PORTAL_COPILOT=true" in env_example
 
 

@@ -13,7 +13,7 @@ reply. Four sets:
 ``native``    The rows whose Luganda and Swahili questions were written into
               the corpus itself (``question_lg`` / ``question_sw``). They are
               the control for the next caveat.
-``coverage``  ``Data/eval/coverage_bank.jsonl``: curated questions in all three
+``coverage``  ``App/Data/eval/coverage_bank.jsonl``: curated questions in all three
               languages. No point ids; the runner judges a pool of candidates.
 ``ood``       Questions the assistant must not answer from the corpus, in all
               three languages: general knowledge, other countries' tax, other
@@ -71,7 +71,7 @@ from app.receptionist.language import lexical_hits  # noqa: E402
 from eval_retrieval_multilingual import stable_rank  # noqa: E402  (this directory)
 
 OUT = ROOT / "App" / "evals" / "retrieval_multilingual" / "queries.jsonl"
-COVERAGE_BANK = ROOT / "Data" / "eval" / "coverage_bank.jsonl"
+COVERAGE_BANK = ROOT / "App" / "Data" / "eval" / "coverage_bank.jsonl"
 
 LANG_NAME = {"lg": "Luganda", "sw": "Swahili"}
 

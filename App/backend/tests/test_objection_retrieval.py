@@ -9,9 +9,9 @@ lodge an objection if dissatisfied with an assessment.", which carries no
 procedure and shares almost no terms with how people actually ask. Anything
 phrased as a how-to therefore scored below the abstention threshold.
 
-Data/dataset/ura_objections_and_appeals_faqs.csv now carries the procedure
+App/Data/dataset/ura_objections_and_appeals_faqs.csv now carries the procedure
 itself, grounded in the Tax Procedures Code Act section 23 wording already
-used as the reference context in Data/eval/rag_eval.jsonl: 45 days from
+used as the reference context in App/Data/eval/rag_eval.jsonl: 45 days from
 service of the notice, in writing, grounds plus supporting documents, and a
 decision from the Commissioner General within 90 days.
 

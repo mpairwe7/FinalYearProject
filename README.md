@@ -20,7 +20,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 | [Deployment Guide](App/docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](App/docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](App/docs/data-schema-and-eval.md) | Database models and evaluation criteria |
-| [Security Policy](SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
+| [Security Policy](.github/SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
 | [Agent repo map](AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `App/evals/`, `App/infra/`) |
 
 ## Pipeline Overview
@@ -84,7 +84,7 @@ FinalYearProject/
 │       │   └── features/  # Chat, FAQ, Settings screens + providers
 │       ├── android/       # Android native (speech, network config)
 │       └── ios/           # iOS native (speech, microphone permissions)
-├── Data/                  # Training & evaluation data
+├── App/Data/                  # Training & evaluation data
 │   ├── dataset/          # 41 CSV FAQ files
 │   ├── pdfs/             # PDF documents
 │   └── eval/             # RAG evaluation sets
@@ -108,10 +108,10 @@ FinalYearProject/
 │       ├── eval_retrieval.py     # Retrieval ranking gate
 │       ├── asr/, mt/, tts/       # infer_*.py: speech_service.py's local backend tier
 │       └── data_aug/             # Corpus chunking used by App/backend's export tooling
-├── Model/                 # Trained model artifacts
-├── Results/               # Metrics and reports
+├── App/Model/                 # Trained model artifacts
+├── App/Results/               # Metrics and reports
 ├── App/tests/                 # Test suite
-├── docker-compose.yml     # Service orchestration (API + frontend + Qdrant + Redis)
+├── App/docker-compose.full.yml     # Service orchestration (API + frontend + Qdrant + Redis)
 └── App/docs/                  # Documentation
 ```
 
@@ -240,7 +240,7 @@ The PR Python coverage gate is currently set to a ratcheting baseline of 35% whi
 | Scan | Coverage |
 |------|----------|
 | Filesystem | Python/Node.js/Dart dependency vulnerabilities |
-| IaC | Dockerfile + docker-compose misconfiguration |
+| IaC | App/Dockerfile + docker-compose misconfiguration |
 | License | Block copyleft (AGPL, GPL, SSPL) in production |
 | Container Images | API, Frontend (2 images) |
 | PR Image Scope | API and frontend image scans run only when relevant image/app paths change on PRs; push, schedule, and manual runs scan both images |
@@ -304,7 +304,7 @@ The project implements **defense-in-depth** security across 7 CI/CD workflows an
 | **Accessibility** | axe-core WCAG 2.2 AA, Lighthouse CI (>= 90) | Frontend a11y audit in CI |
 | **Load Testing** | k6 (p95 < 3s, error rate < 1%) | SLO validation |
 
-All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). Container images are signed with Sigstore cosign (keyless OIDC) and attested with SLSA v1.2 provenance. See [SECURITY.md](SECURITY.md) for full details.
+All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). Container images are signed with Sigstore cosign (keyless OIDC) and attested with SLSA v1.2 provenance. See [.github/SECURITY.md](.github/SECURITY.md) for full details.
 
 ## RAG Quality Gates
 
@@ -346,13 +346,13 @@ locale-specific LoRA adapters (see `App/backend/app/rag/generator.py`).
 See [App/ml/README.md](App/ml/README.md) for what's there and why.
 
 ## Local Development
-- Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
+- Install Python deps with `uv pip install -r App/requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
-- API: build and run locally with `docker compose up --build` (expects `app.main:app`). Qdrant runs as a first-class service via docker-compose with healthcheck.
+- API: build and run locally with `docker compose -f App/docker-compose.full.yml up --build` (expects `app.main:app`). Qdrant runs as a first-class service via docker-compose with healthcheck.
 - LLM: Qwen3-8B downloads automatically on first request unless the Hugging Face cache is mounted offline. Set `LLM_LOAD_IN_4BIT=true` for NF4 4-bit loading, `LLM_DEVICE=cpu` for CPU-only inference, or `LLM_DEVICE=auto` for GPU auto-detection. Disable with `LLM_ENABLED=false` to fall back to FAQ lookup.
 
 ## Container Baseline
-- API image (`Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).
+- API image (`App/Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).
 - Uses BuildKit cache mounts for uv dependency layers (`# syntax=docker/dockerfile:1.7` + `--mount=type=cache,target=/root/.cache/uv`).
 - Compose runtime hardening is enabled for production-like services (`read_only` rootfs for API, `cap_drop: [ALL]`, `no-new-privileges:true`, `tmpfs` mounts, `init: true`).
 

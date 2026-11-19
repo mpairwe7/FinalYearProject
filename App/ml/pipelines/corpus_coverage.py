@@ -2,7 +2,7 @@
 
 The retrieval gates this repository already carries all score *fixed rows*:
 ``test_retrieval_regression_gate`` asks every indexed FAQ its own question,
-``evaluate_rag`` scores ``Data/eval/rag_eval.jsonl``. Both answer "does the
+``evaluate_rag`` scores ``App/Data/eval/rag_eval.jsonl``. Both answer "does the
 corpus still retrieve what it retrieved yesterday". Neither can answer "is
 there a common taxpayer question the corpus cannot answer at all", because
 every question they ask is one the corpus was built from.
@@ -12,7 +12,7 @@ on the subject was "Yes. You may lodge an objection if dissatisfied with an
 assessment.", so self-retrieval was perfect and a taxpayer asking "how do I
 object to a tax assessment I disagree with?" got the abstention copy.
 
-This harness probes the other way round. ``Data/eval/coverage_bank.jsonl``
+This harness probes the other way round. ``App/Data/eval/coverage_bank.jsonl``
 holds questions phrased the way contact-centre callers phrase them, in
 English, Luganda and Kiswahili, each tagged with the domain it belongs to and
 the facts a correct answer has to carry. Running it reports, per domain:
@@ -24,7 +24,7 @@ the facts a correct answer has to carry. Running it reports, per domain:
     skipped    never asked (see the corpus-mode note below)      -> not scored
 
 ``--fail-under-floor`` gates release on the per-domain floors in
-``Data/eval/coverage_domains.yaml``; every abstention and weak answer is
+``App/Data/eval/coverage_domains.yaml``; every abstention and weak answer is
 printed by question so the output is a work list rather than a percentage.
 
 Three modes:
@@ -84,9 +84,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-BANK_PATH = PROJECT_ROOT / "Data" / "eval" / "coverage_bank.jsonl"
-DOMAINS_PATH = PROJECT_ROOT / "Data" / "eval" / "coverage_domains.yaml"
-DATASET_DIR = PROJECT_ROOT / "Data" / "dataset"
+BANK_PATH = PROJECT_ROOT / "App" / "Data" / "eval" / "coverage_bank.jsonl"
+DOMAINS_PATH = PROJECT_ROOT / "App" / "Data" / "eval" / "coverage_domains.yaml"
+DATASET_DIR = PROJECT_ROOT / "App" / "Data" / "dataset"
 
 #: The languages the taxpayer UI offers and this harness probes by default.
 DEFAULT_LANGUAGES = ("en", "lg", "sw")
@@ -876,7 +876,7 @@ def check_bank_covers_corpus(
             "add it to a domain and add a question to coverage_bank.jsonl"
         )
     for name in sorted(claimed - on_disk):
-        problems.append(f"coverage_domains.yaml names {name}, which is not in Data/dataset")
+        problems.append(f"coverage_domains.yaml names {name}, which is not in App/Data/dataset")
 
     asked = {e.domain for e in bank}
     for name in sorted(set(domains) - asked):

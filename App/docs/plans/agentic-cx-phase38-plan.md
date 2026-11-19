@@ -52,7 +52,7 @@ and English-router form, and the read-only, code-routed connector surface (G138�
 - **On-premises first.** Every core path runs on the local stack (Sunflower on vLLM, Whisper-SALT,
   Orpheus/Spark, Qdrant, Redis, Postgres/SQLite). External services stay circuit-broken last resorts.
 - **Flag everything, address it.** New behaviour lands default **off** in `config/flags.py`, subject-addressable
-  (`FLAG_<NAME>_PERCENT/_COHORTS/_ALLOWLIST`), documented in `App/docs/RAG_ARCHITECTURE.md` and `.env.example`.
+  (`FLAG_<NAME>_PERCENT/_COHORTS/_ALLOWLIST`), documented in `App/docs/RAG_ARCHITECTURE.md` and `App/.env.example`.
   Ramp: `ura_staff` cohort → 5% → 25% → 100%, each step gated on the metrics in §8.
 - **Statutory accuracy outranks autonomy.** No change may bypass figure protection, the premise guard,
   grounding/faithfulness checks, PII redaction or the audit ledger. Escalation is offered, never imposed,

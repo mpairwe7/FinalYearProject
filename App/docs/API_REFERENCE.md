@@ -3257,8 +3257,8 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `LOG_LEVEL` | Logging level | `info` |
 | `HF_MODEL_REPO` | Model repository | `mpairweLandwind/ura-chatbot` |
 | `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
-| `DATA_DIR` | Path to FAQ CSV directory | `Data/dataset` |
-| `PDF_DIR` | Path to PDF documents | `Data/pdfs` |
+| `DATA_DIR` | Path to FAQ CSV directory | `App/Data/dataset` |
+| `PDF_DIR` | Path to PDF documents | `App/Data/pdfs` |
 | **Qdrant (Hybrid Retrieval)** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `QDRANT_COLLECTION` | Collection name | `ura_knowledge_base` |

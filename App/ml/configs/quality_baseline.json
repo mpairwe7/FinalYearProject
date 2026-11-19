@@ -1,6 +1,6 @@
 {
   "_comment": "RAG evaluation means measured on dev (CI artifact rag-evaluation-results, 2026-10-05). quality_gates.py --baseline fails a pull request that drops any metric more than --max-regression below these. Raise a value only in the change that earns it.",
-  "eval_set": "Data/eval/rag_eval.jsonl",
+  "eval_set": "App/Data/eval/rag_eval.jsonl",
   "metrics": {
     "faithfulness": 0.858,
     "answer_relevancy": 0.6781,

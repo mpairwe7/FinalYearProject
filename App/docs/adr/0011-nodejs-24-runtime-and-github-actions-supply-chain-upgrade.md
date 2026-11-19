@@ -41,7 +41,7 @@ We upgraded the CI/CD supply chain and frontend runtime baseline from Node.js 20
    - Upgraded `App/Dockerfile.cranecloud` Stage 2 to `node:24-bookworm-slim` (copying the pinned `oven/bun:1.4.3-slim` binary and `App/frontend/bun.lock*`) and Stage 3 to copy `/usr/local/bin/node` from Stage 2. This removed the mutable `curl | bash` installers (`bun.sh/install` and `deb.nodesource.com`).
    - Added `"engines": { "node": ">=24.0.0" }` to `App/frontend/package.json`. The draft also left `App/frontend/Dockerfile` on `node:26-bookworm-slim`; A6 corrects that.
 3. **Container & Dependency Vulnerability Remediation:**
-   - Enforced `Pillow>=13.0.0` across `App/backend/requirements*.txt`, `Dockerfile`, and `Dockerfile.gpu` (eliminating 28 `Pillow 12.3.0` CVEs) and `"katex": "^0.18.2"` override in `App/frontend/package.json` (`CVE-2026-103923`).
+   - Enforced `Pillow>=13.0.0` across `App/backend/requirements*.txt`, `Dockerfile`, and `App/Dockerfile.gpu` (eliminating 28 `Pillow 12.3.0` CVEs) and `"katex": "^0.18.2"` override in `App/frontend/package.json` (`CVE-2026-103923`).
    - Enforced fail-closed CRITICAL/HIGH vulnerability gating in `.github/workflows/security-trivy.yml`.
 
 ## Consequences

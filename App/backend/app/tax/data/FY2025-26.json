@@ -164,8 +164,8 @@
     "penal_tax_late_filing_monthly_rate": "Tax Procedures Code Act (Cap 343), s.49(1)",
     "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)",
     "late_payment_interest_monthly_rate": "Tax Procedures Code Act (Cap 343), s.39",
-    "objection_timeline_days": "Tax Procedures Code Act (Cap 343), s.24; Data/dataset/ura_objections_and_appeals_faqs.csv",
-    "objection_decision_timeline_days": "Tax Procedures Code Act (Cap 343), s.23 / s.24; Data/dataset/ura_objections_and_appeals_faqs.csv",
+    "objection_timeline_days": "Tax Procedures Code Act (Cap 343), s.24; App/Data/dataset/ura_objections_and_appeals_faqs.csv",
+    "objection_decision_timeline_days": "Tax Procedures Code Act (Cap 343), s.23 / s.24; App/Data/dataset/ura_objections_and_appeals_faqs.csv",
     "tax_appeals_tribunal_deadline_days": "Tax Appeals Tribunal Act (Cap 345), s.16",
     "tax_appeals_tribunal_deposit_rate": "Tax Appeals Tribunal Act (Cap 345), s.15 - mandatory 30% deposit of tax assessed or undisputed portion",
     "digital_services_tax_non_resident": "Income Tax Act (Cap 340), s.86A",
@@ -177,15 +177,15 @@
     "residency_days_threshold": "TAXATION-HANDBOOK-FY-2025-26-1 (definitions - resident individual); Income Tax Act (Cap 340), s.9 - present in Uganda for 183 days or more in any 12-month period commencing or ending in the year of income",
     "residency_avg_days_threshold": "TAXATION-HANDBOOK-FY-2025-26-1 (definitions - resident individual); Income Tax Act (Cap 340), s.9 - present in Uganda during the year of income and each of the two preceding years for periods averaging 122 days",
     "year_of_income_end": "TAXATION-HANDBOOK-FY-2025-26-1 (definitions - year of income); Income Tax Act (Cap 340), s.2 - period of twelve months ending on June 30",
-    "bik_motor_vehicle_inclusion_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 1: Motor vehicle - (20% x A x B/C) - D); Data/dataset/ura_employment_income_faqs.csv",
+    "bik_motor_vehicle_inclusion_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 1: Motor vehicle - (20% x A x B/C) - D); App/Data/dataset/ura_employment_income_faqs.csv",
     "bik_motor_vehicle_depreciation_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 1: A depreciated on a reducing balance basis at 35% per annum for subsequent years)",
     "bik_days_in_year_standard": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 1: C is the number of days in the year of income)",
-    "bik_housing_employment_income_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 8: Accommodation/housing); Data/dataset/ura_employment_income_faqs.csv",
-    "bik_loan_principal_threshold_ugx": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 5: Low interest on loans exceeding one million shillings); Data/dataset/ura_employment_income_faqs.csv",
+    "bik_housing_employment_income_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 8: Accommodation/housing); App/Data/dataset/ura_employment_income_faqs.csv",
+    "bik_loan_principal_threshold_ugx": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 5: Low interest on loans exceeding one million shillings); App/Data/dataset/ura_employment_income_faqs.csv",
     "bik_loan_statutory_interest_rate": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (item 5: Bank of Uganda discount rate at commencement of the year of income) - unverified rate value",
     "bik_de_minimis_monthly_ugx": "TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3 Valuation of Benefits in Kind (Relief: non-cash benefits whose value is less than Shs. 10,000 a month are excluded)",
     "fx_conversion_rule": "Income Tax Act (Cap 340) currency conversion rule (Bank of Uganda mid-exchange rate on date of transaction/payment) - citation and snapshot unverified",
-    "vat_input_efris_einvoice_required": "Value Added Tax Act (Cap 349), s.28 & Value Added Tax (Amendment) Act 2023, s.24; Data/dataset/ura_wholesale_and_retail_sector_faqs.csv - input tax credit requires valid EFRIS e-invoice/e-receipt",
+    "vat_input_efris_einvoice_required": "Value Added Tax Act (Cap 349), s.28 & Value Added Tax (Amendment) Act 2023, s.24; App/Data/dataset/ura_wholesale_and_retail_sector_faqs.csv - input tax credit requires valid EFRIS e-invoice/e-receipt",
     "vat_imported_services_reverse_charge_input_credit_allowed": "Value Added Tax Act (Cap 349), s.28; TAXATION-HANDBOOK-FY-2025-26-1 - reverse-charge VAT on imported services is not claimable as input tax credit",
     "withholding_non_resident_service_contract": "Withholding-Tax-FY-2024-25-1.pdf; Income Tax Act (Cap 340), s.85 - 15% WHT on non-resident Ugandan-sourced service contracts (excludes employment contracts)",
     "rental_tax_individual_threshold": "Income Tax Act, s.5 and Third Schedule (2021 compilation numbering), as amended by the Income Tax (Amendment) Act 2022: no rental tax on annual gross rent up to UGX 2,820,000, 12% above it with no deductions (URA Tax Amendments FY2022-23, p.5; URA Taxation Handbook FY2025-26 (8th ed.), p.49).",
@@ -219,19 +219,19 @@
       "id": "dtl-july-2021",
       "title": "Domestic Tax Laws of Uganda (compilation, July 2021)",
       "publisher": "Uganda Revenue Authority",
-      "url": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf"
+      "url": "App/Data/pdfs/10580_DT_LAWS_JULY_2021.pdf"
     },
     {
       "id": "ura-handbook-fy2025-26",
       "title": "A Guide to Taxation in Uganda, Eighth Edition (FY2025-26)",
       "publisher": "Uganda Revenue Authority",
-      "url": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      "url": "App/Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf"
     },
     {
       "id": "ura-amendments-fy2022-23",
       "title": "Tax Amendments FY2022-23",
       "publisher": "Uganda Revenue Authority",
-      "url": "Data/pdfs/Tax-Amendments-FY-2022-23.pdf"
+      "url": "App/Data/pdfs/Tax-Amendments-FY-2022-23.pdf"
     }
   ]
 }

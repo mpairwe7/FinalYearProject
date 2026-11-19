@@ -77,7 +77,7 @@ affected — this is a targeted pass, not a rewrite of the doc tree.
 | `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` | Gap statuses (⚪ 🟡 🟢) — flip a gap when it ships |
 | `docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md` | Appendix C implementation status, test counts |
 | `App/README.md`, `README.md` | Model ids, module tree, phase list |
-| `.env.example` | Every new env var and flag must appear here |
+| `App/.env.example` | Every new env var and flag must appear here |
 | `App/docs/MODEL_SWAP_GUIDE.md`, `App/docs/DEPLOYMENT.md` | Model ids, tiers, deployment topology |
 | `docs/EVALUATION_REPORT.md` | Metric values — update only alongside a real re-run |
 
@@ -92,7 +92,7 @@ grep -rn "<old fact>" --include="*.md" . | grep -v node_modules
 - **Correct the claim, keep the prose.** Do not restructure a doc while
   fixing a number in it.
 - **A new feature flag must land in three places**: the `config/flags.py` registry,
-  the flag table in `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`. Two out of
+  the flag table in `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`. Two out of
   three is the usual failure.
 - **A shipped gap flips its status** in `GAPS_AND_AGENTIC_ROADMAP.md` and gets
   struck through, matching the existing 🟢 entries. Do not delete the row —

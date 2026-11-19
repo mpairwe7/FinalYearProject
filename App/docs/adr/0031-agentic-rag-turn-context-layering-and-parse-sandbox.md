@@ -16,7 +16,7 @@ the gaps are:
 
 | Gap | Measurement |
 | --- | --- |
-| The child's environment was scrubbed by a denylist (G478) | 18 secret-looking names in `.env.example` passed it, including `AUDIT_TAXPAYER_HMAC_SALT`, `DEPLOY_KEY`, `WEBHOOK_NOTIFY_URL`, and the Qdrant, vLLM and reasoner addresses (CWE-526) |
+| The child's environment was scrubbed by a denylist (G478) | 18 secret-looking names in `App/.env.example` passed it, including `AUDIT_TAXPAYER_HMAC_SALT`, `DEPLOY_KEY`, `WEBHOOK_NOTIFY_URL`, and the Qdrant, vLLM and reasoner addresses (CWE-526) |
 | No address-space cap by default (`DOCUMENT_PARSE_MAX_MEM_BYTES=0`) (G479) | Four concurrent parses, each unbounded, on a 16 GB host |
 
 The deadline holds. An isolated parse of the 50 MB Stamp Duty Act returns in about 1 s, and a 1.5 GiB

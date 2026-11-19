@@ -11,6 +11,9 @@
 # Docs: https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
 # =============================================================================
 
+# Scans run from the repository root; the ignore file sits beside this config (ADR-0064).
+ignorefile: App/security/.trivyignore
+
 # ── Scan settings ────────────────────────────────────────────────────────────
 scan:
   # Scanners to enable by default
@@ -65,7 +68,7 @@ misconfiguration:
   # Check Dockerfiles, docker-compose, Kubernetes manifests, Terraform, etc.
   include-non-failures: false
 
-  # Trivy checks IDs to skip (use .trivyignore for per-finding suppression)
+  # Trivy checks IDs to skip (use App/security/.trivyignore for per-finding suppression)
   # skip-checks: []
 
 # ── License compliance ───────────────────────────────────────────────────────

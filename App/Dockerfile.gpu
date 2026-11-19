@@ -16,7 +16,7 @@
 # use for and should not carry.
 #
 # Build:
-#   docker build -f Dockerfile.gpu -t ura-chatbot-api:gpu .
+#   docker build -f App/Dockerfile.gpu -t ura-chatbot-api:gpu .
 #
 # Run (needs nvidia-container-toolkit on the host):
 #   docker run --gpus all -p 8000:8000 --env-file .env ura-chatbot-api:gpu

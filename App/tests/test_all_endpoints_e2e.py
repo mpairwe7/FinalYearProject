@@ -782,7 +782,7 @@ def test_evaluation_results_admin():
     r = _client().get("/v1/evaluation/results", headers=_bearer(STAFF))
     assert r.status_code == 200
     body = r.json()
-    # All metric slots are present (values may be None when Results/ is empty).
+    # All metric slots are present (values may be None when App/Results/ is empty).
     for key in ("rag_evaluation", "safety_evaluation", "benchmark", "calibration"):
         assert key in body
 

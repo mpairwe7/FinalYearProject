@@ -21,7 +21,7 @@ MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "2000"))
 # 2026-11-07. The target has to be addressed to the assistant ("your",
 # "previous", "system prompt", "you were given"), so "can I ignore the
 # instructions on my penalty notice?" stays a tax question; the benign
-# controls in Data/eval/guardrail_benign_controls.jsonl hold that line.
+# controls in App/Data/eval/guardrail_benign_controls.jsonl hold that line.
 _OVERRIDE_VERB = (
     r"(?:ignore|disregard|forget|override|bypass|circumvent|skip|abandon|discard|"
     r"drop|neglect|suspend|disable|deactivate)"

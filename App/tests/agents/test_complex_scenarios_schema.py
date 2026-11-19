@@ -109,7 +109,7 @@ def test_scenario_schema_and_basis_completeness() -> None:
                 )
                 for b in basis:
                     assert isinstance(b, str) and (
-                        b.startswith("Data/") or b.startswith("App/backend/app/tax/data/")
+                        b.startswith("App/Data/") or b.startswith("App/backend/app/tax/data/")
                     ), f"{sid} turn {t_idx}: basis must reference tracked source file: {b}"
 
                 # Check must_include / premise_cues for hardcoded money figures

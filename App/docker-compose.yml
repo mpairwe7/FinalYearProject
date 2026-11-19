@@ -128,11 +128,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ../Data/dataset:/app/Data/dataset:ro
-      - ../Data/pdfs:/app/Data/pdfs:ro
-      - ../Model:/app/Model:ro
+      - ./Data/dataset:/app/Data/dataset:ro
+      - ./Data/pdfs:/app/Data/pdfs:ro
+      - ./Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
-      - ../Model/adapters:/app/adapters:ro
+      - ./Model/adapters:/app/adapters:ro
       - ./ml:/app/ml:ro
       - ./plugins:/app/plugins:ro
       - ./backend/app:/app/app

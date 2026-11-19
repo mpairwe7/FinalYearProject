@@ -468,7 +468,7 @@ risks:
     threat: Vulnerable or compromised Python/Node.js dependencies injected into build artifacts
     severity: High
     cvss: "8.8"
-    existing_controls: Pip-audit and Trivy SCA scanning in CI, Dependabot weekly updates, .security/dependency-advisories.json baseline gate
+    existing_controls: Pip-audit and Trivy SCA scanning in CI, Dependabot weekly updates, App/security/dependency-advisories.json baseline gate
     status: Mitigated
     mitigation_target: Shipped
     owner: devsecops-team
@@ -542,7 +542,7 @@ risks:
     threat: Automated credential stuffing and unescaped database XSS on enterprise node web dashboards
     severity: Medium
     cvss: "6.5"
-    existing_controls: Mandatory Auth Gate on GET /, dynamic server-validated HTML5 canvas CAPTCHA with Bezier distortion curves, HTML entity escaping on all rendered fields, non-root appuser in Dockerfile.plugins
+    existing_controls: Mandatory Auth Gate on GET /, dynamic server-validated HTML5 canvas CAPTCHA with Bezier distortion curves, HTML entity escaping on all rendered fields, non-root appuser in App/Dockerfile.plugins
     status: Mitigated
     mitigation_target: Shipped
     owner: frontend-team

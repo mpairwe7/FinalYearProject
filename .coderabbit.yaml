@@ -27,7 +27,7 @@ reviews:
   path_filters:
     # Generated or vendored trees: reviewing them produces noise, not findings.
     - "!App/Data/**"
-    - "!Data/crawl/pages/**"
+    - "!App/Data/crawl/pages/**"
     - "!**/*.lock"
     - "!**/bun.lock"
     - "!MobileApp/**"

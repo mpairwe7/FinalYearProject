@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export MCP_LINK_TOKEN=$(openssl rand -hex 32)
-#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+#   cd App && docker compose -f docker-compose.full.yml -f docker-compose.mcp.yml up -d
 #
 # MCP_LINK_TOKEN is the shared secret both ends of every link are given
 # below. It is never written to a file by this stack; keep it in the shell
@@ -24,8 +24,8 @@
 
 x-mcp-server: &mcp-server
   build:
-    context: .
-    dockerfile: Dockerfile
+    context: ..
+    dockerfile: App/Dockerfile
     target: runtime
   image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:${IMAGE_TAG:-latest}
   restart: unless-stopped

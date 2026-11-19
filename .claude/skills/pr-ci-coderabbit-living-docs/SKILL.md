@@ -13,7 +13,7 @@ Apply this workflow on **every** code, configuration, model, feature-flag, route
 
 1. **Diátaxis Documentation Architecture**:
    - **Operational Runbooks (How-To)**: Update `App/docs/runbooks/*.md` whenever runtime behavior, failover order, environment variables, circuit breakers, or SLO recovery procedures change.
-   - **Technical Reference**: Update `App/docs/RAG_ARCHITECTURE.md`, `App/docs/API_REFERENCE.md`, `.env.example`, and `config/flags.py` whenever defaults, flags, endpoints, or provider chains change.
+   - **Technical Reference**: Update `App/docs/RAG_ARCHITECTURE.md`, `App/docs/API_REFERENCE.md`, `App/.env.example`, and `config/flags.py` whenever defaults, flags, endpoints, or provider chains change.
    - **Explanations & Architecture**: Update `App/docs/AGENT_ARCHITECTURE.md` and `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` when graphs, state machines, or guardrails change.
 2. **MADR 4.0 Architectural Decision Records (`App/docs/adr/`)**:
    - Every architectural, model-routing, security, or failover decision must include `## Context and Problem Statement`, `## Decision Outcome`, `## Consequences`, and `## Confirmation`, and be indexed in `App/docs/adr/README.md`.

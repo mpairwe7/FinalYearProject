@@ -87,7 +87,7 @@ REAL = [
 
 def _faq_rows() -> list[tuple[str, str]]:
     rows = []
-    for path in sorted((REPO_ROOT / "Data" / "dataset").glob("ura_*_faqs.csv")):
+    for path in sorted((REPO_ROOT / "App" / "Data" / "dataset").glob("ura_*_faqs.csv")):
         with path.open(encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 question = str(row.get("question") or "").strip()

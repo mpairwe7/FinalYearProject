@@ -80,7 +80,7 @@ def test_data_aug_redactor_and_gitleaks_match_real_nins() -> None:
     assert "CM930039182LIR" not in out
     assert "cm950019284kla" not in out
 
-    gitleaks_raw = (REPO_ROOT / ".gitleaks.toml").read_text()
+    gitleaks_raw = (REPO_ROOT / "App/security/.gitleaks.toml").read_text()
     m = re.search(r'id\s*=\s*"uganda-nin"[\s\S]*?regex\s*=\s*\'\'\'(.*?)\'\'\'', gitleaks_raw)
     assert m is not None
     pat = re.compile(m.group(1))

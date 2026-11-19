@@ -1,6 +1,6 @@
 # =============================================================================
 # TruffleHog v3 – Path Exclusions
-# Usage: trufflehog git file://. --exclude-paths .trufflehog-exclude-paths.txt
+# Usage: trufflehog git file://. --exclude-paths App/security/.trufflehog-exclude-paths.txt
 # =============================================================================
 
 # Lock files & package manifests (contain hashes, not secrets)
@@ -22,8 +22,8 @@ build/
 dist/
 
 # Data & results (large files, no secrets expected)
-Data/
-Results/
+App/Data/
+App/Results/
 artifacts/
 
 # Minified assets

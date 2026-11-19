@@ -44,7 +44,7 @@ from typing import Any
 logger = logging.getLogger("ura.static_dense")
 
 # Model/static_index.npz, alongside bm25_state.json.
-_INDEX_PATH = Path(__file__).resolve().parents[3] / "Model" / "static_index.npz"
+_INDEX_PATH = Path(__file__).resolve().parents[3] / "App" / "Model" / "static_index.npz"
 
 _lock = threading.Lock()
 _index: dict[str, Any] | None = None

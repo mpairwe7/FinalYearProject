@@ -34,7 +34,7 @@ The URA Chat Bot project takes security seriously. If you discover a security vu
 - Content-Security-Policy and HSTS headers on frontend and backend
 - X-Request-ID header validation (log-injection prevention)
 - DATA_DIR path-traversal guard on backend
-- No secrets in source code (`.env.example` template only)
+- No secrets in source code (`App/.env.example` template only)
 
 ### Secret Scanning (Defence-in-Depth)
 
@@ -42,16 +42,16 @@ Four independent secret scanners run at both pre-commit (local) and CI (remote) 
 
 | Scanner | Method | Coverage | Config File |
 |---------|--------|----------|-------------|
-| TruffleHog v3 | Verified credentials (contacts provider API) | 800+ detector types | `.trufflehog-exclude-paths.txt` |
+| TruffleHog v3 | Verified credentials (contacts provider API) | 800+ detector types | `App/security/.trufflehog-exclude-paths.txt` |
 | GitGuardian ggshield | ML-based pattern detection | 400+ secret types | `.gitguardian.yaml` |
-| Gitleaks v8 | Regex + entropy + custom rules | 150+ rules + URA custom | `.gitleaks.toml` |
-| detect-secrets (Yelp) | Entropy + baseline comparison | Generic high-entropy | `.secrets.baseline` |
+| Gitleaks v8 | Regex + entropy + custom rules | 150+ rules + URA custom | `App/security/.gitleaks.toml` |
+| detect-secrets (Yelp) | Entropy + baseline comparison | Generic high-entropy | `App/security/.secrets.baseline` |
 
 - **Pre-commit hooks**: All 4 scanners run locally before every commit (setup: `bash App/scripts/setup-secret-scanning.sh`)
 - **CI pipeline**: `.github/workflows/secret-scanning.yml` runs all scanners on push, PR, and weekly full-history scan
 - **Summary gate**: All scanners must pass; ggshield gracefully skips on forks without API key
-- **Custom rules** (`.gitleaks.toml`): Uganda PII (TIN, NIN, mobile), ML API keys (HuggingFace, Kaggle, OpenAI, Google AI, W&B), mobile secrets (Firebase, Android keystore)
-- **detect-secrets baseline**: `.secrets.baseline` tracks known false-positives; audited in CI
+- **Custom rules** (`App/security/.gitleaks.toml`): Uganda PII (TIN, NIN, mobile), ML API keys (HuggingFace, Kaggle, OpenAI, Google AI, W&B), mobile secrets (Firebase, Android keystore)
+- **detect-secrets baseline**: `App/security/.secrets.baseline` tracks known false-positives; audited in CI
 - **Branch protection**: `no-commit-to-branch` hook blocks direct commits to `main`/`master`
 - **File hygiene**: `detect-private-key` blocks `.pem`/`.key` files; `check-added-large-files` blocks files >500 KB
 
@@ -63,7 +63,7 @@ Four independent secret scanners run at both pre-commit (local) and CI (remote) 
 - SLSA v1.2 build provenance attestation
 - **pip-audit** for Python dependency vulnerability auditing against OSV/PyPI databases
 - **OSSF Scorecard** for supply chain security posture scoring
-- License compliance scanning — blocks AGPL, GPL, SSPL, BSL licenses (`trivy.yaml`)
+- License compliance scanning — blocks AGPL, GPL, SSPL, BSL licenses (`App/security/trivy.yaml`)
 
 ### Threat Model as Code (STRIDE + OWASP LLM + MITRE ATLAS)
 
@@ -90,7 +90,7 @@ Static and dynamic analysis runs via `.github/workflows/devsecops-sast-dast.yml`
 | **Checkov** | IaC Security | Dockerfiles, GitHub Actions, docker-compose | CI (CIS/NIST benchmarks) |
 | **OWASP ZAP** | DAST | Live API endpoints | CI baseline scan on main/dev/develop using the CI API target |
 
-Custom Semgrep rules (`.semgrep/ura-chatbot-rules.yaml`) include:
+Custom Semgrep rules (`App/security/.semgrep/ura-chatbot-rules.yaml`) include:
 - LLM-specific rules (prompt injection detection, PII in logs, unsafe output handling)
 - FastAPI rules (CORS wildcards, missing rate limits)
 - Python anti-patterns (pickle, yaml.load, subprocess shell, SQL injection)
@@ -117,7 +117,7 @@ Manual `workflow_dispatch` runs use event-scoped concurrency groups, so branch-l
 - **LLM01 – Prompt Injection**: `InputGuard` with 11 regex patterns; system-prompt isolation via Qwen chat template; passage delimiters (`<passage>` tags) to reduce indirect injection surface
 - **LLM02 – Sensitive Information Disclosure**: `OutputGuard.redact_pii()` on all responses and before database storage; Uganda-specific PII patterns (TIN, NID, phone, passport); `STORE_RAW_PROMPTS=false` default; conversation history sanitized before feeding to LLM
 - **LLM03 – Supply Chain Vulnerabilities**: Pinned dependency versions; Trivy container scanning; SBOM generation; SHA-256 data integrity checks; `LLM_TRUST_REMOTE_CODE=false` by default; production can pin `LLM_MODEL_REVISION`
-- **LLM04 – Data and Model Poisoning**: Data provenance tracking; CODEOWNERS review gates; quality gates; local inference (no external API calls)
+- **LLM04 – Data and Model Poisoning**: Data provenance tracking; .github/CODEOWNERS review gates; quality gates; local inference (no external API calls)
 - **LLM05 – Improper Output Handling**: `OutputGuard.sanitize()` strips `<script>`, HTML tags, suspicious markdown image links; applied per-token in SSE streaming path; CSP headers
 - **LLM09 – Misinformation**: Runtime faithfulness scoring via `compute_faithfulness()`; grounding disclaimer appended when score < threshold; calibrated abstention when confidence too low; human escalation flagging
 - **LLM10 – Unbounded Consumption**: Rate limiting via `slowapi` (configurable per-IP); bearer token auth on `/v1/index` endpoint; `MAX_INPUT_LENGTH` enforced; semantic cache reduces redundant LLM calls
@@ -139,7 +139,7 @@ Manual `workflow_dispatch` runs use event-scoped concurrency groups, so branch-l
 
 ## Security-Related Configuration
 
-See `.env.example` for all configurable security parameters. Never commit `.env` files.
+See `App/.env.example` for all configurable security parameters. Never commit `.env` files.
 
 ## Dependency Management
 

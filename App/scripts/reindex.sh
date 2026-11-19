@@ -8,7 +8,7 @@
 #
 # When to run:
 #   - After changing DENSE_MODEL or DENSE_DIM (embedding dimension change)
-#   - After adding/removing documents in Data/dataset or Data/pdfs
+#   - After adding/removing documents in App/Data/dataset or App/Data/pdfs
 #   - After a fresh deployment with an empty Qdrant volume
 #
 # Prerequisites:

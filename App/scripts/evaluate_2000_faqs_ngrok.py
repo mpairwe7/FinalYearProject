@@ -495,7 +495,7 @@ class URAEvaluationEngine2000:
         
         results: list[TurnResult] = []
         completed_ids: set[str] = set()
-        ckpt_path = Path("Results/metrics/2000_faqs_ngrok_evaluation_report.json")
+        ckpt_path = Path("App/Results/metrics/2000_faqs_ngrok_evaluation_report.json")
         if not self.fresh and ckpt_path.exists():
             try:
                 with open(ckpt_path, "r", encoding="utf-8") as cf:
@@ -531,7 +531,7 @@ class URAEvaluationEngine2000:
                 if completed % 50 == 0 or completed == len(faqs):
                     try:
                         interm = self._compile_report(faqs, results, time.perf_counter() - t_start, gpu_pre, get_gpu_telemetry(self.gpu_id))
-                        with open("Results/metrics/2000_faqs_ngrok_evaluation_report.json", "w") as cf:
+                        with open("App/Results/metrics/2000_faqs_ngrok_evaluation_report.json", "w") as cf:
                             json.dump(interm, cf, indent=2)
                         with open("docs/Reports/data/eval_2000_faqs_ngrok.json", "w") as mf:
                             summary_interm = {k: v for k, v in interm.items() if k != "all_evaluations"}
@@ -767,7 +767,7 @@ def main():
     parser.add_argument("--limit", type=int, default=2000, help="Number of FAQs (default: 2000)")
     parser.add_argument(
         "--out",
-        default="Results/metrics/2000_faqs_ngrok_evaluation_report.json",
+        default="App/Results/metrics/2000_faqs_ngrok_evaluation_report.json",
         help="Output report JSON file path",
     )
     args = parser.parse_args()

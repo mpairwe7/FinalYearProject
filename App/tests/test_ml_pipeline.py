@@ -212,7 +212,7 @@ class TestModelExport:
     
     def test_model_directory_structure(self):
         """Test Model directory exists and structure."""
-        model_dir = PROJECT_ROOT / "Model"
+        model_dir = PROJECT_ROOT / "App" / "Model"
         
         # Directory should exist (may be empty in test environment)
         expected_files = [
@@ -277,7 +277,7 @@ class TestIntegration:
     @pytest.mark.slow
     def test_full_validation_pipeline(self):
         """Test full data validation pipeline."""
-        datasets_dir = PROJECT_ROOT / "Data" / "dataset"
+        datasets_dir = PROJECT_ROOT / "App" / "Data" / "dataset"
         
         if datasets_dir.exists():
             from ml.pipelines.validate_data import validate_csv_files

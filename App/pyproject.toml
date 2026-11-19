@@ -18,7 +18,7 @@ build-backend = "hatchling.build"
 # =============================================================================
 
 [tool.pytest.ini_options]
-testpaths = ["App/tests"]
+testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 addopts = [
@@ -37,47 +37,47 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["App/ml", "App/backend"]
+source = ["ml", "backend"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "App/ml/pipelines/evaluate_rag.py",
-    "App/ml/pipelines/evaluate_rag_offline.py",
-    "App/ml/pipelines/validate_data.py",
-    "App/ml/pipelines/quality_gates.py",
-    "App/ml/pipelines/export_feedback.py",
-    "App/ml/scripts/data_aug/loaders.py",
-    "App/ml/scripts/data_aug/chunkers.py",
-    "App/ml/scripts/data_aug/dedup.py",
-    "App/ml/scripts/data_aug/formatters.py",
-    "App/ml/scripts/data_aug/pipeline.py",
-    "App/ml/scripts/data_aug/quality.py",
-    "App/ml/scripts/data_aug/provenance.py",
-    "App/ml/scripts/lang_id.py",
+    "*/ml/pipelines/evaluate_rag.py",
+    "*/ml/pipelines/evaluate_rag_offline.py",
+    "*/ml/pipelines/validate_data.py",
+    "*/ml/pipelines/quality_gates.py",
+    "*/ml/pipelines/export_feedback.py",
+    "*/ml/scripts/data_aug/loaders.py",
+    "*/ml/scripts/data_aug/chunkers.py",
+    "*/ml/scripts/data_aug/dedup.py",
+    "*/ml/scripts/data_aug/formatters.py",
+    "*/ml/scripts/data_aug/pipeline.py",
+    "*/ml/scripts/data_aug/quality.py",
+    "*/ml/scripts/data_aug/provenance.py",
+    "*/ml/scripts/lang_id.py",
     # Offline retrieval-measurement scripts, same character as the training
     # scripts above: no unit tests, but eval_retrieval.py is itself a CI gate
     # (the "Retrieval ranking gate" step runs it with --min-hit1), so its
     # behaviour is verified by execution rather than by coverage.
-    "App/ml/scripts/eval_retrieval.py",
-    "App/ml/scripts/static_dense.py",
+    "*/ml/scripts/eval_retrieval.py",
+    "*/ml/scripts/static_dense.py",
     # On-device ASR/MT/TTS inference wrappers speech_service.py imports
     # lazily for the local backend tier; hardware/model-file dependent,
     # exercised by App/backend/tests but not measured for line coverage.
-    "App/ml/scripts/asr/*",
-    "App/ml/scripts/tts/*",
-    "App/ml/scripts/mt/*",
-    "App/ml/scripts/speech/*",
+    "*/ml/scripts/asr/*",
+    "*/ml/scripts/tts/*",
+    "*/ml/scripts/mt/*",
+    "*/ml/scripts/speech/*",
     # Backend runtime modules (require full app / integration tests)
-    "App/backend/app/main.py",
-    "App/backend/app/rag/generator.py",
-    "App/backend/app/ingestion/indexer.py",
-    "App/backend/app/evaluation.py",
-    "App/backend/app/rag/cache.py",
-    "App/backend/app/rag/corrective_rag.py",
-    "App/backend/app/speech_service.py",
-    "App/backend/app/resilience.py",
-    "App/backend/app/observability/tracing.py",
-    "App/backend/app/rag/retriever.py",
+    "*/backend/app/main.py",
+    "*/backend/app/rag/generator.py",
+    "*/backend/app/ingestion/indexer.py",
+    "*/backend/app/evaluation.py",
+    "*/backend/app/rag/cache.py",
+    "*/backend/app/rag/corrective_rag.py",
+    "*/backend/app/speech_service.py",
+    "*/backend/app/resilience.py",
+    "*/backend/app/observability/tracing.py",
+    "*/backend/app/rag/retriever.py",
 ]
 
 [tool.coverage.report]
@@ -149,24 +149,24 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 # ML scripts & pipelines are CLI tools that use print() for output
-"App/ml/scripts/**" = ["T201", "S311", "S110", "S112", "S310", "S324", "E402", "E741"]
+"ml/scripts/**" = ["T201", "S311", "S110", "S112", "S310", "S324", "E402", "E741"]
 # Operator tooling under App/scripts/ is the same shape — stdout IS the interface.
 # Only T201, unlike the blanket list above: the security and correctness lints
 # stay on, because these run against live deployments and real credentials.
-"App/scripts/**" = ["T201"]
-"App/governance/**" = ["T201"]
-"App/threat-model/**" = ["T201"]
-"App/ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
+"scripts/**" = ["T201"]
+"governance/**" = ["T201"]
+"threat-model/**" = ["T201"]
+"ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
 # Backend CLI entry-points (audit verifier, etc.)
-"App/backend/app/audit/verifier.py" = ["T201"]
+"backend/app/audit/verifier.py" = ["T201"]
 # Best-effort exception handlers are intentional in resilience code
-"App/backend/app/observability/analytics.py" = ["S110"]
-"App/backend/app/rag/cache.py" = ["S110"]
-"App/backend/app/audit/ledger.py" = ["S110", "SIM105"]
-"App/backend/app/speech_service.py" = ["S110"]
+"backend/app/observability/analytics.py" = ["S110"]
+"backend/app/rag/cache.py" = ["S110"]
+"backend/app/audit/ledger.py" = ["S110", "SIM105"]
+"backend/app/speech_service.py" = ["S110"]
 # URL opens use known http(s) schemes only
-"App/backend/app/rag/generator.py" = ["S310", "S112", "E402"]
-"App/backend/tests/**" = ["PT009"]
+"backend/app/rag/generator.py" = ["S310", "S112", "E402"]
+"backend/tests/**" = ["PT009"]
 
 [tool.mypy]
 python_version = "3.11"

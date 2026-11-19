@@ -564,7 +564,7 @@ def main():
     )
     parser.add_argument(
         "--out",
-        default="Results/metrics/long_term_memory_verification_report.json",
+        default="App/Results/metrics/long_term_memory_verification_report.json",
         help="JSON output path",
     )
     args = parser.parse_args()

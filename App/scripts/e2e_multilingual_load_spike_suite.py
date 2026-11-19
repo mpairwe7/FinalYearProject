@@ -378,7 +378,7 @@ def main() -> int:
     report["spike_suite"] = run_traffic_spike_suite(spike_concurrency=30)
     report["volume_soak"] = run_volume_soak_suite(volume_requests=120, workers=12)
 
-    out_path = Path("Results/multilingual_e2e_load_spike_report.json")
+    out_path = Path("App/Results/multilingual_e2e_load_spike_report.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nReport successfully saved to {out_path}")

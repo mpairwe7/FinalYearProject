@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BASELINE = REPO_ROOT / ".security" / "dependency-advisories.json"
+DEFAULT_BASELINE = REPO_ROOT / "App" / "security" / "dependency-advisories.json"
 
 
 def advisories_from_audit(paths: list[Path]) -> dict[str, dict[str, str]]:

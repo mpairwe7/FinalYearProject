@@ -194,7 +194,7 @@
 # It also carries the biggest retrieval change this Space has had: it runs Qdrant
 # as an in-container sidecar against a collection baked into the image, so the
 # whole corpus is finally reachable here. Retrieval was BM25 over the 499 FAQ
-# rows via the keyword fallback — the 300+ MB of URA handbooks under Data/pdfs
+# rows via the keyword fallback — the 300+ MB of URA handbooks under App/Data/pdfs
 # and the monthly crawl were invisible, because the FAQ path scores candidates on
 # an F1 against each FAQ's own question and a document chunk has no question.
 # The collection now holds 7,943 documents: 499 FAQ, 6 teacher-QA, 7,035 PDF

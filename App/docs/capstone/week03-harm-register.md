@@ -51,7 +51,7 @@ Each harm is scored on two axes (1–5 scale):
 | H4 | (1) Augment training data with SME-specific scenarios; (2) Stratified evaluation by tax category; (3) Bias audit report before each release | ML Team | 2 | 3 | **6** (Low) |
 | H5 | (1) Mandatory disclaimer in every response; (2) Confidence score display; (3) "Contact URA" CTA for complex queries; (4) Acceptable Use Policy | ML Team + URA | 3 | 3 | **9** (Medium) |
 | H6 | (1) Horizontal scaling with Docker; (2) Health check endpoint with uptime monitoring; (3) Graceful degradation (return cached FAQ if model offline) | DevOps | 1 | 3 | **3** (Low) |
-| H7 | (1) Data versioning with DVC/Git; (2) Signed commits; (3) Data validation pipeline in CI; (4) CODEOWNERS approval for Data/ changes | ML Team | 1 | 4 | **4** (Low) |
+| H7 | (1) Data versioning with DVC/Git; (2) Signed commits; (3) Data validation pipeline in CI; (4) .github/CODEOWNERS approval for App/Data/ changes | ML Team | 1 | 4 | **4** (Low) |
 | H8 | (1) Serve model behind API only; (2) Rate limiting; (3) No model download endpoint; (4) API key authentication (planned) | DevOps | 1 | 2 | **2** (Low) |
 | H9 | (1) Quality threshold for Luganda responses; (2) Fallback to English when confidence < 0.7; (3) Community review of translations | ML Team | 2 | 3 | **6** (Low) |
 | H10 | (1) Automated data refresh pipeline triggered by URA publication dates; (2) Version-stamped FAQ corpus; (3) "Last updated" metadata in responses | ML Team | 2 | 3 | **6** (Low) |

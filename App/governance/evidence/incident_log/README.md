@@ -5,7 +5,7 @@ record that holds the evidence. Add a row when a production fault reaches
 taxpayers or staff, in the pull request that fixes it, or as soon as it is
 found if no fix is ready.
 
-[incident_response_sim.json](../../../../Results/incident_response_sim.json) is the
+[incident_response_sim.json](../../../Results/incident_response_sim.json) is the
 output of a drill (`App/scripts/incident_response_sim.py`), not a production
 incident.
 

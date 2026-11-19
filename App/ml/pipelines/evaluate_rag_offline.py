@@ -12,7 +12,7 @@ Designed to run as a nightly CI job or cron task with regression gates.
 
 Usage:
     python -m ml.pipelines.evaluate_rag_offline \\
-        --eval-set Data/eval/rag_eval.jsonl \\
+        --eval-set App/Data/eval/rag_eval.jsonl \\
         --output Results/eval/rag_offline_report.json \\
         --fail-on-regression
 """
@@ -48,7 +48,7 @@ def load_eval_set(path: Path) -> list[dict[str, Any]]:
 
     Canonical shape: ``{"query": ..., "expected_answer": ..., "relevant_sources": [...]}``.
 
-    ``Data/eval/rag_eval.jsonl`` is shared with :mod:`ml.pipelines.evaluate_rag`
+    ``App/Data/eval/rag_eval.jsonl`` is shared with :mod:`ml.pipelines.evaluate_rag`
     and uses ``question``/``ground_truth`` instead, which used to raise
     ``KeyError: 'query'`` here — so this pipeline had never run against the
     repository's own evaluation set. Both spellings are accepted rather than
@@ -234,7 +234,7 @@ def main():
     parser = argparse.ArgumentParser(description="Offline RAG evaluation")
     parser.add_argument("--eval-set", type=Path, required=True, help="Path to JSONL eval set")
     parser.add_argument(
-        "--output", type=Path, default=PROJECT_ROOT / "Results" / "eval" / "rag_offline_report.json"
+        "--output", type=Path, default=PROJECT_ROOT / "App" / "Results" / "eval" / "rag_offline_report.json"
     )
     parser.add_argument(
         "--fail-on-regression", action="store_true", help="Exit non-zero if quality gates fail"

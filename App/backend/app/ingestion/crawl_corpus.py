@@ -1,6 +1,6 @@
 """Validated crawl-page corpus builder for the vector store.
 
-The ``ura.go.ug`` crawl lands normalised pages under ``Data/crawl/pages``, and they
+The ``ura.go.ug`` crawl lands normalised pages under ``App/Data/crawl/pages``, and they
 were feeding the training pipeline only. They can be fresher than the PDF corpus
 — a rate change appears on the website before the next handbook edition — so
 they belong in retrieval, provided they are read when they change.

@@ -88,7 +88,7 @@ trl>=0.12.0
 bitsandbytes>=0.50.0; sys_platform == 'linux'
 # ONNX export + quantisation
 #
-# `optimum[onnxruntime]` is NOT here — it lives in requirements-onnx-export.txt
+# `optimum[onnxruntime]` is NOT here — it lives in App/requirements-onnx-export.txt
 # because it cannot coexist with the transformers 5.x required by CVE-2026-9856.
 # From optimum 2.0 the ORT extra delegates to optimum-onnx, and no release of
 # that supports transformers 5 (newest, 0.1.0, caps `transformers<4.58.0`);

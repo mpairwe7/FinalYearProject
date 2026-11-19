@@ -336,7 +336,7 @@ def _requirement_lines(path: Path) -> list[str]:
 
 
 _OTEL_REQUIREMENTS = (
-    ROOT / "requirements.txt",
+    ROOT / "App" / "requirements.txt",
     ROOT / "App" / "backend" / "requirements.txt",
     ROOT / "App" / "backend" / "requirements-cranecloud.txt",
 )
@@ -427,7 +427,7 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     audit = _load(ROOT / ".github" / "workflows" / "devsecops-sast-dast.yml")["jobs"]["pip-audit"]
     pairs = {(entry["requirements"], str(entry["python"])) for entry in audit["strategy"]["matrix"]["include"]}
     ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
-    api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
+    api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "App" / "Dockerfile").read_text(encoding="utf-8"), re.M))
     # The call receptionist's stack ships in the production Space, whose base
     # image is the Crane Cloud one (ADR-0041, G598).
     space_python = set(
@@ -436,7 +436,7 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     assert len(space_python) == 1, space_python
     api = api_python.pop()
     assert pairs == {
-        ("requirements.txt", ci_python),
+        ("App/requirements.txt", ci_python),
         ("App/backend/requirements.txt", api),
         ("App/ml/requirements-crawl.txt", str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"])),
         # Installed in every image: audited on each Python it is installed on.

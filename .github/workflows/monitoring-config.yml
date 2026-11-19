@@ -13,13 +13,13 @@ on:
     branches: [main, dev, develop]
     paths:
       - "App/monitoring/**"
-      - "docker-compose.yml"
+      - "App/docker-compose.full.yml"
       - ".github/workflows/monitoring-config.yml"
   pull_request:
     branches: [main, dev, develop]
     paths:
       - "App/monitoring/**"
-      - "docker-compose.yml"
+      - "App/docker-compose.full.yml"
       - ".github/workflows/monitoring-config.yml"
 
 permissions:
@@ -72,4 +72,4 @@ jobs:
         run: |
           touch .env
           METRICS_TOKEN=ci ALERTMANAGER_WEBHOOK_URL=http://example.invalid \
-            docker compose -f docker-compose.yml --profile monitoring --profile monitoring-gpu config --quiet
+            docker compose -f App/docker-compose.full.yml --profile monitoring --profile monitoring-gpu config --quiet

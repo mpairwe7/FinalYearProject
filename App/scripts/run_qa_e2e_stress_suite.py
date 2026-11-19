@@ -398,7 +398,7 @@ async def main():
         "sample_fuzzy_turns": [asdict(r) for r in fuzzy_results],
     }
 
-    out_file = "Results/metrics/qa_e2e_stress_audit_report.json"
+    out_file = "App/Results/metrics/qa_e2e_stress_audit_report.json"
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, "w") as f:
         json.dump(report_payload, f, indent=2)

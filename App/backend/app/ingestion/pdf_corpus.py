@@ -1,6 +1,6 @@
 """Validated PDF-chunk corpus builder for the vector store.
 
-Until now the 300+ MB of upstream URA guidance under ``Data/pdfs`` reached
+Until now the 300+ MB of upstream URA guidance under ``App/Data/pdfs`` reached
 retrieval only as teacher-QA JSONL, and that bridge covered a single
 document — so the prose knowledge base was effectively the FAQ CSVs alone.
 This module gives PDFs a first-class, auditable path into the index while
@@ -1706,15 +1706,15 @@ def _record_harvest_in_crawl_state(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint for statutory & MDA PDF harvesting into Data/pdfs."""
+    """CLI entrypoint for statutory & MDA PDF harvesting into App/Data/pdfs."""
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(description="Harvest statutory and 11-MDA PDFs into Data/pdfs")
+    parser = argparse.ArgumentParser(description="Harvest statutory and 11-MDA PDFs into App/Data/pdfs")
     parser.add_argument("--harvest", action="store_true", help="Run remote statutory & MDA PDF harvest")
     parser.add_argument("--include-mda-sources", action="store_true", help="Include the 11-MDA statutory PDF registry")
     parser.add_argument("--source-urls", type=str, default=None, help="Comma-separated HTTPS statutory source URLs")
-    parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
+    parser.add_argument("--pdf-dir", type=Path, default=Path("App/Data/pdfs"))
     parser.add_argument("--crawl-state", type=Path, default=None, help="Optional crawl_state.json to record new PDFs")
     parser.add_argument("--max-pages-per-source", type=int, default=5)
     parser.add_argument("--max-pdf-downloads", type=int, default=None, help="Cap total PDF downloads per run")

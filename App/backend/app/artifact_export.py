@@ -899,8 +899,8 @@ def export_all(
     """Generate all IEEE-standard artifact images.
 
     Args:
-        results_dir: Path to Results/ directory (auto-detected if None).
-        out_dir: Path to output directory (defaults to Artifacts/).
+        results_dir: Path to App/Results/ directory (auto-detected if None).
+        out_dir: Path to output directory (defaults to App/Artifacts/).
 
     Returns:
         List of generated file paths.
@@ -908,16 +908,16 @@ def export_all(
     _ieee_style()
 
     if results_dir is None:
-        from ._root import PROJECT_ROOT as _pr
+        from ._root import CODE_ROOT
 
-        results_dir = _pr / "Results"
+        results_dir = CODE_ROOT / "Results"
     else:
         results_dir = Path(results_dir)
 
     if out_dir is None:
-        from ._root import PROJECT_ROOT as _pr
+        from ._root import CODE_ROOT
 
-        out_dir = _pr / "Artifacts"
+        out_dir = CODE_ROOT / "Artifacts"
     else:
         out_dir = Path(out_dir)
 
@@ -983,9 +983,9 @@ def main() -> int:
         description="Export IEEE-standard figures and tables for the final year project report"
     )
     parser.add_argument("--results-dir", type=str, default=None,
-                        help="Path to Results/ directory (auto-detected)")
+                        help="Path to App/Results/ directory (auto-detected)")
     parser.add_argument("--out-dir", type=str, default=None,
-                        help="Output directory (default: Artifacts/)")
+                        help="Output directory (default: App/Artifacts/)")
     args = parser.parse_args()
 
     files = export_all(results_dir=args.results_dir, out_dir=args.out_dir)

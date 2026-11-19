@@ -17,7 +17,7 @@ routing gate, and for shipping conversation topic persistence (G6).
 
 | Decision | Choice | Why |
 |----------|--------|-----|
-| Agentic default | `FLAG_AGENTIC_MODE=true` | `.env.example` already said true; the code default was the drift. |
+| Agentic default | `FLAG_AGENTIC_MODE=true` | `App/.env.example` already said true; the code default was the drift. |
 | Gate | `agentic_mode_gate()` on `GOLDEN_SET` / `en` | Same harness as `locale_gate`; a drop is a regression, not a reason to keep the flag off. |
 | Floor | 0.95 | Identical to `test_accuracy_does_not_regress`. |
 | `FLAG_TOOL_USE` | stays default off | Calculators/workflows still short-circuit. Tool loop only on TOOLS / specialist (`force_agentic`) or an explicit flag flip. |

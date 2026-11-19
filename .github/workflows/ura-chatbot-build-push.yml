@@ -34,11 +34,11 @@ on:
       - "App/Dockerfile.cranecloud"
       - "App/Dockerfile.cranecloud.dockerignore"
       - "App/backend/requirements-cranecloud.txt"
-      - "Model/bm25_state.json"
-      - "Data/dataset/**"
-      - "Data/teacher_qa/**"
-      - "Data/pdfs/**"
-      - "Data/crawl/**"
+      - "App/Model/bm25_state.json"
+      - "App/Data/dataset/**"
+      - "App/Data/teacher_qa/**"
+      - "App/Data/pdfs/**"
+      - "App/Data/crawl/**"
       - ".github/workflows/ura-chatbot-build-push.yml"
   workflow_dispatch:
     inputs:
@@ -72,7 +72,7 @@ jobs:
       digest:     ${{ steps.build.outputs.digest }}
       tag:        ${{ steps.publish.outputs.tag }}
     steps:
-      - name: Checkout (full context needed — Dockerfile copies Model/ + Data/)
+      - name: Checkout (full context needed — App/Dockerfile.cranecloud copies App/Model/ + App/Data/)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -122,7 +122,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/pdf_jsonl
-          key: pdf-jsonl-v2-${{ hashFiles('Data/pdfs/**', 'App/backend/app/ingestion/pdf_corpus.py', 'App/ml/scripts/data_aug/chunkers.py') }}
+          key: pdf-jsonl-v2-${{ hashFiles('App/Data/pdfs/**', 'App/backend/app/ingestion/pdf_corpus.py', 'App/ml/scripts/data_aug/chunkers.py') }}
 
       - name: Export corpora
         working-directory: App/backend
@@ -131,16 +131,12 @@ jobs:
           PDF_CACHE_HIT: ${{ steps.pdf-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
-          # App/Data is the serving corpus root; seed it from the tracked copies.
-          mkdir -p ../Data/dataset ../Data/teacher_qa ../Data/pdfs
-          cp -f "$GITHUB_WORKSPACE"/Data/dataset/*.csv ../Data/dataset/
-          cp -f "$GITHUB_WORKSPACE"/Data/teacher_qa/*.jsonl ../Data/teacher_qa/
+          # App/Data is the serving corpus root and holds the tracked corpora (ADR-0064).
           python -m app.ingestion.indexer --export-faq-jsonl
           python -m app.ingestion.indexer --export-crawl-jsonl
           if [ "${PDF_CACHE_HIT:-}" = "true" ]; then
             echo "PDF chunk corpus restored from cache"
           else
-            cp -f "$GITHUB_WORKSPACE"/Data/pdfs/*.pdf ../Data/pdfs/
             python -m app.ingestion.indexer --export-pdf-jsonl
           fi
 
@@ -159,7 +155,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/dense
-          key: dense-e5s-v1-${{ hashFiles('App/Data/faq_jsonl/**', 'App/Data/teacher_qa/**', 'App/Data/pdf_jsonl/**', 'App/Data/crawl_jsonl/**', 'Data/dataset/**', 'App/backend/app/embeddings/embedder.py', 'App/backend/app/vectorstore/vector_db.py', 'App/backend/app/ingestion/indexer.py', 'App/backend/app/vectorstore/point_ids.py', 'App/backend/app/ingestion/faq_corpus.py', 'App/backend/app/ingestion/pdf_corpus.py', 'App/backend/app/ingestion/crawl_corpus.py') }}
+          key: dense-e5s-v1-${{ hashFiles('App/Data/faq_jsonl/**', 'App/Data/teacher_qa/**', 'App/Data/pdf_jsonl/**', 'App/Data/crawl_jsonl/**', 'App/Data/dataset/**', 'App/backend/app/embeddings/embedder.py', 'App/backend/app/vectorstore/vector_db.py', 'App/backend/app/ingestion/indexer.py', 'App/backend/app/vectorstore/point_ids.py', 'App/backend/app/ingestion/faq_corpus.py', 'App/backend/app/ingestion/pdf_corpus.py', 'App/backend/app/ingestion/crawl_corpus.py') }}
       - name: Embed the corpus for the dense leg
         if: steps.dense-cache.outputs.cache-hit != 'true'
         working-directory: App/backend

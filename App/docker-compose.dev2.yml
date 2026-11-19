@@ -110,11 +110,11 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/app:/app/app:ro
-      - ../Data/dataset:/app/Data/dataset:ro
-      - ../Data/pdfs:/app/Data/pdfs:ro
+      - ./Data/dataset:/app/Data/dataset:ro
+      - ./Data/pdfs:/app/Data/pdfs:ro
       - ./Model:/app/Model:ro
       - ../artifacts:/app/artifacts:ro
-      - ../Model/adapters:/app/adapters:ro
+      - ./Model/adapters:/app/adapters:ro
       - ./ml:/app/ml:ro
       - ./plugins:/app/plugins:ro
       - ../data_store:/app/data_store

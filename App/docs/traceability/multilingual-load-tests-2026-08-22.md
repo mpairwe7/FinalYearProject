@@ -52,7 +52,7 @@ driver branch. Proof, two containers on this same host at the same time:
 | `vllm/vllm-openai:v0.8.5` | 2.6.0+cu124 | **True** |
 | api, before fix | 2.12.1+cu130 | False |
 
-`Dockerfile.gpu` now pins a matched `torch==2.11.0` / `torchaudio==2.11.0`
+`App/Dockerfile.gpu` now pins a matched `torch==2.11.0` / `torchaudio==2.11.0`
 cu128 pair (GPU image only — `requirements.txt` is untouched, the CPU image
 is unaffected). That also retires the `rm _torchaudio*.so` workaround: the
 pair matches, so the real compiled extension ships.
@@ -313,7 +313,7 @@ Flush `db0` between correctness runs (§6d).
 
 ## 8b. Rerun of the 2026-08-21 benchmark suite
 
-The four language-relevant scripts behind the 2026-08-21 `Results/metrics`
+The four language-relevant scripts behind the 2026-08-21 `App/Results/metrics`
 cluster were rerun after the fixes above. Two findings about the *harness*
 matter more than the numbers.
 

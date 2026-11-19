@@ -75,12 +75,12 @@ jobs:
             while IFS= read -r path; do
               [ -n "$path" ] || continue
               case "$path" in
-                Dockerfile|.dockerignore|trivy.yaml|App/backend/*|App/docker-compose.yml)
+                App/Dockerfile|.dockerignore|App/security/trivy.yaml|App/backend/*|App/docker-compose.yml)
                   api=true
                   ;;
               esac
               case "$path" in
-                trivy.yaml|App/frontend/*)
+                App/security/trivy.yaml|App/frontend/*)
                   frontend=true
                   ;;
               esac
@@ -129,7 +129,7 @@ jobs:
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy-fs-vuln.sarif
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Upload filesystem SARIF to GitHub Security
@@ -150,7 +150,7 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM,LOW
           format: json
           output: trivy-fs-results.json
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Parse filesystem vulnerability counts
@@ -217,7 +217,7 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM
           format: sarif
           output: trivy-iac.sarif
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
 
       - name: Upload IaC SARIF to GitHub Security
         if: always() && hashFiles('trivy-iac.sarif') != ''
@@ -237,7 +237,7 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM
           format: json
           output: trivy-iac.json
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
         continue-on-error: true
 
       - name: Parse IaC findings
@@ -285,7 +285,7 @@ jobs:
           severity: CRITICAL,HIGH
           format: json
           output: trivy-license.json
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
         continue-on-error: true
 
       - name: Parse and evaluate license violations
@@ -361,7 +361,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: ./Dockerfile
+          file: ./App/Dockerfile
           push: false
           load: true
           tags: ${{ env.API_IMAGE }}
@@ -376,7 +376,7 @@ jobs:
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy-api-image.sarif
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Upload API image SARIF
@@ -396,7 +396,7 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM,LOW
           format: json
           output: trivy-api-image.json
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Parse API image vulnerability counts
@@ -421,6 +421,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-config: App/security/trivy.yaml
           image-ref: ${{ env.API_IMAGE }}
           format: cyclonedx
           output: sbom-api.cdx.json
@@ -429,6 +430,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-config: App/security/trivy.yaml
           image-ref: ${{ env.API_IMAGE }}
           scanners: secret
           severity: CRITICAL,HIGH,MEDIUM
@@ -490,7 +492,7 @@ jobs:
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy-frontend-image.sarif
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Upload Frontend image SARIF
@@ -510,7 +512,7 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM,LOW
           format: json
           output: trivy-frontend-image.json
-          trivy-config: trivy.yaml
+          trivy-config: App/security/trivy.yaml
           ignore-unfixed: true
 
       - name: Parse Frontend image vulnerability counts
@@ -535,6 +537,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          trivy-config: App/security/trivy.yaml
           image-ref: ${{ env.FRONTEND_IMAGE }}
           format: cyclonedx
           output: sbom-frontend.cdx.json

@@ -430,7 +430,7 @@ def main():
         },
     }
 
-    out_file = Path("Results/metrics/multilingual_stress_test_report.json")
+    out_file = Path("App/Results/metrics/multilingual_stress_test_report.json")
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
     log(f"\nReport successfully generated: {out_file}")

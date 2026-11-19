@@ -104,7 +104,7 @@ TEXT_SUFFIXES = {
     ".py", ".md", ".mdx", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".sh", ".txt",
     ".json", ".ts", ".tsx", ".js", ".mjs", ".conf", ".example", ".env", ".rst",
 }
-TEXT_NAMES = {"Dockerfile", "Makefile", "CODEOWNERS", "Procfile"}
+TEXT_NAMES = {"Dockerfile", "Makefile", ".github/CODEOWNERS", "Procfile"}
 
 
 def app_prefix(dotted: str) -> str | None:

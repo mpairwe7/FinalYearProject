@@ -145,9 +145,9 @@ def main():
     print("DATA VALIDATION PIPELINE")
     print("=" * 60)
 
-    datasets_dir = PROJECT_ROOT / "Data" / "dataset"
-    pdf_dir = PROJECT_ROOT / "Data" / "pdfs"
-    output_dir = PROJECT_ROOT / "Results" / "reports"
+    datasets_dir = PROJECT_ROOT / "App" / "Data" / "dataset"
+    pdf_dir = PROJECT_ROOT / "App" / "Data" / "pdfs"
+    output_dir = PROJECT_ROOT / "App" / "Results" / "reports"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Run validations

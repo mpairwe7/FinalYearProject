@@ -305,7 +305,7 @@ Decision:
 
   A test fails when a rate table records a replaced value that has no cues. UGX amounts written in
   words ("UGX 150 million", "UGX 37.5M") are read.
-- **The data corrected at source.** Each figure was checked against the PDFs in `Data/pdfs`:
+- **The data corrected at source.** Each figure was checked against the PDFs in `App/Data/pdfs`:
   - USD 2,000: Taxation Handbook FY2025-26, pp.64 and 80, and the Passenger Baggage leaflet
     FY2024-25, p.2.
   - UGX 300m: Taxes Amendments FY2026-27, pp.4 and 13.

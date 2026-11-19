@@ -445,7 +445,7 @@ def run_docker_gpu_benchmark() -> dict[str, Any]:
           f"Post-Test={gpu_post['memory_used_mb']:.0f} MiB | Free Headroom={gpu_post['memory_free_mb']:.0f} MiB")
 
     # Save JSON Report
-    out_file = BASE_DIR / "Results" / "metrics" / "docker_gpu_multilingual_stress_report.json"
+    out_file = BASE_DIR / "App" / "Results" / "metrics" / "docker_gpu_multilingual_stress_report.json"
     out_file.parent.mkdir(parents=True, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

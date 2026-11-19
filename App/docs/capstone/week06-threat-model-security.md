@@ -300,16 +300,16 @@ All tools are open-source and run in CI via `.github/workflows/devsecops-sast-da
 
 | Tool | Type | Purpose | Config File | Integration |
 |------|------|---------|-------------|-------------|
-| **Semgrep** v1.114+ | SAST | Python, TypeScript, React static analysis | `.semgrep/ura-chatbot-rules.yaml` | CI + pre-commit |
-| **Bandit** v1.8+ | SAST | Python AST-based security linting | `.bandit.yaml` | CI + pre-commit |
+| **Semgrep** v1.114+ | SAST | Python, TypeScript, React static analysis | `App/security/.semgrep/ura-chatbot-rules.yaml` | CI + pre-commit |
+| **Bandit** v1.8+ | SAST | Python AST-based security linting | `App/security/.bandit.yaml` | CI + pre-commit |
 | **pip-audit** | SCA | Python dependency vulnerability auditing (OSV/PyPI) | – | CI |
-| **Trivy** v0.69+ | SCA + Container + IaC + License | Full supply chain scanning | `trivy.yaml` | CI (`security-trivy.yml`) |
-| **Checkov** | IaC Security | Dockerfile, GitHub Actions, docker-compose compliance | `.checkov.yaml` | CI |
-| **OWASP ZAP** v2.15+ | DAST | Automated baseline scan against live API | `.zap-rules.tsv` | CI (main/develop) |
+| **Trivy** v0.69+ | SCA + Container + IaC + License | Full supply chain scanning | `App/security/trivy.yaml` | CI (`security-trivy.yml`) |
+| **Checkov** | IaC Security | Dockerfile, GitHub Actions, docker-compose compliance | `App/security/.checkov.yaml` | CI |
+| **OWASP ZAP** v2.15+ | DAST | Automated baseline scan against live API | `App/security/.zap-rules.tsv` | CI (main/develop) |
 | **OSSF Scorecard** | Supply Chain | OpenSSF supply chain security posture scoring | – | CI |
 | **pytm** v1.3+ | Threat Model | STRIDE DFD generation and threat analysis | `App/threat-model/tm.py` | CI + local |
 
-**Custom Semgrep rules** (`.semgrep/ura-chatbot-rules.yaml`) — 13 rules:
+**Custom Semgrep rules** (`App/security/.semgrep/ura-chatbot-rules.yaml`) — 13 rules:
 
 | Rule ID | Severity | Category | Description |
 |---------|----------|----------|-------------|

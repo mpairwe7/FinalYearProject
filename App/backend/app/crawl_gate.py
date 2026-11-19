@@ -21,8 +21,8 @@ decision stays with a person (OWASP ASI06: "require human review for high-risk
 actions", "detect suspicious updates or frequencies"; NITA-U NISP 2026 s.5.2.4.3:
 "protect AI models and training datasets from poisoning attacks").
 
-    python -m app.crawl_gate evaluate --before DIR --after Data/crawl --pdf-dir Data/pdfs --out DIR
-    python -m app.crawl_gate slo --crawl-dir Data/crawl
+    python -m app.crawl_gate evaluate --before DIR --after App/Data/crawl --pdf-dir App/Data/pdfs --out DIR
+    python -m app.crawl_gate slo --crawl-dir App/Data/crawl
 """
 
 from __future__ import annotations

@@ -36,9 +36,9 @@ secret:
     - "package-lock.json"
     - "bun.lock"
     - "yarn.lock"
-    - "Data/eval/prototype_seed.json"
-    - "Data/eval/rag_eval.jsonl"
-    - "Data/eval/redteam_corpus.jsonl"
+    - "App/Data/eval/prototype_seed.json"
+    - "App/Data/eval/rag_eval.jsonl"
+    - "App/Data/eval/redteam_corpus.jsonl"
     - "*.pem"
     - "*.key"
 

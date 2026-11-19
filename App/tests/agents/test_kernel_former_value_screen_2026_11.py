@@ -105,7 +105,7 @@ def test_the_screen_never_takes_retrieval_down(monkeypatch: pytest.MonkeyPatch) 
 def test_no_faq_row_states_a_replaced_figure_as_current() -> None:
     """The corpus itself: 11 rows stated the replaced allowance or VAT threshold until 2026-11-09."""
     rows = []
-    for path in sorted((ROOT / "Data/dataset").glob("*.csv")):
+    for path in sorted((ROOT / "App/Data/dataset").glob("*.csv")):
         with path.open(newline="", encoding="utf-8") as handle:
             reader = csv.reader(handle)
             next(reader, None)

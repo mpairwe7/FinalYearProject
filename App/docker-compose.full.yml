@@ -112,8 +112,8 @@ services:
   # ---------------------------------------------------------------------------
   api:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: App/Dockerfile
       target: runtime
     image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:${IMAGE_TAG:-latest}
     container_name: ura-chatbot-api
@@ -142,7 +142,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
       - LOG_FORMAT=${LOG_FORMAT:-json}
     env_file:
-      - .env
+      - ../.env
     init: true
     security_opt:
       - no-new-privileges:true
@@ -159,9 +159,9 @@ services:
       - /app/cache:uid=10001,gid=10001
       - /app/data_store:uid=10001,gid=10001
     volumes:
-      - ./artifacts/models:/app/models:ro
-      - ./artifacts/offline:/app/offline:ro
-      - ./artifacts/quantized:/app/quantized:ro
+      - ../artifacts/models:/app/models:ro
+      - ../artifacts/offline:/app/offline:ro
+      - ../artifacts/quantized:/app/quantized:ro
       - api_logs:/app/logs
       # analytics_data volume removed — /app/data_store is already mounted as
       # tmpfs (required for the read_only container). A named volume and tmpfs
@@ -186,8 +186,8 @@ services:
   # ---------------------------------------------------------------------------
   api-dev:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: App/Dockerfile
       target: runtime
     image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:dev
     container_name: ura-chatbot-api-dev
@@ -199,8 +199,8 @@ services:
       - WORKERS=1
       - LOG_LEVEL=debug
     volumes:
-      - ./App/backend:/app:ro
-      - ./artifacts/models:/app/models:ro
+      - ./backend:/app:ro
+      - ../artifacts/models:/app/models:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     profiles:
       - dev
@@ -289,7 +289,7 @@ services:
   # ---------------------------------------------------------------------------
   frontend:
     build:
-      context: ./App/frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
@@ -332,9 +332,9 @@ services:
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
-      - ./App/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./App/monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
-      - ./App/monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
+      - ./monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
       - prometheus_data:/prometheus
     secrets:
       - ura_metrics_token
@@ -361,7 +361,7 @@ services:
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
     volumes:
-      - ./App/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     secrets:
       - alertmanager_webhook_url
@@ -380,7 +380,7 @@ services:
     command:
       - "--config.file=/etc/blackbox/blackbox.yml"
     volumes:
-      - ./App/monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
     read_only: true
     restart: unless-stopped
     security_opt:
@@ -450,7 +450,7 @@ services:
     profiles: [monitoring]
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ./App/monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
     ports:
       - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
       - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
@@ -468,7 +468,7 @@ services:
     profiles: [monitoring]
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
-      - ./App/monitoring/loki.yaml:/etc/loki/config.yaml:ro
+      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
       - loki_data:/loki
     ports:
       - "127.0.0.1:${LOKI_PORT:-3100}:3100"
@@ -511,8 +511,8 @@ services:
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     volumes:
-      - ./App/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./App/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     depends_on:
       prometheus:

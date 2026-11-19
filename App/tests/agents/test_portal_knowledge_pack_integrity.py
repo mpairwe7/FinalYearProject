@@ -42,7 +42,7 @@ def _workflow(**overrides) -> dict:
         "portal_key": "prn_payments",
         "url": "https://ura.go.ug",
         "steps": ["Open https://ura.go.ug and check the PRN."],
-        "sources": ["Data/dataset/ura_make_a_payment_faqs.csv"],
+        "sources": ["App/Data/dataset/ura_make_a_payment_faqs.csv"],
     }
     spec.update(overrides)
     return spec
@@ -65,7 +65,7 @@ class TestTheShippedPack:
         for key, spec in json.loads(PACK.read_text(encoding="utf-8"))["workflows"].items():
             assert spec.get("sources"), key
             for source in spec["sources"]:
-                if source.startswith("Data/"):
+                if source.startswith("App/Data/"):
                     assert (REPO_ROOT / source).is_file(), (key, source)
                 else:
                     assert is_authoritative_ura_url(source), (key, source)
@@ -161,7 +161,7 @@ def test_the_declarative_steps_carry_their_sources() -> None:
         },
     )
     assert result["screen_diagnostic"]["detected_state"] == "mda_ntr_prn_reconciliation"
-    assert "Data/dataset/ura_non_tax_revenues_faqs.csv" in result["navigation_guidance"]["sources"]
+    assert "App/Data/dataset/ura_non_tax_revenues_faqs.csv" in result["navigation_guidance"]["sources"]
 
 
 def test_reloading_while_the_tool_reads_never_raises(tmp_path: Path) -> None:
