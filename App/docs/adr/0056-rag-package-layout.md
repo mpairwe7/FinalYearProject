@@ -169,3 +169,4 @@ For step 2:
   carved `api/` modules.
 - Run on the parent of the main carve-out, `carve_out_modules.py --spec main`
   reproduces that commit byte for byte.
+- `restructure_rag_layout.py`, `carve_out_modules.py` and `split_module.py` were deleted on 2026-11-19, once the move was long finished (G686). The code is in git at `61e29d3e`. The `--verify` results above are as recorded at the time: its string heuristic has since gone stale and was never a CI check.
