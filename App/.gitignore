@@ -1,15 +1,15 @@
 # Local retrieval corpus and generated sparse-index state.
 # Recreate these from the documented local harness; do not commit source
 # documents or machine-specific Qdrant/BM25 build artifacts.
-Data/dataset/
+App/Data/dataset/
 Data/faq_jsonl/
 Data/pdf_jsonl/
 Data/crawl_jsonl/
-Data/pdfs/
-Data/eval/
-Data/teacher_qa/
+App/Data/pdfs/
+App/Data/eval/
+App/Data/teacher_qa/
 # The dense leg's model and vectors are built in CI (ADR-0034); only the placeholder
 # that keeps sparse-only image builds working is tracked.
-Data/dense/*
+App/Data/dense/*
 !Data/dense/.keep
-Model/bm25_state.json
+App/Model/bm25_state.json

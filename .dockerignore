@@ -27,11 +27,11 @@ build/
 
 # Project specific
 artifacts/
-Model/
-Results/
-Data/pdfs/
-Data/lgaudio/
-Data/TTT/
+App/Model/
+App/Results/
+App/Data/pdfs/
+App/Data/lgaudio/
+App/Data/TTT/
 # Generated eval audio (receptionist language id, Orpheus samples, call replay)
 evals/language_id/data/
 evals/orpheus_tts/samples/
@@ -40,7 +40,7 @@ evals/call_replay/audio/
 # OS
 .DS_Store
 
-# App folders to exclude (use specific COPY in Dockerfile)
+# App folders to exclude (use specific COPY in App/Dockerfile)
 App/frontend/node_modules/
 App/frontend/.next/
 App/backend/__pycache__/

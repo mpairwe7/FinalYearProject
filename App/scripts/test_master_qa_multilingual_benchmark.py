@@ -289,7 +289,7 @@ def main():
     })
 
     # Output JSON Artifact
-    out_dir = "Results/metrics"
+    out_dir = "App/Results/metrics"
     os.makedirs(out_dir, exist_ok=True)
     report_path = os.path.join(out_dir, "master_qa_benchmark_report.json")
     with open(report_path, "w", encoding="utf-8") as f:

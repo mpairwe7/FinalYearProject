@@ -6,7 +6,7 @@ Following the October 2026 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) and Phase 3
 
 1. **Git Index & Workspace Hygiene Drift**:
    - `MobileApp/ura_chatbot/.dart_tool/` (`119` compiled `.dill`, `.stamp`, `.lock`, and `.class` build-cache files containing hardcoded Windows workstation paths) remained tracked in Git after the Flutter app was retired.
-   - `AGENTS.md` referenced a non-existent lowercase `data/README.md` (`Data/README.md` is the canonical path on case-sensitive Linux hosts).
+   - `AGENTS.md` referenced a non-existent lowercase `data/README.md` (`App/Data/README.md` is the canonical path on case-sensitive Linux hosts).
    - `App/plugins/README.md` and `apps/README.md` still documented retired case-colliding symlinks (`EFRIS/`, `URSB/`, `BWIMS/`, `TIN/`, `dts/`) and `App/mobile`.
 2. **Incomplete Hierarchical `AGENTS.md` Coverage**:
    - Top-level domains `App/ml/`, `App/monitoring/`, `App/threat-model/`, and `App/plugins/` lacked scoped `AGENTS.md` guides and entries in the root `AGENTS.md` router.
@@ -22,7 +22,7 @@ Following the October 2026 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) and Phase 3
 
 ### Phase 1 — Workspace & Git Index Hygiene
 - Removed the 119 retired `MobileApp/` build-cache files from Git tracking and hardened `.gitignore` (`MobileApp/`, `.dart_tool/`, `.flutter-plugins*`).
-- Synchronized `AGENTS.md` (`Data/README.md`), `apps/README.md`, and `App/plugins/README.md`.
+- Synchronized `AGENTS.md` (`App/Data/README.md`), `apps/README.md`, and `App/plugins/README.md`.
 
 ### Phase 2 — Hierarchical `AGENTS.md` Context Architecture
 - Added scoped, contract-first `AGENTS.md` guides in `App/ml/AGENTS.md`, `App/monitoring/AGENTS.md`, `App/threat-model/AGENTS.md`, and `App/plugins/AGENTS.md`, and wired them into the root `AGENTS.md` router table.

@@ -179,7 +179,7 @@ only in a language the deployment takes calls in.
 - More transfers reach officers: calls the recognizer or the voice fails on
   twice. Before, those callers were dropped.
 - The dependency audit resolves the receptionist requirements alone, on each
-  Python. It does not see versions a later image step pins. `Dockerfile.gpu`
+  Python. It does not see versions a later image step pins. `App/Dockerfile.gpu`
   pins `soundfile==0.12.1` and `soxr==0.5.0.post1` after installing Pipecat
   1.15.0, which requires `soundfile~=0.13.1` and `soxr~=1.0.0`: that image runs
   versions Pipecat does not support and no audit covers (the container scan

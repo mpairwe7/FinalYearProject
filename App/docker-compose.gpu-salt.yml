@@ -1,7 +1,7 @@
 # Local GPU overlay — Sunbird SALT speech backends baked in.
 #
 # Layers on top of docker-compose.yml + docker-compose.local-sunflower.yml:
-# builds `api` from Dockerfile.gpu (repo root) instead of the base Dockerfile
+# builds `api` from App/Dockerfile.gpu (repo root) instead of the base Dockerfile
 # so Spark-TTS-SALT's BiCodec checkout is present (SPARK_TTS_REPO_DIR) and
 # torch comes from the cu128 index instead of requirements.txt's CUDA-13 pin.
 #
@@ -10,7 +10,7 @@
 # reports CUDA 12.2, so torch.cuda.is_available() was False. That was a
 # wheel problem, not a driver problem — CUDA minor-version compatibility
 # means any cu12x build runs on a >=525 driver, and vllm proves it on this
-# very host with torch 2.6.0+cu124. Dockerfile.gpu now pins a matched
+# very host with torch 2.6.0+cu124. App/Dockerfile.gpu now pins a matched
 # cu128 torch/torchaudio pair; see its header and
 # App/docs/runbooks/salt-speech-backends.md.
 #
@@ -21,7 +21,7 @@
 services:
   api:
     build:
-      dockerfile: Dockerfile.gpu
+      dockerfile: App/Dockerfile.gpu
     image: ${DOCKER_IMAGE_API:-app-api}:gpu
     environment:
       # docker-compose.local-retrieval.yml is an INDEXING profile: it turns the
@@ -146,12 +146,12 @@ services:
   # does not take the CPU-only path before the GPU API can serve it.
   qdrant-indexer:
     build:
-      dockerfile: Dockerfile.gpu
+      dockerfile: App/Dockerfile.gpu
     image: ${DOCKER_IMAGE_API:-app-api}:gpu
     environment:
       - RETRIEVER_DENSE_DEVICE=cuda:0
       - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
-      # Dockerfile.gpu does not set HF_HOME. Without this, the one-shot
+      # App/Dockerfile.gpu does not set HF_HOME. Without this, the one-shot
       # indexer downloads bge-m3 under /root and discards it on exit despite
       # the mounted cache below.
       - HF_HOME=/app/hf_cache

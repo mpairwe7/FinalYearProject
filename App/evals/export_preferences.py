@@ -214,7 +214,7 @@ def main() -> int:
     parser.add_argument(
         "-o",
         "--output",
-        default=str(ROOT / "Data" / "eval" / "preference_pairs.jsonl"),
+        default=str(ROOT / "App" / "Data" / "eval" / "preference_pairs.jsonl"),
     )
     args = parser.parse_args()
     n = export_pairs(Path(args.output))

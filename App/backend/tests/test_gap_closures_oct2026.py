@@ -301,7 +301,7 @@ class MultilingualAndSpeechHardeningTests(unittest.TestCase):
 
     def test_g297_root_dockerfile_uses_cu126_index(self) -> None:
         """G297: Root Dockerfile uses the cu126 wheel index that publishes torch==2.14.1."""
-        df = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text(encoding="utf-8")
+        df = (Path(__file__).resolve().parents[3] / "App" / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("https://download.pytorch.org/whl/cu126", df)
         self.assertNotIn("https://download.pytorch.org/whl/cu128", df)
 

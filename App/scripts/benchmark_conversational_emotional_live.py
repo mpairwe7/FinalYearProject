@@ -534,7 +534,7 @@ def main():
     parser.add_argument("--target", default=DEFAULT_ENDPOINT, help="Target gateway URL (default: http://localhost:8083)")
     parser.add_argument("--requests-per-worker", type=int, default=10, help="Requests per worker in each concurrency tier (default: 10)")
     parser.add_argument("--out-md", default="docs/Reports/CONVERSATIONAL_EMOTIONAL_STRESS_REPORT_2026-09-29.md", help="Markdown report path")
-    parser.add_argument("--out-json", default="Results/metrics/conversational_emotional_stress_report.json", help="JSON report path")
+    parser.add_argument("--out-json", default="App/Results/metrics/conversational_emotional_stress_report.json", help="JSON report path")
     args = parser.parse_args()
     if args.requests_per_worker < 1:
         parser.error("--requests-per-worker must be at least 1")

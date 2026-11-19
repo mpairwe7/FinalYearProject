@@ -640,7 +640,7 @@ def _print_results(family: str, results: dict) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Check model quality gates")
-    parser.add_argument("--metrics-path", type=str, default="Results/metrics/training_metrics.json")
+    parser.add_argument("--metrics-path", type=str, default="App/Results/metrics/training_metrics.json")
     parser.add_argument("--config", type=str, default="App/ml/configs/training_config.yaml")
     parser.add_argument(
         "--family",

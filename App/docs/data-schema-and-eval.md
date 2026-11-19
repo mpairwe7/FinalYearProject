@@ -29,7 +29,7 @@
 
 The backend maintains application-owned tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
 
-Prototype sample rows live in `Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.seed_prototype`.
+Prototype sample rows live in `App/Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.seed_prototype`.
 
 - **feedback**: User thumbs-up/down on chatbot responses.
   - id (PK), message_id, session_id, rating (up|down), comment, user_query, bot_reply, created_at.
@@ -222,8 +222,8 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 | **Abstention Precision** | Faithfulness < threshold on unanswerable | Correct refusal rate |
 
 ### Canonical FAQ Parallel Corpus Schema
-- Canonical CSV source files: `Data/dataset/ura_*_faqs.csv`
-- Canonical exported JSONL: `Data/faq_jsonl/ura_*_faqs.jsonl`
+- Canonical CSV source files: `App/Data/dataset/ura_*_faqs.csv`
+- Canonical exported JSONL: `App/Data/faq_jsonl/ura_*_faqs.jsonl`
 - Canonical manifest: `Data/faq_jsonl/faq_corpus_manifest.json`
 
 Supported column headers:
@@ -239,17 +239,17 @@ Integrity invariant:
 When compiling via `app.ingestion.faq_corpus.export_faq_csvs_to_jsonl`, every vernacular answer (`answer_lg`, `answer_sw`) must pass `app.mt.figures_survived`. If numbers (e.g. 18%, 30%, UGX amounts) or statutory compliance periods are mutated, compilation halts with `CorpusValidationError`.
 
 ### Evaluation Datasets
-- `Data/eval/rag_eval.jsonl` — English eval set (30 samples), JSONL format:
+- `App/Data/eval/rag_eval.jsonl` — English eval set (30 samples), JSONL format:
   ```json
   {"question": "...", "ground_truth": "...", "contexts": ["..."], "answer": "..."}
   ```
   Optional audit fields on regression rows: `case_id`, `tags`, `should_abstain`.
   Covers: TIN, VAT, penalties, EFRIS, withholding tax, customs, income tax, corporate tax, exemptions, excise duty, PAYE, online payments, rental tax, digital stamps, objections, refunds, stamp duty, amendments, online businesses, plus `reg-*` cases (procedure-vs-definition, FY filters, multi-intent, off-domain abstention). Completeness is gated by `App/backend/tests/test_eval_set_completeness.py`.
 
-- `Data/eval/rag_eval_lg.jsonl` — Luganda eval set (12 samples), same format:
+- `App/Data/eval/rag_eval_lg.jsonl` — Luganda eval set (12 samples), same format:
   Covers: TIN, VAT, penalties, e-services, EFRIS, mobile payments, withholding tax, tax clearance, VAT exemptions, late filing, corporate tax, objections. Evaluated as a blocking CI step.
 
-- `Data/eval/coverage_bank.jsonl` — corpus-coverage question bank (105 questions
+- `App/Data/eval/coverage_bank.jsonl` — corpus-coverage question bank (105 questions
   x en/lg/sw, 23 tax domains), JSONL format:
   ```json
   {"id": "...", "domain": "vat", "theme": "...",
@@ -261,7 +261,7 @@ When compiling via `app.ingestion.faq_corpus.export_faq_csvs_to_jsonl`, every ve
   subjects nothing indexed answers. `expect_any` names the facts a correct
   answer must carry, which is what separates "retrieved something" from
   "answered". Domain registry, per-domain floors and the domain-owner review
-  record live in `Data/eval/coverage_domains.yaml`. Runbook:
+  record live in `App/Data/eval/coverage_domains.yaml`. Runbook:
   `App/docs/runbooks/corpus-coverage.md`.
 
 ## Regression Gates
@@ -365,7 +365,7 @@ User feedback (thumbs up/down) → database.save_feedback()
 ### CI Pipeline Integration
 - **Data Validation Stage**: Runs `App/ml/pipelines/validate_data.py` to ensure schema compliance
 - **Quality Gates**: Enforces data quality thresholds before training proceeds
-- **Artifact Storage**: Validation reports stored in `Results/reports/`
+- **Artifact Storage**: Validation reports stored in `App/Results/reports/`
 
 ### Training Pipeline (Kaggle)
 - **Metrics Logging**: `Results/metrics/training_metrics.json` with retrieval and answer scores

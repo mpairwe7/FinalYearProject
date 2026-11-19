@@ -53,7 +53,7 @@ The project's technical MLOps infrastructure was partially complete, but capston
 
 | Area | Gap | Resolution |
 |------|-----|------------|
-| Repository governance | No LICENSE, SECURITY.md, CODEOWNERS, CONTRIBUTING.md, Dependabot | All 5 files created at repository root |
+| Repository governance | No LICENSE, .github/SECURITY.md, .github/CODEOWNERS, .github/CONTRIBUTING.md, Dependabot | All 5 files created at repository root |
 | Ethics & obligations | No charter, conflict map, or ACM/IEEE mapping | Full Ethics Charter with 7 principles mapped to ACM/IEEE |
 | Harm assessment | No formal harm register or mitigation plan | 12-entry scored harm register with residual risk analysis |
 | Privacy | No NDPA-compliant privacy notice or AUP | Full privacy notice, AUP, and complaint workflow |
@@ -413,9 +413,9 @@ Applying 12 international standards to a real MLOps project was not a box-tickin
 | 29 | Integrated capstone portfolio (15–25 pages) | W10 | CLOSED | This document (`CAPSTONE_PORTFOLIO.md`) |
 | 30 | Standards relationship map (visual + table) | W10 | CLOSED | `week10-standards-relationship-map.md` (16 relationships) |
 | 31 | LICENSE file at root | Gov | CLOSED | `/LICENSE` (Apache-2.0) |
-| 32 | SECURITY.md at root | Gov | CLOSED | `/SECURITY.md` |
-| 33 | CODEOWNERS at root | Gov | CLOSED | `/CODEOWNERS` |
-| 34 | CONTRIBUTING.md at root | Gov | CLOSED | `/CONTRIBUTING.md` |
+| 32 | .github/SECURITY.md at root | Gov | CLOSED | `/SECURITY.md` |
+| 33 | .github/CODEOWNERS at root | Gov | CLOSED | `/CODEOWNERS` |
+| 34 | .github/CONTRIBUTING.md at root | Gov | CLOSED | `/CONTRIBUTING.md` |
 | 35 | .github/dependabot.yml | Gov | CLOSED | `/.github/dependabot.yml` (4 ecosystems) |
 | 36 | Secure CORS in main.py | Code | CLOSED | Explicit origin allowlist, credentials=False |
 | 37 | Implement missing API endpoints | Code | CLOSED | /classify, /classify/batch, /tags, /faq/{tag} in main.py |

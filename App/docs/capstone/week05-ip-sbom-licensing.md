@@ -73,9 +73,9 @@ The full machine-readable SBOM is provided in CycloneDX 1.6 JSON format at:
 | Asset | Owner | License | Notes |
 |-------|-------|---------|-------|
 | Application source code (App/, App/ml/, App/tests/) | Mpairwe Landwind (student) | Apache-2.0 | Original work |
-| URA FAQ data (Data/dataset/*.csv) | Uganda Revenue Authority | Public domain (government publication) | Scraped from ura.go.ug; publicly available |
-| URA PDF documents (Data/pdfs/*.pdf) | Uganda Revenue Authority | Public domain (government publication) | Official URA handbooks and guides |
-| Luganda corpus (Data/TTT/) | Various (see provenance) | Mixed – see below | Academic and community corpora |
+| URA FAQ data (App/Data/dataset/*.csv) | Uganda Revenue Authority | Public domain (government publication) | Scraped from ura.go.ug; publicly available |
+| URA PDF documents (App/Data/pdfs/*.pdf) | Uganda Revenue Authority | Public domain (government publication) | Official URA handbooks and guides |
+| Luganda corpus (App/Data/TTT/) | Various (see provenance) | Mixed – see below | Academic and community corpora |
 | Gemma-2-9B base weights | Google DeepMind | Gemma Terms of Use | Requires license acceptance |
 | Fine-tuned model weights | Mpairwe Landwind (derivative) | Apache-2.0 (code) + Gemma (weights) | Derivative of Gemma; Gemma terms apply to weights |
 | Frontend design & assets | Mpairwe Landwind | Apache-2.0 | Original work |

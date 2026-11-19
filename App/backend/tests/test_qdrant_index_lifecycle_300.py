@@ -153,7 +153,7 @@ def test_cpu_image_build_triggers_for_every_shipped_corpus_source() -> None:
         Path(__file__).resolve().parents[3] / ".github/workflows/ura-chatbot-build-push.yml"
     ).read_text(encoding="utf-8")
 
-    for source in ("Data/dataset/**", "Data/teacher_qa/**", "Data/pdfs/**", "Data/crawl/**"):
+    for source in ("App/Data/dataset/**", "App/Data/teacher_qa/**", "App/Data/pdfs/**", "App/Data/crawl/**"):
         assert source in workflow
 
 
@@ -167,8 +167,8 @@ def test_local_compose_runs_the_staged_indexer_before_api() -> None:
     assert "ura_knowledge_base_jsonl_active" in body
     assert "./Data/pdf_jsonl:/app/Data/pdf_jsonl:ro" in body
     assert "./Data/crawl_jsonl:/app/Data/crawl_jsonl:ro" in body
-    assert "../Data/pdfs:/app/Data/pdfs:ro" in body
-    assert "../Data/crawl/pages:/app/Data/crawl/pages:ro" in body
+    assert "./Data/pdfs:/app/Data/pdfs:ro" in body
+    assert "./Data/crawl/pages:/app/Data/crawl/pages:ro" in body
     assert "qdrant-backup:" in body
     assert "app.vectorstore.qdrant_backup" in body
     assert "qdrant_backups" in body

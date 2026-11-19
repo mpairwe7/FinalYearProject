@@ -10,7 +10,7 @@ none of them would have been caught by the existing suite:
     document heading, so it never fired at all — 0 of 40 replies.
 
 Each was found by asking production questions by hand. Those three cases
-now also live in ``Data/eval/rag_eval.jsonl`` (``reg-how-file-returns``,
+now also live in ``App/Data/eval/rag_eval.jsonl`` (``reg-how-file-returns``,
 ``reg-how-submit-yearly``, ``reg-efris-what``) so the offline eval set
 and this keyword gate cannot drift apart.
 

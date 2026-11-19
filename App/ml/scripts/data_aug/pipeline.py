@@ -90,7 +90,7 @@ class PipelineConfig:
     emit_parquet: bool = True
     # When true, write a supplementary speech manifest alongside the
     # chat-training outputs so the speech pipeline can discover counts
-    # without re-scanning Data/.
+    # without re-scanning App/Data/.
     emit_speech_manifest: bool = True
 
     # PDF

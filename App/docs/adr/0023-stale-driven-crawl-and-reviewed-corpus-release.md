@@ -99,7 +99,7 @@ verification, and a size match no longer counts as identity.
 its last revision as its edition, so an older page cannot displace a newer statement:
 among near-identical passages the newer edition wins, and the model sees each date.
 
-**A ledger is the source of truth.** `Data/crawl/crawl_state.json` holds, per URL, the
+**A ledger is the source of truth.** `App/Data/crawl/crawl_state.json` holds, per URL, the
 current capture, status, verification and publisher dates, and a record of each run.
 Selection follows it, so a page that reverted is on the right capture, a shortened page
 does not fall back to older text, and a withdrawn page leaves. A page unverified for 45

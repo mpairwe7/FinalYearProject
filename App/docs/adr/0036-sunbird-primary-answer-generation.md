@@ -96,7 +96,7 @@ The cloud chain (`service._llm_cloud_fallback`) becomes **Sunbird, then Workers 
 - **Good:** less processing goes to a foreign hyperscaler for answer text.
 - **Bad (until fixed outside the code):** Sunbird serves nothing while both accounts are suspended.
   Workers AI then carries English alone. On the Space that works only if Cloudflare is reachable,
-  directly or through the relay. `.env.example` records TLS failures from the Space to
+  directly or through the relay. `App/.env.example` records TLS failures from the Space to
   `gateway.ai.cloudflare.com`; whether `api.cloudflare.com` works from there is measured after
   deploy. If neither works, answers stay passages with the disclosure.
 - **Bad:** the Ugandan languages have no generator while Sunbird is suspended, because Workers AI

@@ -60,7 +60,7 @@ KNOWN_SKIPS: dict[str, int] = {
     # The superseded-figure sweep diffs the two newest FY*.json rate tables, so
     # it has nothing to compare against in a checkout carrying only one.
     "App/tests/test_eval_ground_truth_currency.py": 1,
-    # The in-language probe-coverage check reads Data/eval/rag_eval_lg.jsonl,
+    # The in-language probe-coverage check reads App/Data/eval/rag_eval_lg.jsonl,
     # which `reviewed_vernacular_probes()` explicitly tolerates the absence of.
     # Every other test in the file runs everywhere.
     "App/tests/test_benchmark_scoring_integrity.py": 1,

@@ -11,8 +11,8 @@ Covers the full stack: **FastAPI API**, **Next.js frontend**, **Qdrant vector DB
 | Docker Engine + Compose v2 | 24.0+ / 2.24+ |
 | Domain name (A/AAAA record) | e.g. `ura-chatbot.example.com` |
 | TLS certificate | Let's Encrypt or organisational CA |
-| `.env` file | Copy from `.env.example`, fill secrets |
-| Trivy | Latest (scans run via `trivy.yaml` config) |
+| `.env` file | Copy from `App/.env.example`, fill secrets |
+| Trivy | Latest (scans run via `App/security/trivy.yaml` config) |
 
 Secrets that **must** be set before first deploy:
 
@@ -31,7 +31,7 @@ openssl rand -hex 32
 
 ## 2. Docker Compose Production
 
-The project ships a single `docker-compose.yml` at the repo root with four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
+The full stack is `App/docker-compose.full.yml`, run from the repository root with `docker compose -f App/docker-compose.full.yml`. It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
 
 ### Build and start
 
@@ -88,15 +88,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ### Image scanning before deploy
 
 ```bash
-trivy image --config trivy.yaml landwind/ura-chatbot-api:latest
-trivy image --config trivy.yaml landwind/ura-chatbot-frontend:latest
+trivy image --config App/security/trivy.yaml landwind/ura-chatbot-api:latest
+trivy image --config App/security/trivy.yaml landwind/ura-chatbot-frontend:latest
 ```
 
 ---
 
 ## 3. Environment Configuration
 
-All variables are documented in `.env.example`. Critical production values:
+All variables are documented in `App/.env.example`. Critical production values:
 
 ```dotenv
 # --- Core ---
@@ -221,7 +221,7 @@ client-side code changes are needed.
 
 ### Option A — Caddy (auto HTTPS with Let's Encrypt)
 
-```Caddyfile
+```App/Caddyfile
 ura-chatbot.example.com {
     # API — proxied under /api prefix
     handle /api/* {
@@ -618,7 +618,7 @@ docker compose start api
 
 Run through every item before go-live:
 
-- [ ] `.env` created from `.env.example` with all production values
+- [ ] `.env` created from `App/.env.example` with all production values
 - [ ] `APP_ENV=production` set
 - [ ] `INDEX_API_KEY` set to a strong random value
 - [ ] `CORS_ORIGINS` restricted to production domain only
@@ -626,7 +626,7 @@ Run through every item before go-live:
 - [ ] `OTEL_ENABLED=true` and collector endpoint configured
 - [ ] TLS termination configured (Caddy or nginx)
 - [ ] `docker compose build` succeeds cleanly
-- [ ] `trivy image --config trivy.yaml <image>` shows zero CRITICAL/HIGH findings
+- [ ] `trivy image --config App/security/trivy.yaml <image>` shows zero CRITICAL/HIGH findings
 - [ ] `GET /health` returns 200
 - [ ] `GET /ready` returns `"status": "ready"` (not `"degraded"`)
 - [ ] `GET /metrics` returns Prometheus text output

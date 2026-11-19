@@ -200,7 +200,7 @@ def sim_supply_chain(base_url: str) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Incident Response Simulation")
     parser.add_argument("--api-url", default="http://localhost:8000")
-    parser.add_argument("--output", default="Results/incident_response_sim.json")
+    parser.add_argument("--output", default="App/Results/incident_response_sim.json")
     args = parser.parse_args()
 
     print("=" * 60)

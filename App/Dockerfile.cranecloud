@@ -179,8 +179,8 @@ COPY App/ml/scripts/lang_id.py     /app/backend/ml/scripts/lang_id.py
 # Bake in the BM25 keyword index + every corpus.  Crane Cloud and the HF Space
 # have no persistent storage and cannot reach Qdrant, so whatever retrieval can
 # see at runtime is exactly what ships here.
-COPY Model/bm25_state.json /app/Model/bm25_state.json
-COPY Data/dataset /app/Data/dataset
+COPY App/Model/bm25_state.json /app/Model/bm25_state.json
+COPY App/Data/dataset /app/Data/dataset
 # Validated JSONL corpora. APP_DATA_ROOT resolves to /app/Data in the container
 # (no /app/App directory), so these land where the ingesters look for them.
 # The chunk corpora are generated — build with `python -m app.ingestion.indexer

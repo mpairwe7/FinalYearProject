@@ -50,7 +50,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Conversational safety & EQ runbook](runbooks/conversational-safety-and-eq.md) | Phase 39 mid-workflow emotional off-ramp, wellbeing check-in, and voice affect consent |
 | [Voice receptionist demo runbook](runbooks/voice-receptionist-demo.md) | 5-locale WebSocket/LiveKit receptionist, queue position, callback, and officer desk operations |
 | **Security** |
-| [Security Policy](../../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
+| [Security Policy](../../.github/SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
 | [Incident Response Sim](../scripts/incident_response_sim.py) | Automated playbook validation (3 AI-specific scenarios) |
 | **Governance & Compliance** |
@@ -70,8 +70,8 @@ Complete documentation for the URA Chatbot MLOps project.
 
 ### For ML Engineers
 1. RAG quality gates live in `App/ml/configs/training_config.yaml` (`rag_quality_gates`)
-2. Run `python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl` locally
-3. Monitor results in `Results/` folder
+2. Run `python -m ml.pipelines.evaluate_rag --eval-set App/Data/eval/rag_eval.jsonl` locally
+3. Monitor results in `App/Results/` folder
 4. Corpus coverage (issue #303): `python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor`
 
 ### For Frontend Developers
@@ -92,7 +92,7 @@ FinalYearProject/
 ├── App/                   # Application code
 │   ├── backend/          # FastAPI backend
 │   └── frontend/         # Next.js frontend
-├── Data/                  # Training and reference data
+├── App/Data/                  # Training and reference data
 │   ├── dataset/          # CSV training files
 │   ├── pdfs/             # PDF documents
 │   ├── TTT/              # Translation corpus
@@ -105,8 +105,8 @@ FinalYearProject/
 │   ├── configs/          # RAG quality gate thresholds
 │   ├── pipelines/        # RAG eval, corpus coverage, quality gates, feedback export
 │   └── App/scripts/          # Language ID (prod), retrieval eval, local ASR/MT/TTS, corpus chunking
-├── Model/                 # Trained model artifacts
-├── Results/               # Metrics and reports
+├── App/Model/                 # Trained model artifacts
+├── App/Results/               # Metrics and reports
 │   ├── metrics/          # Training metrics
 │   ├── reports/          # Validation reports
 │   └── plots/            # Visualizations
@@ -166,18 +166,18 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `docker-compose.yml` | Local development + monitoring (`--profile monitoring`) |
 | `Dockerfile` | Production container image |
 | `.pre-commit-config.yaml` | Pre-commit hook definitions (11 hooks: secrets, SAST, hygiene) |
-| `trivy.yaml` | Trivy security scanner configuration |
-| `.trivyignore` | Trivy accepted-risk suppressions |
-| `.gitleaks.toml` | Gitleaks custom rules (Uganda PII, ML API keys) |
+| `App/security/trivy.yaml` | Trivy security scanner configuration |
+| `App/security/.trivyignore` | Trivy accepted-risk suppressions |
+| `App/security/.gitleaks.toml` | Gitleaks custom rules (Uganda PII, ML API keys) |
 | `.gitguardian.yaml` | ggshield path exclusions |
-| `.trufflehog-exclude-paths.txt` | TruffleHog path exclusions |
-| `.secrets.baseline` | detect-secrets known false-positive baseline |
+| `App/security/.trufflehog-exclude-paths.txt` | TruffleHog path exclusions |
+| `App/security/.secrets.baseline` | detect-secrets known false-positive baseline |
 | `App/frontend/vitest.config.ts` | Vitest test runner + V8 coverage (60% threshold) |
 | `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
 | `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
 | `App/monitoring/prometheus.yml` | Prometheus scrape targets |
 | `App/monitoring/alerting-rules.yml` | 17 alert rules (SLO, Qdrant index lifecycle, audit trail) |
-| `.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
+| `App/security/.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ### Current runtime toggles
 

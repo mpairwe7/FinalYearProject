@@ -24,4 +24,4 @@ Rules:
 - When a linked file moves, update the README. `App/tests/test_governance_evidence.py`
   fails on a broken link.
 - Threat-model code lives in `App/threat-model/`. Security claims must match
-  `SECURITY.md` and the manifest, not marketing copy.
+  `.github/SECURITY.md` and the manifest, not marketing copy.

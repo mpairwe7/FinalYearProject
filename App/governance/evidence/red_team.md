@@ -7,7 +7,7 @@ guardrails are in [`App/backend/app/guardrails/`](../../backend/app/guardrails/_
 ## The CI gate, on every pull request
 
 [`test_redteam_corpus.py`](../../backend/tests/test_redteam_corpus.py) runs
-[`redteam_corpus.jsonl`](../../../Data/eval/redteam_corpus.jsonl) through `InputGuard`
+[`redteam_corpus.jsonl`](../../Data/eval/redteam_corpus.jsonl) through `InputGuard`
 and `OutputGuard`. Every attack must be refused, and every benign control must be
 answered. A row that does not parse fails the gate.
 
@@ -31,7 +31,7 @@ without a failing check.
 
 | Run | What it tried | Result | Record |
 | --- | --- | --- | --- |
-| Live API run, 2026-04-12 (`App/scripts/ai_red_team.py`) | 46 prompts against a running API | 46 blocked; threshold 0.9 | [red_team_report.json](../../../Results/red_team_report.json) |
+| Live API run, 2026-04-12 (`App/scripts/ai_red_team.py`) | 46 prompts against a running API | 46 blocked; threshold 0.9 | [red_team_report.json](../../Results/red_team_report.json) |
 | Portal copilot adversarial eval | 27 attacks on the browser agent (ADR-0038) | Pinned by `App/tests/agents/test_portal_copilot_adversarial_eval.py` | [adversarial.jsonl](../../evals/portal_copilot_scenarios/adversarial.jsonl) |
 | Web research adversarial eval | 21 attacks through live web pages (ADR-0032, ADR-0035) | Pinned by `App/tests/agents/test_web_research_adversarial_eval.py` | [adversarial.jsonl](../../evals/web_research_scenarios/adversarial.jsonl) |
 

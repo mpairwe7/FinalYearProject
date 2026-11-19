@@ -5,10 +5,10 @@
 # Data Configuration
 # ===========================================
 data:
-  datasets_dir: "Data/dataset"
-  pdf_dir: "Data/pdfs"
-  output_dir: "Model"
-  results_dir: "Results"
+  datasets_dir: "App/Data/dataset"
+  pdf_dir: "App/Data/pdfs"
+  output_dir: "App/Model"
+  results_dir: "App/Results"
   
   # Data splits
   test_size: 0.2

@@ -82,7 +82,7 @@ The development team must maintain competence in AI safety, MLOps, and the relev
 Clear ownership and accountability must exist for every aspect of the system.
 
 **Commitments:**
-- Assign CODEOWNERS for every directory in the repository
+- Assign .github/CODEOWNERS for every directory in the repository
 - Maintain an ethical decision log for all significant design choices
 - Conduct post-deployment monitoring with alerting
 - Establish an incident response plan for AI-specific failures

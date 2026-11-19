@@ -127,7 +127,7 @@ Thresholds are `CRAWL_GATE_MAX_REMOVED_SHARE`, `CRAWL_GATE_MAX_CHANGED_SHARE`,
    [the crawl was held](#the-crawl-was-held) or failed.
 3. If `dev` has a recent crawl and production does not, the image was not rebuilt or the
    roll failed. Compare `crawl.last_full_run_at` from `GET /v1/index/freshness` with
-   `Data/crawl/crawl_state.json`.
+   `App/Data/crawl/crawl_state.json`.
 
 `ok: true` on that route only says the index matches the image. `crawl` says how old the
 image's corpus is.

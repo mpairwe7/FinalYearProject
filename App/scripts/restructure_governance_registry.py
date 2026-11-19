@@ -65,7 +65,7 @@ def main():
     move_files()
     for rel in git("ls-files").splitlines():
         path = ROOT / rel
-        if not path.is_file() or rel in KEEP_OLD_PATHS or rel.startswith(("Data/", "CosyVoice/")):
+        if not path.is_file() or rel in KEEP_OLD_PATHS or rel.startswith(("App/Data/", "CosyVoice/")):
             continue
         try:
             text = path.read_text(encoding="utf-8")

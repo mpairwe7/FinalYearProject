@@ -1,7 +1,7 @@
 """Rate-table figures verified against original documents (ADR-0033 audit, 2026-11-08).
 
 The 14 figures that had no legal basis were checked against URA's published
-law and guidance in ``Data/pdfs``. Seven were wrong or stale and are corrected;
+law and guidance in ``App/Data/pdfs``. Seven were wrong or stale and are corrected;
 one could not be confirmed and is served as unverified. The evidence ledger
 ``app/tax/evidence/rate_evidence.json`` quotes each page, and these tests
 re-read the page, so the verification can be repeated rather than trusted.

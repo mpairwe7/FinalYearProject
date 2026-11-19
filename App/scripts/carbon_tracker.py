@@ -34,7 +34,7 @@ def track_training(script: str, args: list[str]) -> dict:
 
     tracker = EmissionsTracker(
         project_name="ura-chatbot-training",
-        output_dir="Results/carbon",
+        output_dir="App/Results/carbon",
         log_level="warning",
         save_to_file=True,
     )
@@ -94,7 +94,7 @@ def main() -> None:
     parser.add_argument("--task", choices=["training", "inference"], required=True)
     parser.add_argument("--script", help="Training script to run")
     parser.add_argument("--duration", type=float, default=3600, help="Estimation duration (seconds)")
-    parser.add_argument("--output", default="Results/carbon/emissions_report.json")
+    parser.add_argument("--output", default="App/Results/carbon/emissions_report.json")
     args = parser.parse_args()
 
     print(f"Carbon tracking: task={args.task}")

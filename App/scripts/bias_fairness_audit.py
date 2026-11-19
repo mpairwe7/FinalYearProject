@@ -169,7 +169,7 @@ def audit_taxpayer_parity(base_url: str) -> AuditResult:
 def main() -> None:
     parser = argparse.ArgumentParser(description="URA Chatbot Bias & Fairness Audit")
     parser.add_argument("--api-url", default="http://localhost:8000")
-    parser.add_argument("--output", default="Results/bias_audit_report.json")
+    parser.add_argument("--output", default="App/Results/bias_audit_report.json")
     args = parser.parse_args()
 
     print(f"Running bias audit against {args.api_url}")

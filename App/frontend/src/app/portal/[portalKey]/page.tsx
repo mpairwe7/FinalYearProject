@@ -531,7 +531,7 @@ interface MainMenuItem {
  * ura.go.ug's main navigation and its two mega menus, as the owner's
  * screenshots show them (2026-10-27). Entries this workspace serves open here;
  * the rest open the official page in a new tab. Every official URL below is a
- * page the project's own crawl of ura.go.ug (Data/crawl) fetched; entries whose
+ * page the project's own crawl of ura.go.ug (App/Data/crawl) fetched; entries whose
  * page it never saw (Whistle Blow, Voluntary Disclosure, Stamp Duty, Sitemap)
  * are left out rather than guessed.
  */

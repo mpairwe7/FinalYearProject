@@ -6,7 +6,7 @@ Accepted (amended with second-pass QA hardening G451–G457) — 2026-11-06
 
 ## Context and Problem Statement
 
-As a high-stakes government tax administration platform serving the Uganda Revenue Authority (URA), the assistant ingests statutory Acts, Parliamentary Tax Bills, Uganda Gazette notices, 10-MDA fee schedules (`Data/pdfs/`), live-researched URA Public Notices (`ephemeral_pdf_sandbox.py`), and taxpayer-uploaded receipts, invoices, and assessment notices (`documents.py`).
+As a high-stakes government tax administration platform serving the Uganda Revenue Authority (URA), the assistant ingests statutory Acts, Parliamentary Tax Bills, Uganda Gazette notices, 10-MDA fee schedules (`App/Data/pdfs/`), live-researched URA Public Notices (`ephemeral_pdf_sandbox.py`), and taxpayer-uploaded receipts, invoices, and assessment notices (`documents.py`).
 
 A November 2026 two-pass QA and audit review benchmarked against **IBM Docling** (Livathinos et al. 2025; Heron Layout Model `arXiv:2509.11720`; Granite-Docling; `DoclingDocument`; `HybridChunker`; `TableFormer`; `TripletTableSerializer`), **Citation-Enforced Fiscal RAG (`arXiv:2603.14170`)**, and **HierFinRAG (2026)** identified 17 concrete document-intelligence and container supply-chain gaps (`G441`–`G457`) plus a `PyMuPDF` `import fitz` deprecation across the codebase:
 

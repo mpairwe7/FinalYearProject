@@ -1,6 +1,6 @@
 # ONNX export + quantisation toolchain — NOT part of the runtime environment.
 #
-# Split out of the root requirements.txt on 2026-09-02 when remediating
+# Split out of App/requirements.txt (then at the root) on 2026-09-02 when remediating
 # CVE-2026-9856 (path traversal in transformers `save_pretrained()`, fixed only
 # in transformers 5.10.0). `optimum[onnxruntime]` cannot be installed alongside
 # transformers 5.x:
@@ -19,7 +19,7 @@
 # when the package is absent, which is exactly what happens in the runtime env.
 #
 # Usage:
-#   python -m venv .venv-onnx && .venv-onnx/bin/pip install -r requirements-onnx-export.txt
+#   python -m venv .venv-onnx && .venv-onnx/bin/pip install -r App/requirements-onnx-export.txt
 #   .venv-onnx/bin/python App/scripts/quantize_models.py ...
 #
 # RESIDUAL RISK — read before using this file.
@@ -44,7 +44,7 @@
 # that is a reviewed decision with a named owner, not one to make in passing.
 #
 # Revisit when optimum-onnx supports transformers 5.x; at that point these can
-# fold back into requirements.txt and this file can go away.
+# fold back into App/requirements.txt and this file can go away.
 
 optimum[onnxruntime]>=1.24.0,<2.0.0
 transformers>=4.36,<4.58.0

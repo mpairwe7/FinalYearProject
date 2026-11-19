@@ -138,7 +138,7 @@ handoff summaries and memory, and wrote to a scratch analytics database.
 | `faq` code-switched | – | 205 | 210 | Sunflower: "as people in Uganda say it", English tax terms kept | same |
 | `faq` typo / ASR-style copies | 110 / 154 | 154 / 202 | 177 / 215 | seeded keyboard typos; lower case, no punctuation, elision apostrophes dropped | same |
 | `native` | – | 23 (+38 perturbed) | 23 (+42 perturbed) | the `question_lg` / `question_sw` written into the corpus for 23 rows | the row |
-| `coverage` | 105 | 105 | 105 | `Data/eval/coverage_bank.jsonl`, curated taxpayer-voice questions | judged pool |
+| `coverage` | 105 | 105 | 105 | `App/Data/eval/coverage_bank.jsonl`, curated taxpayer-voice questions | judged pool |
 | `ood` | 32 | 27 | 28 | general knowledge, other countries' tax, other Ugandan agencies, chit-chat | none |
 
 Two caveats decide how to read the `faq` numbers:
@@ -633,7 +633,7 @@ questions:
 - Nothing measures, per language, how often the pivot fails, how much of the
   served context came from the untranslated pass, or how often the service
   abstains — the three numbers this report had to build a harness to see.
-- `Dockerfile` and `Dockerfile.gpu` do not copy `App/ml/`, so the language detector
+- `Dockerfile` and `App/Dockerfile.gpu` do not copy `App/ml/`, so the language detector
   falls back to a character heuristic unless `App/ml/` is bind-mounted (it is on
   the local stack; the HF Space reports `lingua`). In that image, "Ani alina
   okwewandiisa ku VAT?" was detected as English.

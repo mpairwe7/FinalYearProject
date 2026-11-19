@@ -76,10 +76,10 @@ App/ml/
 
 ```bash
 # RAG evaluation (English)
-python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl
+python -m ml.pipelines.evaluate_rag --eval-set App/Data/eval/rag_eval.jsonl
 
 # Offline RAG smoke eval (no Qdrant/LLM required)
-python -m ml.pipelines.evaluate_rag_offline --eval-set Data/eval/rag_eval.jsonl
+python -m ml.pipelines.evaluate_rag_offline --eval-set App/Data/eval/rag_eval.jsonl
 
 # Corpus coverage gate (issue #303)
 python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor
@@ -90,7 +90,7 @@ python -m ml.scripts.eval_retrieval --min-hit1 0.90
 # Combined production quality gate
 python -m ml.pipelines.quality_gates --family production \
   --config App/ml/configs/training_config.yaml \
-  --rag-eval Results/rag_evaluation_results.json --soft-fail
+  --rag-eval App/Results/rag_evaluation_results.json --soft-fail
 
 # Dataset validation
 python App/ml/pipelines/validate_data.py

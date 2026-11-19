@@ -257,7 +257,7 @@ class Statutory2024To2027CorpusAndRatesTests(unittest.TestCase):
 
         for pdf_name in self.EXPECTED_NEW_PDFS:
             with self.subTest(pdf=pdf_name):
-                pdf_path = REPO_ROOT / "Data" / "pdfs" / pdf_name
+                pdf_path = REPO_ROOT / "App" / "Data" / "pdfs" / pdf_name
                 self.assertTrue(pdf_path.is_file(), f"Missing {pdf_path}")
                 insp = inspect_pdf_path(pdf_path, CORPUS_PDF_LIMITS)
                 self.assertGreater(insp.page_count, 0)

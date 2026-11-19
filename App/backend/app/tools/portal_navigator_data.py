@@ -7226,7 +7226,7 @@ _BUILTIN_PORTALS: dict[str, dict[str, Any]] = {k: dict(v) for k, v in EXTERNAL_U
 #: The last load: its (path, mtime_ns, size) key and its result.
 _PACK_STATE: dict[str, Any] = {"key": None, "result": None}
 _WORKFLOW_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
-_SOURCE_PATH_RE = re.compile(r"^Data/[A-Za-z0-9_./-]+$")
+_SOURCE_PATH_RE = re.compile(r"^App/Data/[A-Za-z0-9_./-]+$")
 _URL_IN_TEXT_RE = re.compile(r"https?://[^\s)>\]\"']+")
 _MAX_WORKFLOW_STEPS = 12
 
@@ -7237,7 +7237,7 @@ def _pack_url_ok(url: str) -> bool:
 
 
 def _pack_source_ok(source: Any) -> bool:
-    """A citation: an official URA URL, or a tracked corpus file under ``Data/``."""
+    """A citation: an official URA URL, or a tracked corpus file under ``App/Data/``."""
     text = str(source or "").strip()
     if _SOURCE_PATH_RE.match(text):
         return ".." not in text.split("/")

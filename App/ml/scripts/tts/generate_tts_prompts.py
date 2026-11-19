@@ -10,12 +10,12 @@ Usage::
 
     python -m ml.scripts.tts.generate_tts_prompts \\
         --languages nyn ach lg \\
-        --faq-dir Data/dataset \\
-        --output-dir Data/speech/tts/prompts
+        --faq-dir App/Data/dataset \\
+        --output-dir App/Data/speech/tts/prompts
 
 Output per language::
 
-    Data/speech/tts/prompts/
+    App/Data/speech/tts/prompts/
     ├── nyn_prompts.txt    # One sentence per line
     ├── ach_prompts.txt
     └── lg_prompts.txt
@@ -217,8 +217,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="Generate TTS recording prompts")
     parser.add_argument("--languages", nargs="+", default=["lg", "sw", "nyn", "ach"])
-    parser.add_argument("--faq-dir", type=Path, default=Path("Data/dataset"))
-    parser.add_argument("--output-dir", type=Path, default=Path("Data/speech/tts/prompts"))
+    parser.add_argument("--faq-dir", type=Path, default=Path("App/Data/dataset"))
+    parser.add_argument("--output-dir", type=Path, default=Path("App/Data/speech/tts/prompts"))
     parser.add_argument("--count", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()

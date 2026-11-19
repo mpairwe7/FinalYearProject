@@ -43,7 +43,7 @@ re-index:
 | Tool / graph runtime | `App/backend/app/tools/rag_tool.py`, `App/backend/app/workflows/graph/main_graph.py`, `App/backend/app/native_voice/speculative_prefetch.py` |
 | Freshness | `App/backend/app/freshness.py`; snapshot write from `indexer.main` |
 | Flags | `App/backend/app/config/flags.py` (`query_decomposition`, `hyde`) |
-| Eval | `Data/eval/rag_eval.jsonl` (30 rows) |
+| Eval | `App/Data/eval/rag_eval.jsonl` (30 rows) |
 
 ## 4. Flags and environment
 
@@ -65,7 +65,7 @@ re-index:
 | `FRESHNESS_SLACK_WEBHOOK` | unset | https only; `--notify` no-op if empty |
 | `INDEX_REINDEX_REQUEST_PATH` | `App/Model/index_reindex_requested.json` | `--enqueue` only; never starts indexer |
 
-All of the above are in `.env.example`.
+All of the above are in `App/.env.example`.
 
 ## 5. How to re-verify
 
@@ -154,6 +154,6 @@ so a later audit cannot treat their G16/G17/G27 rows as current.
 
 - FAQ retrieval diagnosis: `faq-retrieval-diagnosis-2026-07-21.md`
 - Local FAQ setup: `../local-faq-retrieval.md`
-- Architecture: `../../docs/RAG_ARCHITECTURE.md`
-- Gaps: `../../docs/GAPS_AND_AGENTIC_ROADMAP.md` (living register)
+- Architecture: `../RAG_ARCHITECTURE.md`
+- Gaps: `../GAPS_AND_AGENTIC_ROADMAP.md` (living register)
 - Dated proposals (not current status): `../../docs/URA_Chatbot_Roadmap_2026_Enhanced.md`, `../../docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md`

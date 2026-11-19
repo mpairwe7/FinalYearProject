@@ -59,7 +59,7 @@ DEFAULT_BASE_URL = os.getenv(
     "https://struttingly-nongeological-briella.ngrok-free.dev/api",
 )
 DEFAULT_CHECKPOINT = "docs/Reports/data/eval_400_checkpoint.json"
-DEFAULT_OUTPUT_REPORT = "Results/metrics/400_faqs_ngrok_evaluation_report.json"
+DEFAULT_OUTPUT_REPORT = "App/Results/metrics/400_faqs_ngrok_evaluation_report.json"
 DEFAULT_DOCS_REPORT = "docs/Reports/data/eval_400_faqs_ngrok.json"
 
 
@@ -99,7 +99,7 @@ def build_400_faqs_dataset() -> list[EvalFAQ]:
     cust_pool: list[dict[str, str]] = []
     edu_pool: list[dict[str, str]] = []
 
-    for fpath in sorted(glob.glob("Data/dataset/*.csv")):
+    for fpath in sorted(glob.glob("App/Data/dataset/*.csv")):
         fname = os.path.basename(fpath)
         try:
             with open(fpath, encoding="utf-8", errors="ignore") as fh:

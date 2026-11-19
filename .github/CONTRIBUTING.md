@@ -12,7 +12,7 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
 
 1. Check existing issues to avoid duplicates.
 2. Use the appropriate issue template (bug report, feature request, security vulnerability).
-3. For **security vulnerabilities**, follow the process in [SECURITY.md](SECURITY.md) instead.
+3. For **security vulnerabilities**, follow the process in [.github/SECURITY.md](SECURITY.md) instead.
 
 ### Development Workflow
 
@@ -53,7 +53,7 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
 - Package manager: **Bun**
 
 #### General
-- No secrets or credentials in code (use `.env` files, reference `.env.example`)
+- No secrets or credentials in code (use `.env` files, reference `App/.env.example`)
 - Pre-commit hooks **must** be installed — they block secrets, large files, and direct pushes to `main`
 - All new endpoints must include Pydantic request/response models
 - All new features must include tests
@@ -82,4 +82,4 @@ If contributing training data:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](../LICENSE).

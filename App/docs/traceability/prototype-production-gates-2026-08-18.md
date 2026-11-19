@@ -30,7 +30,7 @@ stay default **off**.
 | Isolated parse | subprocess when `DOCUMENT_PARSE_ISOLATED`; production requires it | Not a parse pool or gVisor; still better than in-process extractors. |
 | Notifications | In-app inbox + mock outbox. `NOTIFICATION_LIVE` must stay false | No SES / Africa's Talking in this repo. |
 | Publications | https URL or offline fixture. Production forbids fixture. Never auto-`--recreate` | A laptop can ingest; an index rebuild stays an ops act. |
-| Seed data | `Data/eval/prototype_seed.json`; skipped in production and under pytest | Deterministic demo rows without polluting CI. |
+| Seed data | `App/Data/eval/prototype_seed.json`; skipped in production and under pytest | Deterministic demo rows without polluting CI. |
 | Multi-tenant | Predicate + `App/infra/postgres/rls.sql`. Production needs `MULTI_TENANT_RLS_APPLIED=true` | The app filter is not Postgres RLS. |
 | DPO | Export pairs; `DPO_RUN` without `EVAL_GATE_OK` exits 2 | No trainer is wired. |
 | HPA / chaos | Example YAML + in-process drills only | Not applied to a cluster. |
@@ -47,7 +47,7 @@ How a later reviewer traces each feature from claim → code → gate → test.
 | G13 upload AV / isolate | `malware_scan.py`, `document_worker.py` | both flags required | `test_malware_and_publications` | Guards shipped. ClamAV is ops. |
 | G14 inbox / outbox | `notify.py`, `/v1/me/reminders`, `/admin/outbox` | `NOTIFICATION_LIVE` false | `test_remaining_gaps` | In-app live. Email/SMS not sent. |
 | G15 publications | `publications.py`, `publications-ingest.yml` | https URL | `test_malware_and_publications` | Fixture in demo. No auto-recreate. |
-| G28 red-team corpus | `guardrails.py`, `Data/eval/redteam_corpus.jsonl` | — | `test_redteam_corpus` | CI refuse-all on the corpus. |
+| G28 red-team corpus | `guardrails.py`, `App/Data/eval/redteam_corpus.jsonl` | — | `test_redteam_corpus` | CI refuse-all on the corpus. |
 | G29 preference export | `App/evals/export_preferences.py`, `evals/dpo_job.py` | `EVAL_GATE_OK` | `test_remaining_gaps` | Export only. |
 | G30 tenancy | `tenancy.py`, `App/infra/postgres/rls.sql` | RLS ack | `App/tests/chaos` | Predicate shipped. RLS not auto-applied. |
 | G31 overrides | `cms.py`, `/admin/overrides` | `SEED_PROTOTYPE` false | `test_seed_prototype` | Exact-match CMS. |
@@ -78,7 +78,7 @@ Measured from `flags.all()`: **49** flags. Production-on set:
 `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 `voice_consent`.
 
-New or tightened env (all in `.env.example`):
+New or tightened env (all in `App/.env.example`):
 
 | Name | Dev default | Production |
 |------|-------------|------------|

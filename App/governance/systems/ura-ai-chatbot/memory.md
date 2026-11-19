@@ -4,7 +4,7 @@ Everything the URA AI Chatbot keeps about a taxpayer or a conversation, how long
 it keeps it, and who can read it. The code is in
 [`App/backend/app/memory/`](../../../backend/app/memory/__init__.py)
 (ADR-0060). Checked against the code on 2026-11-18. Default periods come from
-[.env.example](../../../../.env.example); a deployment can set others.
+[App/.env.example](../../../.env.example); a deployment can set others.
 
 | Memory | What it holds | Where | How long | Read by |
 | --- | --- | --- | --- | --- |

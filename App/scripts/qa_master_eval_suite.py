@@ -459,7 +459,7 @@ def run_qa_suite() -> dict[str, Any]:
           f"Thermal Headroom: {90 - gpu_final.get('temperature_c', 0):.0f}°C")
 
     # Save complete JSON report
-    out_dir = Path("Results/metrics")
+    out_dir = Path("App/Results/metrics")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "qa_master_eval_report.json"
     with open(out_file, "w", encoding="utf-8") as f:

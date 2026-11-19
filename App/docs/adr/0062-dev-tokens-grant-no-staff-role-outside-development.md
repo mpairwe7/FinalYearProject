@@ -55,7 +55,7 @@ taxpayer as `verified_taxpayer`, and answers 403 otherwise.
 ## Consequences
 
 - Staff on the Space sign in through the OIDC provider only, as they already do.
-- Local staff dev tokens need `AUTH_DEV_SECRET` set to a random value (`.env.example`).
+- Local staff dev tokens need `AUTH_DEV_SECRET` set to a random value (`App/.env.example`).
   The test suites set one per run in `App/tests/conftest.py` and
   `App/backend/tests/conftest.py`.
 - A token forged with the default secret can name only the demo taxpayer outside

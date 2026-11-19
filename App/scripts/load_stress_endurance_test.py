@@ -32,7 +32,7 @@ except ImportError:
     sys.exit(1)
 
 TARGET_BASE_URL = os.environ.get("TARGET_BASE_URL", "http://localhost:8089")
-OUTPUT_JSON = Path("Results/metrics/load_stress_test_report.json")
+OUTPUT_JSON = Path("App/Results/metrics/load_stress_test_report.json")
 OUTPUT_MD = Path("docs/Reports/LOAD_STRESS_ENDURANCE_TEST_REPORT_2026-08-21.md")
 
 

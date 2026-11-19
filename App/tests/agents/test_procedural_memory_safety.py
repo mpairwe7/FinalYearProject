@@ -34,7 +34,7 @@ from app.rag.pipeline import ChatModel  # noqa: E402
 
 def _faq_questions() -> list[str]:
     out: list[str] = []
-    for path in sorted((REPO_ROOT / "Data" / "dataset").glob("ura_*_faqs.csv")):
+    for path in sorted((REPO_ROOT / "App" / "Data" / "dataset").glob("ura_*_faqs.csv")):
         with path.open(encoding="utf-8") as fh:
             out.extend(str(r.get("question") or "").strip() for r in csv.DictReader(fh) if r.get("question"))
     return [q for q in out if q]

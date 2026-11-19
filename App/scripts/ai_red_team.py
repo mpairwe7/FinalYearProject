@@ -205,7 +205,7 @@ def run_red_team(base_url: str) -> list[CategoryResult]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI Red Team Evaluation")
     parser.add_argument("--api-url", default="http://localhost:8000")
-    parser.add_argument("--output", default="Results/red_team_report.json")
+    parser.add_argument("--output", default="App/Results/red_team_report.json")
     args = parser.parse_args()
 
     print("=" * 60)

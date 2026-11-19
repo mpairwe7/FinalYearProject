@@ -6,7 +6,7 @@ Playwright E2E + a11y, AI red team, incident response, DR test, env
 validation) and renders a professional PDF report.
 
 Usage:
-    python App/scripts/generate_test_report_pdf.py --output Results/reports/production_test_report.pdf
+    python App/scripts/generate_test_report_pdf.py --output App/Results/reports/production_test_report.pdf
 """
 from __future__ import annotations
 
@@ -236,7 +236,7 @@ def build_security_section(story: list) -> None:
     story.append(Paragraph("3. Security Testing", styles["H2"]))
 
     story.append(Paragraph("3.1 AI Red Team Evaluation (NIST AI 600-1)", styles["H3"]))
-    red = _load_json("Results/red_team_report.json")
+    red = _load_json("App/Results/red_team_report.json")
     if red:
         data = [["Category", "Total", "Blocked", "Rate", "Status"]]
         for cat in red.get("categories", []):
@@ -252,11 +252,11 @@ def build_security_section(story: list) -> None:
         t.setStyle(_tbl_style())
         story.append(t)
     else:
-        story.append(Paragraph("Red team report not found at Results/red_team_report.json", styles["BodySmall"]))
+        story.append(Paragraph("Red team report not found at App/Results/red_team_report.json", styles["BodySmall"]))
 
     story.append(Spacer(1, 0.5 * cm))
     story.append(Paragraph("3.2 Incident Response Simulation", styles["H3"]))
-    ir = _load_json("Results/incident_response_sim.json")
+    ir = _load_json("App/Results/incident_response_sim.json")
     if ir:
         data = [["Playbook", "Status", "Details"]]
         for pb, passed in ir.get("playbook_results", {}).items():
@@ -413,7 +413,7 @@ def build_infra_section(story: list) -> None:
         ["Frontend CI test stage", _status(True), "test-frontend + a11y-audit before build"],
         ["--cov-fail-under=80", _status(True), "Present in ci-ml-pipeline.yml pytest command"],
         ["Container signing", _status(True), "container-sign-provenance.yml: cosign + SLSA"],
-        ["OWASP ZAP DAST", _status(True), "devsecops-sast-dast.yml with .zap-rules.tsv"],
+        ["OWASP ZAP DAST", _status(True), "devsecops-sast-dast.yml with App/security/.zap-rules.tsv"],
         ["Monitoring stack", _status(True), "docker-compose profile: Prometheus + Grafana + Jaeger"],
         ["Alerting rules", _status(True), "5 SLO rules in App/monitoring/alerting-rules.yml"],
         ["Grafana dashboards", _status(True), "8-panel overview dashboard auto-provisioned"],
@@ -452,7 +452,7 @@ def build_infra_section(story: list) -> None:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default="Results/reports/production_test_report.pdf")
+    parser.add_argument("--output", default="App/Results/reports/production_test_report.pdf")
     args = parser.parse_args()
 
     outpath = Path(args.output)

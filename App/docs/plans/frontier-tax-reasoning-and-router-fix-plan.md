@@ -17,7 +17,7 @@ Target Environment: `dev-2.0` (FastAPI backend + Next.js frontend + vLLM on mult
 2. **Invariants (from `AGENTS.md` and `App/backend/AGENTS.md`):**
    - **Zero Regression on 2,000-FAQ Benchmark:** All existing FAQ regressions, golden sets, and vernacular routing (English, Luganda, Swahili) must continue to pass (baseline ≥ 99.85%).
    - **Endpoint Manifest Contract:** If any FastAPI route is modified or added, update `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS`, `COVERAGE`, and locked endpoint counts).
-   - **Feature Flag Governance:** Any new feature flag must be registered in `App/backend/app/config/flags.py`, documented in `App/docs/RAG_ARCHITECTURE.md`, and reflected in `.env.example`.
+   - **Feature Flag Governance:** Any new feature flag must be registered in `App/backend/app/config/flags.py`, documented in `App/docs/RAG_ARCHITECTURE.md`, and reflected in `App/.env.example`.
    - **Secrets Safety:** Never commit, log, or echo credentials. Use `SecretStr` for API keys.
 3. **Investigation Origin:**
    - Prompt testing on `dev-2.0` revealed that complex tax queries are corrupted or intercepted prematurely by rigid regex heuristics, aggressive spell-checking, and naive false-premise blocks before reaching the LLM, or are choked by a 512-token limit and single-tier 14B model.
@@ -168,7 +168,7 @@ Fix the five acute bugs that caused immediate failure during testing.
   - Update default `LLM_MAX_TOKENS=1536` (with `LLM_CONTEXT_WINDOW=8192` or `16384`) in:
     - `App/backend/app/rag/pipeline.py`
     - `configs/prototype.env`
-    - `.env.example`
+    - `App/.env.example`
     - `docker-compose.yml` / `docker-compose.gpu-salt.yml`
   - In `_call_llm_with_deadline()`, allow full token generation up to 1,536 tokens for RAG answers.
 

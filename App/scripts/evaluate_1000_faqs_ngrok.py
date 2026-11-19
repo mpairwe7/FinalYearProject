@@ -181,7 +181,7 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
     question as a task and answers a slot prompt instead.
 
     No vocabulary is invented here. The Luganda questions are read verbatim
-    from ``Data/eval/rag_eval_lg.jsonl``; the Kiswahili ones are the reviewed
+    from ``App/Data/eval/rag_eval_lg.jsonl``; the Kiswahili ones are the reviewed
     probes already carried by ``App/tests/load/tax_education_accuracy_eval.py`` and
     ``App/scripts/test_master_qa_multilingual_benchmark.py``. Expectations are
     figures, statutory citations and acronyms — the evidence that does not
@@ -190,7 +190,7 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
     """
     probes: list[EvalFAQ] = []
 
-    #: Every question in ``Data/eval/rag_eval_lg.jsonl``, mapped to the
+    #: Every question in ``App/Data/eval/rag_eval_lg.jsonl``, mapped to the
     #: language-invariant evidence its own English ground truth states.
     #: Figures and citations only — the reviewed Luganda text supplies the
     #: question, and nothing here invents an expected Luganda phrasing for the
@@ -211,7 +211,7 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
         "Nsobola ntya okufuna ennyingiza y'emisolo egy'entadde?": ("tax_education", "tax_clearance", [], []),
     }
     try:
-        with open("Data/eval/rag_eval_lg.jsonl", encoding="utf-8") as fh:
+        with open("App/Data/eval/rag_eval_lg.jsonl", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -1286,7 +1286,7 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
 
 #: Words that mark a reply as actually being in the target language. Every one
 #: is drawn from an asset already in this repo that a native speaker reviewed —
-#: ``Data/eval/rag_eval_lg.jsonl``, the reviewed probes in
+#: ``App/Data/eval/rag_eval_lg.jsonl``, the reviewed probes in
 #: ``App/tests/load/tax_education_accuracy_eval.py`` and
 #: ``App/scripts/test_master_qa_multilingual_benchmark.py``. No vocabulary is
 #: invented here: ``app.agents.patterns`` refuses that without native-speaker
@@ -1389,7 +1389,7 @@ def _vernacular_contains(reply_lower: str, term: str, locale: str) -> bool:
 
 
 #: Terms that stay in English inside a correct Luganda or Kiswahili answer:
-#: acronyms and URA product names. ``Data/eval/rag_eval_lg.jsonl`` keeps "VAT"
+#: acronyms and URA product names. ``App/Data/eval/rag_eval_lg.jsonl`` keeps "VAT"
 #: and "TIN" untranslated in reviewed Luganda answers, so finding them there is
 #: evidence of a correct answer rather than of a failed translation.
 _LOCALE_INVARIANT_TERMS: frozenset[str] = frozenset({
@@ -2308,7 +2308,7 @@ def main():
     parser.add_argument("--limit", type=int, default=1000, help="Number of FAQs to evaluate (default: 1000)")
     parser.add_argument(
         "--out",
-        default="Results/metrics/1000_faqs_ngrok_evaluation_report.json",
+        default="App/Results/metrics/1000_faqs_ngrok_evaluation_report.json",
         help="Output report JSON file path",
     )
     args = parser.parse_args()

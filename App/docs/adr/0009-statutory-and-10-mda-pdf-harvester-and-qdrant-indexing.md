@@ -47,7 +47,7 @@ We implemented a unified, October 2026 standard **Statutory & 10-MDA PDF Harvest
 
 ### Harvested & Indexed Corpus Provenance Summary (October 2026)
 
-| Source / MDA Code | Canonical PDF Filename (`Data/pdfs/`) | Upstream Official HTTPS Source | SHA-256 Prefix | Chunks |
+| Source / MDA Code | Canonical PDF Filename (`App/Data/pdfs/`) | Upstream Official HTTPS Source | SHA-256 Prefix | Chunks |
 | :--- | :--- | :--- | :---: | :---: |
 | **Parliament (2026 Bills)** | `Traffic-and-Road-Safety-Amendment-Bill-2026-FY2026-27.pdf` *(+7 existing 2026 Tax Bills)* | `https://www.parliament.go.ug/page/tax-bills-2026` | `e058692495ca` | `4` |
 | **URA (`laws-and-acts`)** | `COMESA-Protocol-on-Rules-of-Origin-2015-1-1-1.pdf` *(+18 existing Acts/Rules)* | `https://ura.go.ug/download-category/laws-and-acts/?cp=2` | `35d7e8ac5352` | `229` |

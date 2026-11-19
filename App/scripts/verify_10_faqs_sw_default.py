@@ -265,7 +265,7 @@ def run_evaluation(target_scenarios: list[str] | None = None) -> dict[str, Any]:
     print(f"Target Frontend Proxy: {FRONTEND_PROXY_ENDPOINT}", flush=True)
     print("Default Language: Swahili (sw)\n", flush=True)
 
-    report_path = Path("Results/metrics/10_faqs_sw_default_evaluation_report.json")
+    report_path = Path("App/Results/metrics/10_faqs_sw_default_evaluation_report.json")
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     results: list[SWAFAQEvalResult] = []

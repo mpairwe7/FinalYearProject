@@ -357,7 +357,7 @@ async def main():
     # Select multimodal speech subset (e.g. 15 items: 5 EN, 5 LG, 5 SW) for intensive STT+TTS roundtrip
     speech_indices = set(list(range(5)) + list(range(34, 39)) + list(range(67, 72)))
 
-    checkpoint_file = "Results/metrics/100_faqs_checkpoint.json"
+    checkpoint_file = "App/Results/metrics/100_faqs_checkpoint.json"
     os.makedirs(os.path.dirname(checkpoint_file), exist_ok=True)
     completed: dict[str, TurnTelemetry] = {}
     if os.path.exists(checkpoint_file):
@@ -482,7 +482,7 @@ async def main():
         "sample_evaluations": [asdict(r) for r in results[:20]],
     }
 
-    out_file = "Results/metrics/100_faqs_multimodal_ngrok_report.json"
+    out_file = "App/Results/metrics/100_faqs_multimodal_ngrok_report.json"
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, "w") as f:
         json.dump(report, f, indent=2)

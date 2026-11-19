@@ -13,7 +13,7 @@
 | Process | 12207 Clause | Project Implementation | Evidence Artifact | Maturity |
 |---------|-------------|----------------------|-------------------|----------|
 | Acquisition | §6.1.1 | N/A – academic project; no formal acquisition | – | N/A |
-| Supply | §6.1.2 | Open-source distribution under Apache-2.0 | LICENSE, CONTRIBUTING.md | Partial |
+| Supply | §6.1.2 | Open-source distribution under Apache-2.0 | LICENSE, .github/CONTRIBUTING.md | Partial |
 
 ### 1.2 Organizational Project-Enabling Processes
 
@@ -22,7 +22,7 @@
 | Life Cycle Model Management | §6.2.1 | MLOps pipeline defines full lifecycle: data → train → evaluate → deploy → monitor | docs/MLOPS_PIPELINE.md, .github/workflows/ | Full |
 | Infrastructure Management | §6.2.2 | Docker containers, GitHub Actions CI/CD, Kaggle GPU/TPU, Docker Hub hosting | docker-compose.yml, Dockerfile, workflows | Full |
 | Portfolio Management | §6.2.3 | Single-project scope; capstone portfolio document | App/docs/capstone/CAPSTONE_PORTFOLIO.md | Full |
-| Human Resource Management | §6.2.4 | Single developer + academic supervisor | CODEOWNERS | Partial |
+| Human Resource Management | §6.2.4 | Single developer + academic supervisor | .github/CODEOWNERS | Partial |
 | Quality Management | §6.2.5 | Quality gates in ML pipeline; linting/testing in CI | App/ml/pipelines/quality_gates.py, ci-ml-pipeline.yml | Full |
 | Knowledge Management | §6.2.6 | Documentation in /docs/; decision logs; memory files | App/docs/, App/docs/capstone/ | Full |
 

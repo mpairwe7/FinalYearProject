@@ -125,12 +125,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git fetch --depth=1 origin dev
-          git checkout FETCH_HEAD -- Data/crawl Data/pdfs
-          cp -r Data/crawl "$RUNNER_TEMP/crawl-before"
+          git checkout FETCH_HEAD -- App/Data/crawl App/Data/pdfs
+          cp -r App/Data/crawl "$RUNNER_TEMP/crawl-before"
           open=$(gh pr list --head "$CANDIDATE_BRANCH" --base dev --state open --json number --jq 'length')
           if [ "$open" != "0" ]; then
             git fetch --depth=1 origin "$CANDIDATE_BRANCH"
-            git checkout FETCH_HEAD -- Data/crawl Data/pdfs
+            git checkout FETCH_HEAD -- App/Data/crawl App/Data/pdfs
             echo "Continuing from the open proposal."
           fi
 
@@ -158,8 +158,8 @@ jobs:
         run: |
           # Harvest Parliament, URA laws-and-acts, and the 11 high-dependency MDA
           # statutory/fee PDF registries (MoWT, DCIC, NIRA, PPDA/MoFPED, UNBS, MLHUD,
-          # KCCA/MoLG, UPF, URSB, NDA/NEMA/UESW, NITA-U/PDPO) into Data/pdfs and
-          # record any new document hashes in Data/crawl/crawl_state.json for crawl_gate.
+          # KCCA/MoLG, UPF, URSB, NDA/NEMA/UESW, NITA-U/PDPO) into App/Data/pdfs and
+          # record any new document hashes in App/Data/crawl/crawl_state.json for crawl_gate.
           max_pages=5
           harvest_args=()
           if [ "$TIER" = "changes" ]; then max_pages=2; fi
@@ -173,8 +173,8 @@ jobs:
             --include-mda-sources \
             --max-pages-per-source "$max_pages" \
             --timeout 25 \
-            --pdf-dir Data/pdfs \
-            --crawl-state Data/crawl/crawl_state.json \
+            --pdf-dir App/Data/pdfs \
+            --crawl-state App/Data/crawl/crawl_state.json \
             "${harvest_args[@]}"
 
       - name: Judge the crawl
@@ -191,7 +191,7 @@ jobs:
           args=()
           [ "$BASELINE" = "true" ] && args+=(--baseline)
           python -m app.crawl_gate evaluate \
-            --before "$RUNNER_TEMP/crawl-before" --after Data/crawl --pdf-dir Data/pdfs \
+            --before "$RUNNER_TEMP/crawl-before" --after App/Data/crawl --pdf-dir App/Data/pdfs \
             --out "$RUNNER_TEMP/candidate" "${args[@]}"
           report="$RUNNER_TEMP/candidate/report.json"
           verdict=$(jq -r .verdict "$report")
@@ -255,12 +255,12 @@ jobs:
           if [ -n "$bad" ]; then echo "::error::Unexpected page file: $bad"; exit 1; fi
           jq empty "$candidate/crawl/crawl_state.json"
           git checkout -B "$CANDIDATE_BRANCH"
-          cp "$candidate"/crawl/pages/*.json Data/crawl/pages/
-          cp "$candidate/crawl/crawl_state.json" Data/crawl/crawl_state.json
+          cp "$candidate"/crawl/pages/*.json App/Data/crawl/pages/
+          cp "$candidate/crawl/crawl_state.json" App/Data/crawl/crawl_state.json
           if [ -d "$candidate/pdfs" ]; then
             bad=$(find "$candidate/pdfs" -type f ! -regex '.*/[A-Za-z0-9._-]+\.pdf$')
             if [ -n "$bad" ]; then echo "::error::Unexpected document name: $bad"; exit 1; fi
-            cp "$candidate"/pdfs/*.pdf Data/pdfs/
+            cp "$candidate"/pdfs/*.pdf App/Data/pdfs/
           fi
 
       - name: Open or update the pull request
@@ -269,7 +269,7 @@ jobs:
         run: |
           git config user.name "URA Crawler Bot"
           git config user.email "crawler@ura-chatbot.example"
-          git add Data/crawl Data/pdfs
+          git add App/Data/crawl App/Data/pdfs
           if git diff --cached --quiet; then
             echo "Nothing differs from dev."
             exit 0

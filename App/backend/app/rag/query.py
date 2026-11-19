@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import mt
-from .._root import PROJECT_ROOT as _PROJECT_ROOT
+from .._root import CODE_ROOT as _CODE_ROOT
 from ..prompts.query import REWRITE_PROMPT, REWRITE_SYSTEM
 
 if TYPE_CHECKING:
@@ -708,12 +708,12 @@ _VOCAB_TOKEN_RE = re.compile(r"[a-z]{4,}")
 
 
 def _bm25_state_paths() -> tuple[Path, ...]:
-    """Where a BM25 state may sit: the retriever's own path, then a checkout's ``Model/``."""
+    """Where a BM25 state may sit: the retriever's own path, then a checkout's ``App/Model/``."""
     if _BM25_STATE_PATHS is not None:
         return _BM25_STATE_PATHS
     from .retriever import BM25_STATE_PATH
 
-    return (BM25_STATE_PATH, _PROJECT_ROOT / "Model" / "bm25_state.json")
+    return (BM25_STATE_PATH, _CODE_ROOT / "Model" / "bm25_state.json")
 
 
 def register_corpus_vocabulary(words: Iterable[str]) -> None:

@@ -92,16 +92,16 @@ calculator's FX source), and `OUTPUT_LINK_ALLOWED_HOSTS`.
 1. Reproduce it: `PYTHONPATH=App/backend python3 -c "from app.guardrails import InputGuard; print(InputGuard().check('…'))"`.
    The flag says which list matched, and the WARNING log names the first 60
    characters of the pattern.
-2. Add the question to `Data/eval/guardrail_benign_controls.jsonl` (`channel`
+2. Add the question to `App/Data/eval/guardrail_benign_controls.jsonl` (`channel`
    `input`, or `passage` for corpus text) with a one-line `why`. CI now fails
    until the pattern is narrowed.
-3. Narrow the pattern so the attack rows in `Data/eval/redteam_corpus.jsonl`
+3. Narrow the pattern so the attack rows in `App/Data/eval/redteam_corpus.jsonl`
    still match, then run both gates:
    `PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_redteam_corpus.py App/tests/agents/test_ai_security_layer_2026_11.py -q`.
 
 ## Adding an attack to the gate
 
-Add a row to `Data/eval/redteam_corpus.jsonl`: a unique `id`, a `category`
+Add a row to `App/Data/eval/redteam_corpus.jsonl`: a unique `id`, a `category`
 (the floors are in `test_redteam_corpus._REQUIRED_CATEGORIES`), `language`,
 `prompt`, `expected` (`refuse` or `partial_refuse`), and `channel: retrieved`
 for text a model would read rather than one a taxpayer would type. A row that

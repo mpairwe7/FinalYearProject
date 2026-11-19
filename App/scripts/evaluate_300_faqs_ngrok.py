@@ -55,7 +55,7 @@ DEFAULT_BASE_URL = os.getenv(
     "https://struttingly-nongeological-briella.ngrok-free.dev/api",
 )
 DEFAULT_CHECKPOINT = "docs/Reports/data/eval_300_checkpoint.json"
-DEFAULT_OUTPUT_REPORT = "Results/metrics/300_faqs_ngrok_evaluation_report.json"
+DEFAULT_OUTPUT_REPORT = "App/Results/metrics/300_faqs_ngrok_evaluation_report.json"
 DEFAULT_DOCS_REPORT = "docs/Reports/data/eval_300_faqs_ngrok.json"
 
 
@@ -95,7 +95,7 @@ def build_300_faqs_dataset() -> list[EvalFAQ]:
     cust_pool: list[dict[str, str]] = []
     edu_pool: list[dict[str, str]] = []
 
-    for fpath in sorted(glob.glob("Data/dataset/*.csv")):
+    for fpath in sorted(glob.glob("App/Data/dataset/*.csv")):
         fname = os.path.basename(fpath)
         try:
             with open(fpath, encoding="utf-8", errors="ignore") as fh:
@@ -565,7 +565,7 @@ async def main():
     runner = Benchmark300Runner(base_url=args.base_url, concurrency=args.concurrency)
     report = await runner.run_evaluation(faqs, checkpoint_path=args.checkpoint)
 
-    # Save to Results/ and App/docs/Reports/data/
+    # Save to App/Results/ and App/docs/Reports/data/
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:

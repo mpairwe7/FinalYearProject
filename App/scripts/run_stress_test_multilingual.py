@@ -260,7 +260,7 @@ async def main():
         }
     }
 
-    out_file = "Results/metrics/multilingual_stress_test_report.json"
+    out_file = "App/Results/metrics/multilingual_stress_test_report.json"
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, "w") as f:
         json.dump(report, f, indent=2)

@@ -649,7 +649,7 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
 
 #: Tokens that mark an amount as money, in any of the three languages served.
 #: ``ssente`` (Luganda) and ``shilingi`` (Kiswahili) are read from
-#: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
+#: ``App/Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
 #: ``App/tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
 _CURRENCY_TOKEN_RE = re.compile(
     r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|shiringi|cilingi|ssente|sente|esente|cente|milioni|obukadde|obukaikuru|akakaikuru|emitwalo|emitwaro)\b",
@@ -660,7 +660,7 @@ _CURRENCY_TOKEN_RE = re.compile(
 #: Shortest a translation may be, as a fraction of the source it renders.
 #:
 #: Measured, not chosen. Across the 23,838 aligned English→Luganda and
-#: English→Kiswahili pairs in ``Data/online_corpora/salt/`` (human
+#: English→Kiswahili pairs in ``App/Data/online_corpora/salt/`` (human
 #: translations, sentences of 20 characters or more):
 #:
 #: ===========  ======  ======  ======  ======  ======

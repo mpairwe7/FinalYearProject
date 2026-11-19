@@ -384,10 +384,11 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+from .._root import APP_DATA_ROOT as _APP_DATA_ROOT  # noqa: E402
 from .._root import PROJECT_ROOT as _PROJECT_ROOT
 from ..prompts.answer import FAQ_JUDGE_PROMPT as _JUDGE_PROMPT
 
-_DEFAULT_DATA_DIR = str(_PROJECT_ROOT / "Data" / "dataset")
+_DEFAULT_DATA_DIR = str(_APP_DATA_ROOT / "dataset")
 _DATA_DIR = Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)).resolve()
 # Guard against path traversal via DATA_DIR env var
 if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
@@ -4150,7 +4151,7 @@ def _retain_faq_candidates(
     return retained
 
 # --- BM25 keyword scoring ----------------------------------------------------
-# Lazy module-level encoder loaded from Model/bm25_state.json (vocab + IDF +
+# Lazy module-level encoder loaded from App/Model/bm25_state.json (vocab + IDF +
 # avg_dl + k1/b).  Used by _simple_search to score the keyword fallback
 # properly — rare URA-domain terms (vat, paye, presumptive, …) get high
 # weight, common words get near-zero weight.  Without the state file we
@@ -4625,7 +4626,7 @@ def _simple_search(
 ) -> list[dict[str, str]]:
     """Keyword retrieval over the in-memory FAQ index.
 
-    Prefers proper BM25 scoring (using the committed Model/bm25_state.json
+    Prefers proper BM25 scoring (using the committed App/Model/bm25_state.json
     vocab+IDF+avg_dl) so rare domain terms like vat, paye, presumptive
     dominate ranking; falls back to plain content-word overlap counting
     when the BM25 state isn't present.  Each returned dict includes an

@@ -63,7 +63,6 @@ BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
 SPARSE_ONLY_INDEX = os.getenv("SPARSE_ONLY_INDEX", "false").lower() in ("1", "true", "yes", "on")
 
 from .._root import APP_DATA_ROOT as _APP_DATA_ROOT
-from .._root import PROJECT_ROOT as _PROJECT_ROOT
 from .faq_corpus import (
     CorpusValidationError,
     export_faq_csvs_to_jsonl,
@@ -87,16 +86,11 @@ from .pdf_corpus import (
 DATA_DIR = Path(os.getenv("DATA_DIR", str(_APP_DATA_ROOT / "dataset")))
 FAQ_JSONL_DIR = Path(os.getenv("FAQ_JSONL_DIR", str(_APP_DATA_ROOT / "faq_jsonl")))
 TEACHER_QA_DIR = Path(os.getenv("TEACHER_QA_DIR", str(_APP_DATA_ROOT / "teacher_qa")))
-# Tracked PDFs live at the repository root (`Data/pdfs`), matching `Data/crawl/pages`.
-_DEFAULT_PDF_DIR = (
-    _PROJECT_ROOT / "Data" / "pdfs"
-    if (_PROJECT_ROOT / "Data" / "pdfs").is_dir()
-    else _APP_DATA_ROOT / "pdfs"
-)
+# The tracked PDFs and the crawl live in App/Data with the derived corpora (ADR-0064).
+_DEFAULT_PDF_DIR = _APP_DATA_ROOT / "pdfs"
 PDF_DIR = Path(os.getenv("PDF_DIR", str(_DEFAULT_PDF_DIR)))
 PDF_JSONL_DIR = Path(os.getenv("PDF_JSONL_DIR", str(_APP_DATA_ROOT / "pdf_jsonl")))
-# The crawl lives at the repository root (it is committed), not under App/Data.
-CRAWL_PAGES_DIR = Path(os.getenv("CRAWL_PAGES_DIR", str(_PROJECT_ROOT / "Data" / "crawl" / "pages")))
+CRAWL_PAGES_DIR = Path(os.getenv("CRAWL_PAGES_DIR", str(_APP_DATA_ROOT / "crawl" / "pages")))
 CRAWL_JSONL_DIR = Path(os.getenv("CRAWL_JSONL_DIR", str(_APP_DATA_ROOT / "crawl_jsonl")))
 BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))

@@ -25,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 logger = logging.getLogger(__name__)
 
 
-def export_review_set(days: int = 30, output_dir: Path = Path("Data/eval/feedback")) -> dict:
+def export_review_set(days: int = 30, output_dir: Path = Path("App/Data/eval/feedback")) -> dict:
     """Query the analytics DB and export review-worthy entries."""
     from App.backend.app.db import database as db
 
@@ -90,7 +90,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Export feedback for review")
     parser.add_argument("--days", type=int, default=30)
-    parser.add_argument("--output-dir", type=str, default="Data/eval/feedback")
+    parser.add_argument("--output-dir", type=str, default="App/Data/eval/feedback")
     args = parser.parse_args()
 
     stats = export_review_set(days=args.days, output_dir=Path(args.output_dir))

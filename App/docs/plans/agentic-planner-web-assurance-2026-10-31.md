@@ -116,7 +116,7 @@ may make XE and Google refuse requests, leaving the mirror as a single source
 G330: threat T43 claimed "pre-connect DNS IP resolution" that did not exist.
 Implemented (`resolves_to_public_address`) and the entry reworded: the check narrows
 rebinding but cannot close it, because the client resolves again on connect. The
-runbook and `.env.example` documented `LIVE_FX_*` variables the code never read;
+runbook and `App/.env.example` documented `LIVE_FX_*` variables the code never read;
 corrected to the real `FX_*` names.
 
 ## What independent review changed

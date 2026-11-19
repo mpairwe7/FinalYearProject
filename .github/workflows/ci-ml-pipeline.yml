@@ -13,9 +13,9 @@ on:
     paths:
       - 'App/ml/**'
       - 'App/backend/**'
-      - 'Data/**'
-      - 'Model/**'
-      - 'requirements.txt'
+      - 'App/Data/**'
+      - 'App/Model/**'
+      - 'App/requirements.txt'
       # This workflow's own test job runs `pytest App/tests/`, so a change to that
       # suite has to trigger it. Without this the guards living there — the
       # endpoint manifest, the coverage registry, the locked surface count —
@@ -23,7 +23,7 @@ on:
       # (or a break in them) could sit unverified until an unrelated commit.
       - 'App/tests/**'
       # pytest's configfile — it sets the rootdir and options this job runs under.
-      - 'pyproject.toml'
+      - 'App/pyproject.toml'
       - '.github/workflows/ci-ml-pipeline.yml'
   pull_request:
     branches: [main, dev, develop]
@@ -72,7 +72,7 @@ jobs:
           # Specification document (ADR-0033); test-only, jsonschema pinned as in
           # App/backend/requirements.lock.txt.
           uv pip install --system ruff pytest pytest-cov pyshacl==0.30.1 jsonschema==4.26.0
-          uv pip install --system -r requirements.txt
+          uv pip install --system -r App/requirements.txt
 
       - name: Run Ruff linter
         run: |
@@ -87,7 +87,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          pytest App/tests/ -v --cov=App/ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
+          pytest App/tests/ -v --cov-config=App/pyproject.toml --cov=App/ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
 
       - name: Install backend test dependencies
         run: |
@@ -132,12 +132,12 @@ jobs:
           with tempfile.TemporaryDirectory() as tmp:
               out = Path(tmp)
 
-              faq_stats = export_faq_csvs_to_jsonl(root / "Data" / "dataset", out / "faq_jsonl")
-              faq_docs = ingest_faq_jsonls(root / "Data" / "dataset", out / "faq_jsonl")
+              faq_stats = export_faq_csvs_to_jsonl(root / "App" / "Data" / "dataset", out / "faq_jsonl")
+              faq_docs = ingest_faq_jsonls(root / "App" / "Data" / "dataset", out / "faq_jsonl")
               assert len(faq_docs) == faq_stats["records"], (len(faq_docs), faq_stats)
               print(f"FAQ corpus OK: {len(faq_docs)} documents from {faq_stats['sources']} CSVs")
 
-              pages = root / "Data" / "crawl" / "pages"
+              pages = root / "App" / "Data" / "crawl" / "pages"
               crawl_stats = export_crawl_pages_to_jsonl(pages, out / "crawl_jsonl")
               crawl_docs = ingest_crawl_jsonls(pages, out / "crawl_jsonl")
               assert len(crawl_docs) == crawl_stats["records"], (len(crawl_docs), crawl_stats)
@@ -174,9 +174,9 @@ jobs:
         # "How do I object to a tax assessment I disagree with?" reached
         # production abstaining.
         #
-        # This asks the questions taxpayers ask instead (Data/eval/coverage_bank.jsonl,
+        # This asks the questions taxpayers ask instead (App/Data/eval/coverage_bank.jsonl,
         # drawn from URA contact-centre themes) and gates the answered rate per
-        # tax domain against the floors in Data/eval/coverage_domains.yaml, plus
+        # tax domain against the floors in App/Data/eval/coverage_domains.yaml, plus
         # a whole-bank floor. Every abstention and every on-topic-but-wrong
         # answer is printed by question, so a failure is a work list.
         #
@@ -256,7 +256,7 @@ jobs:
           SPEECH_ENABLED: 'false'
         run: |
           python -m ml.pipelines.evaluate_rag_offline \
-            --eval-set Data/eval/rag_eval.jsonl \
+            --eval-set App/Data/eval/rag_eval.jsonl \
             --output "${RUNNER_TEMP}/rag_offline_report.json"
           python - <<'PY'
           import json
@@ -370,7 +370,7 @@ jobs:
       - name: Install the backend and the receptionist stack
         run: |
           uv pip install --system pytest
-          uv pip install --system -r requirements.txt
+          uv pip install --system -r App/requirements.txt
           uv pip install --system -r App/backend/requirements-cranecloud.txt
           # As every image installs it: Pipecat's metadata caps Pillow below
           # the patched floor, so the resolver is told to keep Pillow >= 13.
@@ -449,30 +449,30 @@ jobs:
 
       - name: Verify RAG evaluation set exists
         run: |
-          if [ ! -f Data/eval/rag_eval.jsonl ]; then
-            echo "ERROR: RAG evaluation set Data/eval/rag_eval.jsonl is missing"
+          if [ ! -f App/Data/eval/rag_eval.jsonl ]; then
+            echo "ERROR: RAG evaluation set App/Data/eval/rag_eval.jsonl is missing"
             exit 1
           fi
-          echo "Eval set: $(wc -l < Data/eval/rag_eval.jsonl) samples"
+          echo "Eval set: $(wc -l < App/Data/eval/rag_eval.jsonl) samples"
 
       - name: Run RAG evaluation (English)
         env:
           PYTHONPATH: ${{ github.workspace }}/App
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          mkdir -p Results
+          mkdir -p App/Results
           python -m ml.pipelines.evaluate_rag \
-            --eval-set Data/eval/rag_eval.jsonl \
-            --output-dir Results \
+            --eval-set App/Data/eval/rag_eval.jsonl \
+            --output-dir App/Results \
             --config App/ml/configs/training_config.yaml
 
       - name: Verify Luganda evaluation set exists
         run: |
-          if [ ! -f Data/eval/rag_eval_lg.jsonl ]; then
-            echo "ERROR: Luganda evaluation set Data/eval/rag_eval_lg.jsonl is missing"
+          if [ ! -f App/Data/eval/rag_eval_lg.jsonl ]; then
+            echo "ERROR: Luganda evaluation set App/Data/eval/rag_eval_lg.jsonl is missing"
             exit 1
           fi
-          echo "Luganda eval set: $(wc -l < Data/eval/rag_eval_lg.jsonl) samples"
+          echo "Luganda eval set: $(wc -l < App/Data/eval/rag_eval_lg.jsonl) samples"
 
       # faithfulness and groundedness are lexical-overlap scorers (shared
       # tokens / shared 3-grams).  The Luganda set pairs Luganda answers with
@@ -489,8 +489,8 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -m ml.pipelines.evaluate_rag \
-            --eval-set Data/eval/rag_eval_lg.jsonl \
-            --output-dir Results/lg \
+            --eval-set App/Data/eval/rag_eval_lg.jsonl \
+            --output-dir App/Results/lg \
             --config App/ml/configs/training_config.yaml \
             --gate-exclude faithfulness,groundedness
 
@@ -499,17 +499,17 @@ jobs:
         with:
           name: rag-evaluation-results
           path: |
-            Results/rag_evaluation_results.json
-            Results/rag_quality_gates.json
-            Results/lg/
+            App/Results/rag_evaluation_results.json
+            App/Results/rag_quality_gates.json
+            App/Results/lg/
 
       - name: Step summary
         if: always()
         run: |
           echo "## RAG Evaluation" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f Results/rag_evaluation_results.json ]; then
+          if [ -f App/Results/rag_evaluation_results.json ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            cat Results/rag_evaluation_results.json >> "$GITHUB_STEP_SUMMARY"
+            cat App/Results/rag_evaluation_results.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -539,7 +539,7 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rag-evaluation-results
-          path: Results/
+          path: App/Results/
 
       - name: Set up uv
         uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
@@ -562,7 +562,7 @@ jobs:
           python -m ml.pipelines.quality_gates \
             --family production \
             --config App/ml/configs/training_config.yaml \
-            --rag-eval Results/rag_evaluation_results.json \
+            --rag-eval App/Results/rag_evaluation_results.json \
             --baseline App/ml/configs/quality_baseline.json \
             --max-regression 0.03
 
@@ -572,5 +572,5 @@ jobs:
           {
             echo "## Production Gates"
             echo ""
-            echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`App/ml/configs/quality_baseline.json\` regression baseline (blocking)."
+            echo "Quality gates scored against \`App/Results/rag_evaluation_results.json\` and the \`App/ml/configs/quality_baseline.json\` regression baseline (blocking)."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -36,7 +36,7 @@ repos:
         stages: [pre-commit, pre-push]
 
   # ── Gitleaks – fast regex-based secret scanner ────────────────────────────
-  # Config: .gitleaks.toml (includes Uganda-specific PII + ML API key rules)
+  # Config: App/security/.gitleaks.toml (includes Uganda-specific PII + ML API key rules)
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.24.0
     hooks:
@@ -45,14 +45,14 @@ repos:
         stages: [pre-commit]
 
   # ── detect-secrets (Yelp) – baseline-aware entropy scanner ────────────────
-  # Maintains a baseline (.secrets.baseline) of known false-positives.
+  # Maintains a baseline (App/security/.secrets.baseline) of known false-positives.
   # New high-entropy strings trigger a failure requiring explicit audit.
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
         name: detect-secrets – baseline scan
-        args: ['--baseline', '.secrets.baseline']
+        args: ['--baseline', 'App/security/.secrets.baseline']
         exclude: >
           (?x)^(
             .*\.lock$|
@@ -60,23 +60,23 @@ repos:
             package-lock\.json$|
             bun\.lockb$|
             .*\.ipynb$|
-            Data/.*|
-            Results/.*|
+            App/Data/.*|
+            App/Results/.*|
             App/evals/language_id/manifest.*\.jsonl|
             test_env/.*
           )$
         stages: [pre-commit]
 
   # ── Semgrep – multi-language SAST ─────────────────────────────────────────
-  # Runs custom project rules (.semgrep/) + community OWASP/security rules.
-  # Config: .semgrep/ura-chatbot-rules.yaml
+  # Runs custom project rules (App/security/.semgrep/) + community OWASP/security rules.
+  # Config: App/security/.semgrep/ura-chatbot-rules.yaml
   - repo: https://github.com/semgrep/semgrep
     rev: v1.155.0
     hooks:
       - id: semgrep
         name: Semgrep – SAST scan
         args:
-          - --config=.semgrep/
+          - --config=App/security/.semgrep/
           - --error
           - --severity=ERROR
           - --metrics=off
@@ -84,7 +84,7 @@ repos:
 
   # ── Bandit – Python security linter ─────────────────────────────────────
   # AST-based analysis for Python-specific security issues.
-  # Config: .bandit.yaml
+  # Config: App/security/.bandit.yaml
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.3
     hooks:
@@ -92,7 +92,7 @@ repos:
         name: Bandit – Python security scan
         args:
           - -c
-          - .bandit.yaml
+          - App/security/.bandit.yaml
           - --severity-level=high
           - --confidence-level=high
         stages: [pre-commit]

@@ -145,7 +145,7 @@ warm-up thread pulling Spark-TTS-SALT onto the GPU *at boot*:
 Nothing in the request path triggered that load — no client had connected yet.
 Before `SPEECH_WARMUP`, the first taxpayer to press Listen paid for it. Note
 also `device=cuda:0` on both tiers: the 2026-08-22 run accepted CPU fallback
-here, and the cu128 pin in `Dockerfile.gpu` has since made the GPU path real.
+here, and the cu128 pin in `App/Dockerfile.gpu` has since made the GPU path real.
 
 ### Infrastructure
 

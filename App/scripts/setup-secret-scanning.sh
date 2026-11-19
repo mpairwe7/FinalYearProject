@@ -59,7 +59,7 @@ info "Installed pre-commit and pre-push hooks into .git/hooks/"
 
 # ── Generate detect-secrets baseline ──────────────────────────────────────
 step "Configuring detect-secrets baseline"
-if [ ! -f .secrets.baseline ]; then
+if [ ! -f App/security/.secrets.baseline ]; then
     info "Generating new detect-secrets baseline..."
     detect-secrets scan \
         --exclude-files '\.secrets\.baseline$' \
@@ -70,25 +70,25 @@ if [ ! -f .secrets.baseline ]; then
         --exclude-files 'Podfile\.lock$' \
         --exclude-files '\.env\.example$' \
         --exclude-files '.*\.ipynb$' \
-        --exclude-files 'Data/.*' \
-        --exclude-files 'Results/.*' \
+        --exclude-files 'App/Data/.*' \
+        --exclude-files 'App/Results/.*' \
         --exclude-files 'test_env/.*' \
         --exclude-files 'artifacts/.*' \
         --exclude-files 'sbom-cyclonedx\.json$' \
         --exclude-files '.*\.apk$' \
         --exclude-files '.*\.ipa$' \
-        > .secrets.baseline
-    info "Baseline created at .secrets.baseline"
-    info "Review and commit this file: git add .secrets.baseline && git commit"
+        > App/security/.secrets.baseline
+    info "Baseline created at App/security/.secrets.baseline"
+    info "Review and commit this file: git add App/security/.secrets.baseline && git commit"
 else
     info "Baseline exists — updating with current scan..."
-    detect-secrets scan --baseline .secrets.baseline \
+    detect-secrets scan --baseline App/security/.secrets.baseline \
         --exclude-files '\.secrets\.baseline$' \
         --exclude-files 'package-lock\.json$' \
         --exclude-files 'bun\.lockb$' \
         --exclude-files '.*\.ipynb$' \
-        --exclude-files 'Data/.*' \
-        --exclude-files 'Results/.*'
+        --exclude-files 'App/Data/.*' \
+        --exclude-files 'App/Results/.*'
     info "Baseline updated"
 fi
 
@@ -149,7 +149,7 @@ fi
 step "Validating configuration"
 
 # Check all config files exist
-CONFIGS=(".pre-commit-config.yaml" ".gitleaks.toml" ".gitguardian.yaml" ".trufflehog-exclude-paths.txt")
+CONFIGS=(".pre-commit-config.yaml" "App/security/.gitleaks.toml" ".gitguardian.yaml" "App/security/.trufflehog-exclude-paths.txt")
 ALL_PRESENT=true
 for cfg in "${CONFIGS[@]}"; do
     if [ -f "$cfg" ]; then
@@ -199,14 +199,14 @@ echo "    Runs on: push, PR, weekly full-history scan"
 echo ""
 echo "  Configuration files:"
 echo "    - .pre-commit-config.yaml       – hook definitions"
-echo "    - .gitleaks.toml                – custom rules (Uganda PII, ML keys)"
+echo "    - App/security/.gitleaks.toml                – custom rules (Uganda PII, ML keys)"
 echo "    - .gitguardian.yaml             – ggshield path exclusions"
-echo "    - .trufflehog-exclude-paths.txt – TruffleHog path exclusions"
-echo "    - .secrets.baseline             – detect-secrets known false-positives"
+echo "    - App/security/.trufflehog-exclude-paths.txt – TruffleHog path exclusions"
+echo "    - App/security/.secrets.baseline             – detect-secrets known false-positives"
 echo ""
 echo "  Next steps:"
 echo "    1. Set GITGUARDIAN_API_KEY locally and in GitHub Secrets"
-echo "    2. Review .secrets.baseline: detect-secrets audit .secrets.baseline"
+echo "    2. Review App/security/.secrets.baseline: detect-secrets audit App/security/.secrets.baseline"
 echo "    3. Commit all config files"
 echo "    4. Test: pre-commit run --all-files"
 echo ""

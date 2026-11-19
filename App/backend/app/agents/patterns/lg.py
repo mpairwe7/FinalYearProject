@@ -1,6 +1,6 @@
 """Luganda routing patterns.
 
-Vocabulary is taken from ``Data/eval/rag_eval_lg.jsonl`` — twelve real
+Vocabulary is taken from ``App/Data/eval/rag_eval_lg.jsonl`` — twelve real
 taxpayer questions — rather than from a dictionary, so the forms here
 are the ones people actually type, including the possessive contractions
 (``gw'ameka``, ``y'emeka``) that a naive word list misses.

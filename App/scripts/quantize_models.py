@@ -55,7 +55,7 @@ log = logging.getLogger("quantize_models")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "artifacts" / "quantized"
-CALIBRATION_DATA = PROJECT_ROOT / "Data" / "dataset"
+CALIBRATION_DATA = PROJECT_ROOT / "App" / "Data" / "dataset"
 
 # GGUF quant types: name -> (description, approx bits/weight for 8B model)
 GGUF_QUANT_TYPES: dict[str, tuple[str, float]] = {
@@ -531,7 +531,7 @@ def export_onnx(
             "the transformers 5.x that CVE-2026-9856 requires); install it in "
             "its own environment, never this one, to run this path: "
             "python -m venv .venv-onnx && .venv-onnx/bin/pip install -r "
-            "requirements-onnx-export.txt"
+            "App/requirements-onnx-export.txt"
         )
         return QuantResult(
             model=model_id, format="onnx", quant_type="fp16",
@@ -574,7 +574,7 @@ def _load_calibration_texts(max_samples: int = 128) -> list[str]:
     """Load calibration texts from the training dataset."""
     texts: list[str] = []
 
-    # Try JSONL files in Data/dataset
+    # Try JSONL files in App/Data/dataset
     for jsonl_path in sorted(CALIBRATION_DATA.glob("*.jsonl")):
         try:
             with open(jsonl_path, encoding="utf-8") as f:

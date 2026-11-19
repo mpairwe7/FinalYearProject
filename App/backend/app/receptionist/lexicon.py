@@ -11,13 +11,13 @@ try:
 except ImportError:
     jellyfish = None  # type: ignore[assignment]
 
-from .._root import PROJECT_ROOT
+from .._root import APP_DATA_ROOT, PROJECT_ROOT
 from ..rag.query import _ABBREVIATIONS, _TAX_DOMAIN_VOCAB, _damerau_levenshtein
 
 logger = logging.getLogger(__name__)
 
 # Fallback path for multi-word lexicon definitions
-_LEXICON_PATH = PROJECT_ROOT / "Data" / "receptionist" / "lexicon_en.txt"
+_LEXICON_PATH = APP_DATA_ROOT / "receptionist" / "lexicon_en.txt"
 _ALT_LEXICON_PATH = PROJECT_ROOT / "data" / "receptionist" / "lexicon_en.txt"
 
 # An acronym as Luganda or Swahili speakers say it: every word ends in a

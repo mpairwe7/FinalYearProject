@@ -325,7 +325,7 @@ def run_evaluation() -> dict[str, Any]:
         "results": [asdict(r) for r in results],
     }
 
-    report_path = Path("Results/metrics/10_faqs_lg_default_evaluation_report.json")
+    report_path = Path("App/Results/metrics/10_faqs_lg_default_evaluation_report.json")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"\nDetailed evaluation report saved to: {report_path}")

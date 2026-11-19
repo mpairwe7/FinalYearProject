@@ -10,7 +10,7 @@ This file is the repo-wide router. Package rules live next to the code.
 | `App/backend` | FastAPI host, RAG, tools, MCP, graphs | `App/backend/AGENTS.md` |
 | `App/frontend` | Next.js taxpayer + staff UI | `App/frontend/AGENTS.md` |
 | `App/evals/` | Golden sets, red-team gate, preference export | `App/evals/AGENTS.md` |
-| `Data/` | FAQ, PDFs, crawl, eval JSONL | `Data/README.md` |
+| `App/Data/` | FAQ, PDFs, crawl, eval JSONL | `App/Data/README.md` |
 | `App/ml/` | Offline training, corpus pipelines, local ASR/MT/TTS wrappers | `App/ml/AGENTS.md` |
 | `App/infra/` | Compose overlays and example HPA (not applied) | `App/infra/AGENTS.md` |
 | `App/monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `App/monitoring/AGENTS.md` |
@@ -52,7 +52,7 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - Every open PR must resolve all CI check failures and all CodeRabbit AI review comments (`coderabbitai[bot]`) before merging (`gh pr checks` green + inline review findings addressed).
 - Every code, config, model, flag, route, or infrastructure change must update living documentation in the same PR per 2026 industry standards (ISO/IEC 42001 Clause 7.5, NIST AI RMF 1.0 `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, MADR 4.0 ADRs in `App/docs/adr/`, Diátaxis runbooks in `App/docs/runbooks/`, Model Cards in `App/governance/systems/ura-ai-chatbot/model_card.md`, and CycloneDX 1.6 AIBOM in `App/governance/systems/ura-ai-chatbot/manifest.yaml`; see `.claude/skills/living-docs-adr-runbooks-traceability/SKILL.md` and `.claude/skills/refresh-docs/SKILL.md`).
 - New FastAPI routes must land in `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
-- A new flag lands in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- A new flag lands in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`.
 - On sign-in, a guided workflow is adopted only from the anonymous session the request itself proves (`db.adopt_workflow_session`, ADR-0013). Never add candidate keys a caller could derive from a conversation id alone; "signed in" is decided per request, never read back from stored slots.
 - A new workflow YAML needs its own prefix in `RESUME_CODE_PREFIXES` (`journey_copilot.py`).
 - GitHub Actions (ADR-0011): pin every action by commit SHA with a `# vX.Y.Z` comment, pass `inputs.*`/`github.event.*` through `env:` (never `${{ }}` inside `run:`), set `persist-credentials: false` unless the job pushes, and take Node/Bun versions from `App/frontend/.nvmrc` / `.bun-version`. Enforced by `App/tests/test_ci_supply_chain_policy.py` and `.github/workflows/actions-security.yml` (zizmor + actionlint).

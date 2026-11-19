@@ -89,9 +89,9 @@ previously implied they did.
 `no_repeat_ngram_size` is not a vLLM `SamplingParams` field, so it never
 reaches `Sunflower-14B-FP8` however it is set. `App/governance/systems/ura-ai-chatbot/model_card.md` claimed it
 as a property of the served model; that was wrong and is corrected. Its code
-default, `.env.example` and the docs also disagreed three ways (6 / 0 / 6),
+default, `App/.env.example` and the docs also disagreed three ways (6 / 0 / 6),
 which is the `.env`-versus-Space-secret drift pattern that has caused silent
-production differences before — an operator copying `.env.example` got one
+production differences before — an operator copying `App/.env.example` got one
 value and the Space, carrying no such secret, got the code default.
 
 It is now 0 everywhere on purpose. A hard block on every repeated 6-gram is
@@ -171,7 +171,7 @@ through the unprotected retry.
 `test_localization_integrity.py` covers the three properties masking does *not*
 protect and that claim verification, having run on the English draft, assumes:
 the unit survives ("18%" must not arrive as a bare "18"), the answer is not
-truncated (the floor is measured from `Data/online_corpora/salt/`, not chosen),
+truncated (the floor is measured from `App/Data/online_corpora/salt/`, not chosen),
 and the `[n]` citation markers still match the ones the verification report was
 written about.
 

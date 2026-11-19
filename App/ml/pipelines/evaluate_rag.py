@@ -11,7 +11,7 @@ in ``evaluate.py``:
 Reference: RAGAS evaluation framework (docs.ragas.io)
 
 Usage:
-    python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl
+    python -m ml.pipelines.evaluate_rag --eval-set App/Data/eval/rag_eval.jsonl
 """
 
 from __future__ import annotations
@@ -629,8 +629,8 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(description="Evaluate RAG pipeline")
-    parser.add_argument("--eval-set", type=str, default="Data/eval/rag_eval.jsonl")
-    parser.add_argument("--output-dir", type=str, default="Results")
+    parser.add_argument("--eval-set", type=str, default="App/Data/eval/rag_eval.jsonl")
+    parser.add_argument("--output-dir", type=str, default="App/Results")
     parser.add_argument("--config", type=str, default="App/ml/configs/training_config.yaml")
     parser.add_argument(
         "--baseline",

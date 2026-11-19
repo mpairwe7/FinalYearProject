@@ -31,7 +31,7 @@ from unittest import mock
 from app.rag import query as query_mod
 from app.rag.query import _fuzzy_correct_word, correct_spelling, register_corpus_text, rewrite
 
-_FAQ_DIR = Path(__file__).resolve().parents[3] / "Data" / "dataset"
+_FAQ_DIR = Path(__file__).resolve().parents[3] / "App" / "Data" / "dataset"
 
 
 def _faq_rows() -> list[dict[str, str]]:
