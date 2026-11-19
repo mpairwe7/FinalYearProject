@@ -79,3 +79,4 @@ where the sealed approval is part of the graph's state.
   problem after each phase, and a second `--apply` changes nothing.
 - `app.main` imports, and the root and backend suites pass in CI's order after
   each phase.
+- `restructure_guardrails_agents_workflows.py` and `split_module.py` were deleted on 2026-11-19, once the move was long finished (G686). The code is in git at `61e29d3e`. The `--verify` results above are as recorded at the time: its string heuristic has since gone stale and was never a CI check.

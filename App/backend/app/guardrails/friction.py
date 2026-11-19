@@ -33,6 +33,8 @@ import uuid
 from collections import OrderedDict, deque
 from typing import TYPE_CHECKING, Any
 
+from ..redis_shared import shared_redis
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -204,40 +206,10 @@ class StrikeTracker:
 
 
 _SHARED_PREFIX = "guard:friction:"
-#: Seconds between attempts to reach Redis after one failed.
-_REDIS_RETRY_S = 30.0
-_redis_client: Any = None
-_redis_retry_at = 0.0
-
-
-def _shared_redis() -> Any:
-    """The Redis client at ``REDIS_URL``, or None until it can be reached.
-
-    A failed connection is retried every ``_REDIS_RETRY_S``, so a Redis that comes
-    up after this process resumes shared counting without a restart.
-    """
-    global _redis_client, _redis_retry_at
-    if _redis_client is not None:
-        return _redis_client
-    url = os.getenv("REDIS_URL", "")
-    if not url or time.monotonic() < _redis_retry_at:
-        return None
-    try:
-        import redis
-
-        client = redis.from_url(url, socket_timeout=1)
-        client.ping()
-    except Exception:  # noqa: BLE001 - no Redis means per-process state until it answers
-        if not _redis_retry_at:
-            logger.warning("REDIS_URL is set but unreachable; guard strikes stay per process until it answers")
-        _redis_retry_at = time.monotonic() + _REDIS_RETRY_S
-        return None
-    _redis_client = client
-    return client
 
 
 #: The process-wide tracker the chat service consults.
-strike_tracker = StrikeTracker(shared=_shared_redis)
+strike_tracker = StrikeTracker(shared=shared_redis)
 
 
 def _friction_enabled() -> bool:

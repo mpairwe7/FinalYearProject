@@ -80,3 +80,4 @@ system prompts.
   problem after each phase.
 - The root and backend suites pass in CI's order after each phase.
 - A second `--apply` of the same phase changes nothing.
+- `restructure_observability_memory_prompts.py` was deleted on 2026-11-19, once the move was long finished (G686). The code is in git at `61e29d3e`. The `--verify` results above are as recorded at the time: its string heuristic has since gone stale and was never a CI check.

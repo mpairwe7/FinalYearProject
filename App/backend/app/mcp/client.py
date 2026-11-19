@@ -23,6 +23,7 @@ The agent layer never imports :mod:`app.tools` directly.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -34,6 +35,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..redis_shared import shared_redis
 from ..resilience import CircuitBreaker
 from ..observability.security_events import record_mcp_security_event
 from ..observability.tracing import trace_tool_call
@@ -69,29 +71,8 @@ _IDEMPOTENCY_REDIS_PREFIX = "mcp:idem:"
 _IDEMPOTENCY_REDIS_TTL_S = int(os.getenv("MCP_IDEMPOTENCY_TTL_S", "86400"))
 #: TTL (seconds) for pinned tool descriptors before legitimate redeploy re-pins.
 MCP_DESCRIPTOR_PIN_TTL_S = int(os.getenv("MCP_DESCRIPTOR_PIN_TTL_S", "3600"))
-_redis = None
-_redis_tried = False
-
-
-def _shared_store():
-    """Redis when ``REDIS_URL`` is up; otherwise ``None`` (in-process cache)."""
-    global _redis, _redis_tried
-    if _redis_tried:
-        return _redis
-    _redis_tried = True
-    url = os.getenv("REDIS_URL", "")
-    if not url:
-        return None
-    try:
-        import redis  # noqa: PLC0415 — optional
-
-        client = redis.from_url(url, socket_timeout=2)
-        client.ping()
-        _redis = client
-    except Exception:
-        logger.info("MCP idempotency: Redis unavailable; using in-process cache")
-        _redis = None
-    return _redis
+#: Redis when ``REDIS_URL`` is up; otherwise ``None`` (in-process cache).
+_shared_store = functools.partial(shared_redis, timeout=2.0)
 
 
 @dataclass

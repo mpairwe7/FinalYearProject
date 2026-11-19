@@ -45,6 +45,7 @@ from app.db import database  # noqa: E402
 from app.rag import pipeline as pipeline_module  # noqa: E402
 from app.config.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
+from app import redis_shared  # noqa: E402
 from app.providers import breakers, budget, gateway  # noqa: E402
 from app.providers import config as cloud_config  # noqa: E402
 
@@ -105,8 +106,7 @@ def cloud_fallback_env():
     os.environ.update(env)
     cloud_config.get_cloud_settings.cache_clear()
     flags.set("cloudflare_fallback", True)
-    budget._redis = None
-    budget._redis_tried = True  # force in-process counters
+    redis_shared.reset(enabled=False)  # force in-process counters
     budget._local_gemini.clear()
     breakers.SUNBIRD_LLM_BREAKER.record_success()
     pipeline_module._LLM_CIRCUIT.record_success()
@@ -115,7 +115,7 @@ def cloud_fallback_env():
     for key in env:
         os.environ.pop(key, None)
     cloud_config.get_cloud_settings.cache_clear()
-    budget._redis_tried = False
+    redis_shared.reset()
 
 
 @pytest.fixture()

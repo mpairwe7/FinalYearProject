@@ -19,6 +19,7 @@ Implements Phase D of the Sovereign Live Web Research & Self-Updating Qdrant pla
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -39,6 +40,7 @@ from urllib.parse import unquote, urlparse
 
 from . import egress
 from .document_worker import try_isolated
+from .redis_shared import shared_redis
 from .guardrails.input_checks import _record_guardrail_security_event, injection_present
 from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
@@ -68,7 +70,6 @@ _TAINTED_CHUNK_MARKER = "[REDACTED_INSTRUCTION]"
 #: dropped others page by page (G487; CodeRabbit on #704).
 _CACHE_SCREEN_VERSION = "g487-1"
 SANDBOX_CACHE_TTL_SECONDS = int(os.getenv("SANDBOX_CACHE_TTL_SECONDS", str(24 * 3600)))
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SANDBOX_REDIS_PREFIX = "ura:pdf_chunks:"
 _CHUNK_TARGET_CHARS = 900
 _CHUNK_OVERLAP_CHARS = 120
@@ -98,33 +99,10 @@ class SandboxDocument:
 _CACHE_LOCK = threading.Lock()
 _L1_CHUNK_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _L1_MAX_ENTRIES = 64
-_redis_client: Any = None
-_redis_init_attempted = False
 
 
-def _get_redis() -> Any:
-    """Lazy-initialize optional Redis client for 24h SHA-256 PDF chunk caching."""
-    global _redis_client, _redis_init_attempted
-    if _redis_init_attempted:
-        return _redis_client
-    with _CACHE_LOCK:
-        if _redis_init_attempted:
-            return _redis_client
-        _redis_init_attempted = True
-        try:
-            import redis  # type: ignore[import-untyped]
-
-            client = redis.from_url(
-                REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.5,
-                socket_timeout=0.5,
-            )
-            client.ping()
-            _redis_client = client
-        except Exception:
-            _redis_client = None
-        return _redis_client
+#: Optional Redis for 24h SHA-256 PDF chunk caching; None without REDIS_URL or while it is unreachable.
+_get_redis = functools.partial(shared_redis, decode_responses=True, timeout=0.5)
 
 
 def clear_sandbox_cache() -> None:

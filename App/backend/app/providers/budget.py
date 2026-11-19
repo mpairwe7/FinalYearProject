@@ -10,41 +10,23 @@ neurons.
 
 from __future__ import annotations
 
+import functools
 import logging
-import os
 import threading
 import time
 
+from ..redis_shared import shared_redis
 from .config import get_cloud_settings
 
 logger = logging.getLogger("ura.providers.budget")
 
-_REDIS_URL = os.getenv("REDIS_URL", "")
-_redis = None
-_redis_tried = False
 _lock = threading.Lock()
 _local_neurons: dict[str, int] = {}
 _local_gemini: list[float] = []
 
 
-def _get_redis():
-    """Lazily connect to the app's Redis (None if unavailable → in-process counters)."""
-    global _redis, _redis_tried
-    if _redis_tried:
-        return _redis
-    _redis_tried = True
-    if not _REDIS_URL:
-        return None
-    try:
-        import redis  # noqa: PLC0415 — optional, lazy
-
-        client = redis.from_url(_REDIS_URL, socket_timeout=2)
-        client.ping()
-        _redis = client
-    except Exception as exc:  # pragma: no cover - environment dependent
-        logger.info("budget: Redis unavailable (%s); using in-process counters", exc)
-        _redis = None
-    return _redis
+#: The app's Redis, or None (in-process counters).
+_get_redis = functools.partial(shared_redis, timeout=2.0)
 
 
 def try_consume_neurons(estimate: int = 1, *, now: float | None = None) -> bool:

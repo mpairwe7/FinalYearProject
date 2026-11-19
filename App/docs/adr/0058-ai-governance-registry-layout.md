@@ -69,3 +69,4 @@ numbered portfolio, and the module READMEs link to them.
 - `App/tests/test_monorepo_architecture_governance.py` and
   `App/tests/test_governance_evidence.py` read the manifest at its new path.
 - Running the codemod a second time changes no file.
+- `restructure_governance_registry.py` was deleted on 2026-11-19, once the move was long finished (G686). The code is in git at `61e29d3e`. The `--verify` results above are as recorded at the time: its string heuristic has since gone stale and was never a CI check.

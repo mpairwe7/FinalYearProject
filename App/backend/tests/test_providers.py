@@ -11,6 +11,7 @@ import os
 import unittest
 import unittest.mock as mock
 
+from app import redis_shared
 from app.providers import budget, config, gateway, relay_client, vectorize
 
 _KEYS = {
@@ -309,8 +310,7 @@ class BudgetTest(unittest.TestCase):
         os.environ["CF_NEURON_DAILY_BUDGET"] = "3"
         os.environ["GEMINI_RPM"] = "2"
         config.get_cloud_settings.cache_clear()
-        budget._redis = None
-        budget._redis_tried = True  # force in-process counters
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_neurons.clear()
         budget._local_gemini.clear()
 
@@ -318,7 +318,7 @@ class BudgetTest(unittest.TestCase):
         os.environ.pop("CF_NEURON_DAILY_BUDGET", None)
         os.environ.pop("GEMINI_RPM", None)
         config.get_cloud_settings.cache_clear()
-        budget._redis_tried = False
+        redis_shared.reset()
 
     def test_neuron_budget_caps(self):
         self.assertTrue(budget.try_consume_neurons(2))
@@ -349,14 +349,11 @@ class BudgetTest(unittest.TestCase):
             def incr(self, *a, **k):
                 raise ConnectionError("redis gone")
 
-        budget._redis = _BrokenRedis()
-        try:
+        with mock.patch.object(budget, "_get_redis", return_value=_BrokenRedis()):
             # Both guards must degrade to the in-process counters, not raise.
             self.assertTrue(budget.try_consume_neurons(2))
             self.assertFalse(budget.try_consume_neurons(2))  # 4 > 3 locally
             self.assertTrue(budget.try_consume_gemini_call(now=1000.0))
-        finally:
-            budget._redis = None
 
     def test_neuron_budget_is_thread_safe(self):
         import threading
@@ -588,8 +585,7 @@ class LLMFallbackTest(unittest.TestCase):
 
     def setUp(self):
         _with_keys()
-        budget._redis = None
-        budget._redis_tried = True  # force in-process budget
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_gemini.clear()
         budget._local_neurons.clear()
         # Some tests below let a "truncated" Gemini reply fall through to a
@@ -604,7 +600,7 @@ class LLMFallbackTest(unittest.TestCase):
 
     def tearDown(self):
         _clear_keys()
-        budget._redis_tried = False
+        redis_shared.reset()
         gateway._client = None
 
     def test_fallback_uses_sunbird_when_configured(self):
@@ -1162,8 +1158,7 @@ class CfWhisperSTTTest(unittest.TestCase):
 
     def setUp(self):
         _with_keys()
-        budget._redis = None
-        budget._redis_tried = True
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_neurons.clear()
         from app.providers import breakers
 
@@ -1171,7 +1166,7 @@ class CfWhisperSTTTest(unittest.TestCase):
 
     def tearDown(self):
         _clear_keys()
-        budget._redis_tried = False
+        redis_shared.reset()
         gateway._client = None
 
     @staticmethod
@@ -1243,8 +1238,7 @@ class CfWorkersTtsTest(unittest.TestCase):
 
     def setUp(self):
         _with_keys()
-        budget._redis = None
-        budget._redis_tried = True
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_neurons.clear()
         from app.providers import breakers
 
@@ -1252,7 +1246,7 @@ class CfWorkersTtsTest(unittest.TestCase):
 
     def tearDown(self):
         _clear_keys()
-        budget._redis_tried = False
+        redis_shared.reset()
         gateway._client = None
 
     @staticmethod
@@ -1398,8 +1392,7 @@ class CfGatewayDispatchTest(unittest.TestCase):
         from app.providers import breakers
         from app.speech_service import SpeechModel
 
-        budget._redis = None
-        budget._redis_tried = True
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_neurons.clear()
         breakers.CF_STT_BREAKER.record_success()
         sm = SpeechModel.__new__(SpeechModel)
@@ -1411,7 +1404,7 @@ class CfGatewayDispatchTest(unittest.TestCase):
              mock.patch.object(gateway, "workers_ai_stt", return_value={"text": "x"}) as stt:
             sm._cf_whisper_transcribe(b"\x00" * 320, 16000, "en")
         self.assertEqual(stt.call_args.kwargs.get("model"), "@cf/openai/whisper-large-v3-turbo")
-        budget._redis_tried = False
+        redis_shared.reset()
 
 
 @unittest.skipUnless(os.getenv("CF_LIVE_TEST") == "1", "set CF_LIVE_TEST=1 + real CF keys to run")
@@ -1471,8 +1464,7 @@ class LLMRoutingOrderTest(unittest.TestCase):
 
     def setUp(self):
         _with_keys()
-        budget._redis = None
-        budget._redis_tried = True
+        redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_gemini.clear()
         budget._local_neurons.clear()
         from app.providers import breakers
@@ -1481,7 +1473,7 @@ class LLMRoutingOrderTest(unittest.TestCase):
 
     def tearDown(self):
         _clear_keys()
-        budget._redis_tried = False
+        redis_shared.reset()
         gateway._client = None
 
     def test_sunbird_is_primary_and_gemini_never_generates(self):

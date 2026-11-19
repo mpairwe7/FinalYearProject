@@ -26,6 +26,7 @@ Implements Phase E of the Sovereign Live Web Research & Self-Updating Qdrant pla
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -42,6 +43,7 @@ from urllib.parse import urlparse
 from .._root import APP_DATA_ROOT as _APP_DATA_ROOT
 from ..ephemeral_pdf_sandbox import SandboxDocument
 from ..freshness import SNAPSHOT_PATH, write_snapshot
+from ..redis_shared import shared_redis
 from ..ingestion.indexer import PDF_JSONL_DIR, QDRANT_COLLECTION, _embedding_text
 from ..ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, PDF_MANIFEST_NAME, _stable_id
 from ..rag.retriever import deterministic_point_id, fiscal_year_rank
@@ -51,7 +53,6 @@ logger = logging.getLogger(__name__)
 
 ARCHIVE_DIR = Path(os.getenv("PDF_ARCHIVE_DIR", str(_APP_DATA_ROOT / "archive")))
 WEB_SYNC_TTL_SECONDS = int(os.getenv("WEB_SYNC_TTL_SECONDS", str(7 * 86400)))
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _SYNC_LOCK_PREFIX = "ura:web_sync_lock:"
 
 #: Only official Ugandan statutory/tax/MDA authority hosts may ever persist to Qdrant.
@@ -72,8 +73,6 @@ _NON_REPLACING_FAMILIES: frozenset[str] = frozenset(
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _FAMILY_LOCKS: dict[str, threading.Lock] = {}
-_redis_client: Any = None
-_redis_init_attempted = False
 
 
 class CorpusSyncOriginRejected(ValueError):
@@ -111,29 +110,8 @@ class SyncOutcome:
     ledger_entry: dict[str, Any] = field(default_factory=dict)
 
 
-def _get_redis() -> Any:
-    """Lazy-initialize optional Redis client for distributed sync locks."""
-    global _redis_client, _redis_init_attempted
-    if _redis_init_attempted:
-        return _redis_client
-    with _PROCESS_LOCKS_GUARD:
-        if _redis_init_attempted:
-            return _redis_client
-        _redis_init_attempted = True
-        try:
-            import redis  # type: ignore[import-untyped]
-
-            client = redis.from_url(
-                REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.5,
-                socket_timeout=0.5,
-            )
-            client.ping()
-            _redis_client = client
-        except Exception:
-            _redis_client = None
-        return _redis_client
+#: Optional Redis for distributed sync locks; None without REDIS_URL or while it is unreachable.
+_get_redis = functools.partial(shared_redis, decode_responses=True, timeout=0.5)
 
 
 @contextlib.contextmanager
