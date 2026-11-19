@@ -46,6 +46,29 @@ class AmountExtractionTests(unittest.TestCase):
             self.assertEqual([a for a, _, _ in extract_amounts(message)], [500_000.0], message)
         self.assertEqual([a for a, _, _ in extract_amounts("turnover of UGX 1,000,000,000")], [1_000_000_000.0])
 
+    def test_a_tin_is_known_by_its_label_wherever_the_label_sits(self) -> None:
+        """#759 covered "TIN is …". These five phrasings still gave PAYE on a billion-shilling salary."""
+        tin = "10001" + "23456"
+        for message in (
+            f"My Taxpayer Identification Number is {tin}. PAYE on 500,000?",
+            f"{tin} is my TIN. What is PAYE on 500,000?",
+            f"I am taxpayer {tin}, PAYE on 500,000?",
+            f"My TIN ({tin}) - PAYE on 500,000?",
+            f"PAYE on 500,000 for TIN={tin}",
+            f"Tax identification no. {tin}, PAYE on 500,000",
+        ):
+            self.assertEqual([a for a, _, _ in extract_amounts(message)], [500_000.0], message)
+
+    def test_a_ten_digit_amount_without_a_tin_label_is_still_an_amount(self) -> None:
+        """A bare ten-digit number starting with 1 is a TIN to the redactor; here only a label makes it one."""
+        for message, amounts in (
+            ("My turnover is 1500000000, do I register for VAT?", [1_500_000_000.0]),
+            ("VAT on 1000000000", [1_000_000_000.0]),
+            ("I paid tax of 1000123456 last year", [1_000_123_456.0]),
+            ("My TIN is 1000123456 and my turnover is 1500000000", [1_500_000_000.0]),
+        ):
+            self.assertEqual([a for a, _, _ in extract_amounts(message)], amounts, message)
+
     def test_multiple_amounts_refuse_single_parse(self) -> None:
         self.assertIsNone(parse_ugx_amount("between 1m and 2m"))
         self.assertIsNone(parse_ugx_amount("no numbers here"))
@@ -227,6 +250,22 @@ class ServiceCalculatorPathTests(unittest.TestCase):
         self.assertEqual(out["response_judge"]["confidence_band"], "high")
         self.assertIn("180,000", out["reply"])
         self.assertIn("1,180,000", out["reply"])
+
+    def test_a_tin_in_the_question_does_not_change_the_paye_answer(self) -> None:
+        """G670: the TIN became the salary, and the answer was PAYE on over a billion shillings."""
+        tin = "10001" + "23456"
+        plain = self.model.generate("What is the PAYE on UGX 500,000 a month?")["reply"]
+        for message in (
+            f"My Taxpayer Identification Number is {tin}. What is the PAYE on UGX 500,000 a month?",
+            f"{tin} is my TIN. What is the PAYE on UGX 500,000 a month?",
+        ):
+            turn = self.model.generate(message)
+            stream = self.model.generate_retrieval_only(message=message, conversation_id=str(uuid.uuid4()))
+            for out in (turn, stream):
+                self.assertEqual(out["retrieval_mode"], "calculator", message)
+                self.assertIn("UGX 500,000", out["reply"], message)
+                self.assertNotIn("1,000,123,456", out["reply"], message)
+            self.assertEqual(turn["reply"], plain, message)
 
     def test_missing_salary_elicits_then_computes(self) -> None:
         thread = str(uuid.uuid4())
