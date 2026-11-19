@@ -43,6 +43,14 @@ docker compose build api frontend
 docker compose up -d qdrant api frontend
 ```
 
+### Changing a Python dependency of the API image
+
+The API image installs `App/backend/requirements.lock.txt`, hash-checked (ADR-0066, G690). The lock pins `App/backend/requirements.txt` and `App/backend/requirements-receptionist.txt` together, with the overrides in `App/backend/requirements-overrides.txt`.
+
+1. Edit the range in one of those three files.
+2. Re-run the command in the lock's header from the repository root. To move one package and keep the rest, add `--upgrade-package <name>`.
+3. Commit the edited file and the lock. `App/tests/test_ci_supply_chain_policy.py` fails if the lock no longer satisfies a range, or if the Dockerfile installs from an index the lock was not compiled against.
+
 ### Production overrides
 
 Create `docker-compose.prod.yml` alongside the existing file to tighten settings:

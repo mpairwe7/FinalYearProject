@@ -1,0 +1,3 @@
+# Overrides applied when App/backend/requirements.lock.txt is compiled (see its header).
+# pipecat-ai caps Pillow below 13 in its metadata. Pillow 13 fixes CVE-2026-112393 et al.
+Pillow>=13.0.0

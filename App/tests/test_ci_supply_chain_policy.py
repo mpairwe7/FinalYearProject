@@ -368,8 +368,8 @@ def test_opentelemetry_family_moves_in_lockstep(path: Path):
 
 
 def test_backend_lockfile_satisfies_its_requirements():
-    """The lock is compiled from App/backend/requirements.txt (see its header).
-    Dependabot edits it in place, and it had drifted below its own floors
+    """The lock is compiled from requirements.txt and requirements-receptionist.txt (see its
+    header). Dependabot edits it in place, and it had drifted below its own floors
     (Pillow 12.3.0 under ``Pillow>=13.0.0``, contrib 0.66b0 under api 1.45.1)."""
     from packaging.requirements import Requirement
     from packaging.utils import canonicalize_name
@@ -384,13 +384,40 @@ def test_backend_lockfile_satisfies_its_requirements():
            "implementation_name": "cpython", "platform_python_implementation": "CPython", "extra": ""}
     semconv = pinned.get("opentelemetry-semantic-conventions")
     assert semconv == _otel_contrib_for(pinned["opentelemetry-api"]), "lock: OpenTelemetry contrib/core mismatch"
-    for line in _requirement_lines(ROOT / "App" / "backend" / "requirements.txt"):
+    backend = ROOT / "App" / "backend"
+    lists = ("requirements.txt", "requirements-receptionist.txt", "requirements-overrides.txt")
+    for line in (line for name in lists for line in _requirement_lines(backend / name)):
         req = Requirement(line)
         if req.marker is not None and not req.marker.evaluate(env):
             continue
         version = pinned.get(canonicalize_name(req.name))
         assert version is not None, f"lock is missing {req.name}"
         assert req.specifier.contains(version, prereleases=True), f"lock pins {req.name}=={version}, outside {req}"
+
+
+def test_the_api_image_installs_only_its_hashed_lock():
+    """The API image installed ranges from two lists, and its lock described another
+    torch build (PyPI's CUDA 13, where the image took CUDA 12.6) and was never installed (G690)."""
+    dockerfile = (ROOT / "App" / "Dockerfile").read_text(encoding="utf-8")
+    install = re.search(r"uv pip install --require-hashes -r requirements\.lock\.txt (.+)", dockerfile)
+    assert install, "the API image must install its lock with --require-hashes"
+    for ranges in ("-r requirements.txt", "-r requirements-receptionist.txt", "--override"):
+        assert ranges not in dockerfile, f"the API image must not resolve again ({ranges})"
+
+    lock = (ROOT / "App" / "backend" / "requirements.lock.txt").read_text(encoding="utf-8")
+    header = lock.split("\n", 2)[1]
+    # The install fetches from the indexes the lock was compiled against, or the hashes and torch build differ.
+    index_options = re.compile(r"--(index-url|extra-index-url|default-index|index|find-links|index-strategy)[ =](\S+)")
+    installed_from = set(index_options.findall(install.group(1)))
+    assert installed_from == set(index_options.findall(header)), "the install and the lock name different indexes"
+    assert ("index-strategy", "unsafe-best-match") in installed_from
+    for source in ("requirements.txt", "requirements-receptionist.txt", "--override App/backend/requirements-overrides.txt"):
+        assert source in header, f"the lock header does not compile {source}"
+    index = re.search(r"/whl/(\w+)", install.group(1)).group(1)
+    assert re.search(rf"^torch==\S+\+{index} ", lock, re.M), f"torch in the lock is not the {index} build"
+    blocks = re.split(r"\n(?=[A-Za-z0-9])", lock)
+    unhashed = [b.splitlines()[0] for b in blocks if re.match(r"^[A-Za-z0-9_.-]+==", b) and "--hash=sha256:" not in b]
+    assert unhashed == []
 
 
 def test_dependabot_automerge_waits_for_required_checks():

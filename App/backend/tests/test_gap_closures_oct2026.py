@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import unittest
 from pathlib import Path
@@ -299,11 +300,15 @@ class MultilingualAndSpeechHardeningTests(unittest.TestCase):
         self.assertEqual(out, "How do I pay Rental Income Tax?")
         self.assertTrue(seen and "Rental Income Tax" in seen[0])
 
-    def test_g297_root_dockerfile_uses_cu126_index(self) -> None:
-        """G297: Root Dockerfile uses the cu126 wheel index that publishes torch==2.14.1."""
-        df = (Path(__file__).resolve().parents[3] / "App" / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("https://download.pytorch.org/whl/cu126", df)
-        self.assertNotIn("https://download.pytorch.org/whl/cu128", df)
+    def test_g297_api_image_torch_comes_from_the_index_it_names(self) -> None:
+        """G297: the cu128 index published no torch==2.14.1, so uv silently took PyPI's CUDA 13
+        build. The image now installs a hashed lock whose torch is the named index's build (G690)."""
+        app = Path(__file__).resolve().parents[3] / "App"
+        df = (app / "Dockerfile").read_text(encoding="utf-8")
+        lock = (app / "backend" / "requirements.lock.txt").read_text(encoding="utf-8")
+        index = re.search(r"--extra-index-url https://download\.pytorch\.org/whl/(\w+)", df)
+        self.assertIsNotNone(index)
+        self.assertRegex(lock, rf"(?m)^torch==\S+\+{index.group(1)} ")
 
 
 if __name__ == "__main__":
