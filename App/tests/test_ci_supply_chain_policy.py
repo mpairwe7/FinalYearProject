@@ -496,15 +496,19 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
         re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8"), re.M)
     )
     assert len(space_python) == 1, space_python
-    api = api_python.pop()
+    api, space = api_python.pop(), space_python.pop()
     assert pairs == {
         ("App/requirements.txt", ci_python),
         ("App/backend/requirements.txt", api),
         ("App/ml/requirements-crawl.txt", str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"])),
         # Installed in every image: audited on each Python it is installed on.
-        ("App/backend/requirements-receptionist.txt", space_python.pop()),
+        ("App/backend/requirements-receptionist.txt", space),
         ("App/backend/requirements-receptionist.txt", api),
+        # What production runs, audited as pinned rather than re-resolved (ADR-0066).
+        ("App/backend/requirements-cranecloud.lock.txt", space),
     }
+    locked = [entry for entry in audit["strategy"]["matrix"]["include"] if entry["requirements"].endswith(".lock.txt")]
+    assert [entry.get("locked") for entry in locked] == [True], "the lock is audited as it stands, not re-resolved"
 
 
 CRAWL_WORKFLOW = ROOT / ".github" / "workflows" / "scheduled-crawl.yml"

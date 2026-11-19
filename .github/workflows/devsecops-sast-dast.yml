@@ -276,6 +276,12 @@ jobs:
             python: "3.14"          # Dockerfile / App/Dockerfile.gpu base image
           - requirements: App/ml/requirements-crawl.txt
             python: "3.11"          # scheduled-crawl.yml PYTHON_VERSION
+          # What production runs: the image's hashed lock, audited as pinned
+          # (ADR-0066). The ranges it is compiled from resolve to newer
+          # versions, so auditing those could pass while a pinned one is vulnerable.
+          - requirements: App/backend/requirements-cranecloud.lock.txt
+            python: "3.11"          # Dockerfile.cranecloud base image (the Space)
+            locked: true
           # The call receptionist's stack was installed in every image and
           # audited in none (G598). Every image installs it with this
           # override, because Pipecat's metadata caps Pillow below the patched
@@ -319,6 +325,9 @@ jobs:
           if [ -f /tmp/resolved-requirements.txt ]; then
             # Already the full pinned closure: audit it as it stands.
             SOURCE="-r /tmp/resolved-requirements.txt --no-deps --disable-pip"
+          elif [ "${{ matrix.locked }}" = "true" ]; then
+            # A lock is the full pinned closure too: audit exactly what it pins.
+            SOURCE="-r ${{ matrix.requirements }} --no-deps --disable-pip"
           else
             SOURCE="-r ${{ matrix.requirements }}"
           fi

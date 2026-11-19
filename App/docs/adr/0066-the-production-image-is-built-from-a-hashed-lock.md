@@ -29,6 +29,7 @@ Option 1. It is pip's own hash-checking mode, and the repository already uses it
 - **The lock.** `App/backend/requirements-cranecloud.lock.txt` is compiled with the command in its header: `uv pip compile` with `--generate-hashes`, for the image's Python (3.11.17) and platform. It pins 92 packages, each with the SHA-256 of every file it may be installed from. The ranges file stays the place a person edits.
 - **The image.** The build runs `pip install --require-hashes --only-binary :all: -r requirements-cranecloud.lock.txt`. `--only-binary` means no source distribution is built, so no package's build script runs during the image build. The lock is in the build context and in the build workflow's path filter.
 - **CI.** Every job that installs `App/requirements.txt` passes the lock as constraints (`-c`), so the packages the two lists share resolve to the shipped versions. The backend steps then install the lock itself with `--require-hashes`. The root list's `numpy==1.26.4` becomes the image's range, because it was the one pin that excluded a shipped version.
+- **Vulnerability audit.** The pip-audit job audits the lock as pinned. It had never audited the image's list at all, and re-resolving the ranges could pass while a pinned version was vulnerable.
 - **Dependabot.** It watches `/App/ml` and `/App` for pip, and no longer `/` for Docker.
 
 Not covered: `App/Dockerfile`, the API image the Compose stacks build, still installs ranges with a CUDA index. It is not what production runs. Its lock stays checked by `test_backend_lockfile_satisfies_its_requirements` and is tracked as G690.
@@ -48,5 +49,6 @@ Not covered: `App/Dockerfile`, the API image the Compose stacks build, still ins
   - the lock satisfies every range and hashes every package
   - every CI install of the root list is constrained by the lock, and no root pin excludes a shipped version
   - every folder Dependabot watches holds a manifest
+  - the pip-audit matrix audits the lock as pinned
 - In the image's own base container (`python:3.11-slim-bookworm`, the pinned digest), `pip install --require-hashes --only-binary :all:` from the lock installed and `pip check` passed.
 - `uv pip install --dry-run` of both CI commands resolved: 217 packages for the constrained root list, with the five shipped versions, and 92 for the lock.
