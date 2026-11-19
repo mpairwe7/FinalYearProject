@@ -173,3 +173,4 @@ Option 1, chosen by the service owner over the narrower option 2.
   passes. `docker compose config` resolves the full stack with its monitoring
   profiles, and the full stack with the MCP overlay. A second run of the script
   finds nothing to move.
+- `App/tests/test_compose_build_paths.py` checks that every Compose build names a Dockerfile that exists. `docker compose config` does not check that. After phase D, four builds in `App/docker-compose.yml` and two overlays still named the root `Dockerfile`; they now name `App/Dockerfile`.
