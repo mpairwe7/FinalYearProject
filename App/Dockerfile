@@ -41,11 +41,13 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Install Python dependencies from the hashed lock (ADR-0066, G690). It pins
 # requirements.txt and requirements-receptionist.txt together, with the Pillow
 # override in requirements-overrides.txt; its header has the compile command.
-# torch comes from the CUDA 12.6 index, so the install names the index the lock
-# was compiled against. docopt has no wheel, so builds stay allowed here.
+# torch is the CPU build: the laptop and CI that build this image have no NVIDIA
+# GPU, the CUDA build added 2.78 GB of wheels, and GPU hosts build Dockerfile.gpu.
+# The install names the index the lock was compiled against. docopt has no wheel,
+# so builds stay allowed.
 COPY App/backend/requirements.lock.txt ./requirements.lock.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --require-hashes -r requirements.lock.txt --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
+    uv pip install --require-hashes -r requirements.lock.txt --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image

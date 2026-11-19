@@ -32,7 +32,8 @@ Option 1. It is pip's own hash-checking mode, and the repository already uses it
 - **Vulnerability audit.** The pip-audit job audits the lock as pinned. It had never audited the image's list at all, and re-resolving the ranges could pass while a pinned version was vulnerable.
 - **Dependabot.** It watches `/App/ml` and `/App` for pip, and no longer `/` for Docker.
 
-- **The API image (G690, added 2026-11-19).** `App/Dockerfile`, which the Compose stacks, the ZAP job and the Trivy scan build, installed two range lists with a CUDA 12.6 index and a Pillow override. Its lock, `App/backend/requirements.lock.txt`, was compiled from one of the lists against PyPI, so it held PyPI's CUDA 13 torch where the image installs the CUDA 12.6 build, and nothing installed it. The lock is now compiled from both lists, `App/backend/requirements-overrides.txt`, the CUDA 12.6 index and the image's Python (3.14.8) and platform, with the command in its header: 177 packages. The image runs `uv pip install --require-hashes -r requirements.lock.txt` against the same index. It cannot be binary-only: `docopt`, which `pipecat-ai` needs through `num2words`, publishes no wheel.
+- **The API image (G690, added 2026-11-19).** `App/Dockerfile`, which the Compose stacks, the ZAP job and the Trivy scan build, installed two range lists with a CUDA 12.6 index and a Pillow override. Its lock, `App/backend/requirements.lock.txt`, was compiled from one of the lists against PyPI, so it held PyPI's CUDA 13 torch where the image installs the CUDA 12.6 build, and nothing installed it. The lock is now compiled from both lists, `App/backend/requirements-overrides.txt`, the PyTorch CPU index and the image's Python (3.14.8) and platform, with the command in its header: 158 packages. The image runs `uv pip install --require-hashes -r requirements.lock.txt` against the same index. It cannot be binary-only: `docopt`, which `pipecat-ai` needs through `num2words`, publishes no wheel.
+- **CPU torch in the API image (owner's decision, 2026-11-20).** The development laptop and the CI runners that build this image have no NVIDIA GPU, and the Space runs the other image. GPU hosts build `App/Dockerfile.gpu`, which has its own CUDA torch: `docker-compose.gpu-salt.yml` builds it, and `docker-compose.dev2.yml` runs it. The CUDA 12.6 build pulled in 19 CUDA packages, 2.78 GB of wheels. The CPU build of the same torch (`2.14.1+cpu`) drops them and changes no other pin.
 
 ## Consequences
 
@@ -42,6 +43,7 @@ Option 1. It is pip's own hash-checking mode, and the repository already uses it
 - New releases no longer arrive by themselves. Dependabot's weekly pip run for `/App/backend` proposes them, and a person merges.
 - The bootstrap line `pip install --upgrade pip wheel setuptools` is still unpinned.
 - The API image's lock is compiled against two indexes with `--index-strategy unsafe-best-match`, so its install must name the same index and strategy. A test fails if they differ, or if torch in the lock is not that index's build.
+- Two overlays layer on this image and ask for CUDA in the API container. `docker-compose.local-sunflower.yml` sets `RETRIEVER_DENSE_DEVICE` and `RERANKER_DEVICE` to `cuda:0`, and `docker-compose.coverage-gpu.yml` reserves a GPU for `api`. With CPU torch the retriever falls back to CPU and logs it, as it does whenever the device is missing. By default both models already run on CPU (`RETRIEVER_DENSE_DEVICE=cpu`). A stack that needs them on a GPU builds `App/Dockerfile.gpu`, as gpu-salt does.
 
 ## Confirmation
 

@@ -397,7 +397,7 @@ def test_backend_lockfile_satisfies_its_requirements():
 
 def test_the_api_image_installs_only_its_hashed_lock():
     """The API image installed ranges from two lists, and its lock described another
-    torch build (PyPI's CUDA 13, where the image takes CUDA 12.6) and was never installed (G690)."""
+    torch build (PyPI's CUDA 13, where the image took CUDA 12.6) and was never installed (G690)."""
     dockerfile = (ROOT / "App" / "Dockerfile").read_text(encoding="utf-8")
     install = re.search(r"uv pip install --require-hashes -r requirements\.lock\.txt (.+)", dockerfile)
     assert install, "the API image must install its lock with --require-hashes"
@@ -411,7 +411,7 @@ def test_the_api_image_installs_only_its_hashed_lock():
         assert flag in header, f"the lock was not compiled with {flag}"
     for source in ("requirements.txt", "requirements-receptionist.txt", "--override App/backend/requirements-overrides.txt"):
         assert source in header, f"the lock header does not compile {source}"
-    index = re.search(r"/whl/(cu\d+)", install.group(1)).group(1)
+    index = re.search(r"/whl/(\w+)", install.group(1)).group(1)
     assert re.search(rf"^torch==\S+\+{index} ", lock, re.M), f"torch in the lock is not the {index} build"
     blocks = re.split(r"\n(?=[A-Za-z0-9])", lock)
     unhashed = [b.splitlines()[0] for b in blocks if re.match(r"^[A-Za-z0-9_.-]+==", b) and "--hash=sha256:" not in b]
