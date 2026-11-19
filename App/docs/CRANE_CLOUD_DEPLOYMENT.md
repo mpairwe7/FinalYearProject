@@ -52,7 +52,7 @@ calls) + Next.js standalone + a loopback sparse Qdrant sidecar` under
 ## 2. Architecture: local vs Crane Cloud
 
 ```
-LOCAL (docker compose --profile dev up in App/)
+LOCAL (docker compose -f App/docker-compose.full.yml --profile dev up)
 ┌────────────┐    ┌────────────┐    ┌──────────┐    ┌────────┐
 │  Next.js   │───▶│  FastAPI   │───▶│  Qdrant  │    │ Redis  │
 │  :3032     │    │  :8083     │    │  :6333   │    │ :6379  │

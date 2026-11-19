@@ -152,10 +152,17 @@ Option 1, chosen by the service owner over the narrower option 2.
 - After phase D the root holds only what a tool reads from there: `.github/`, the
   ignore files, `.pre-commit-config.yaml`, `.coderabbit.yaml` and `.gitguardian.yaml`.
   It also holds the readme, the licence and the agent guides.
-- `App/` still has two Compose stacks, `docker-compose.yml` and
-  `docker-compose.full.yml`. A follow-up merges them. Until then the bare
-  `docker compose` commands in `App/docs/DEPLOYMENT.md` mean
-  `-f App/docker-compose.full.yml`.
+- `App/` keeps two Compose stacks, `docker-compose.yml` and `docker-compose.full.yml`.
+  A merge was planned and then measured, and it is not done. The four services both
+  define share 96 of 209 lines (45%), most of it `redis` and `qdrant` boilerplate; the
+  `api` service has 47 environment settings in one and 14 in the other, with two
+  identical. They are two deployment shapes. One is the source-built stack that ten
+  overlays layer on. The other is the image-based, read-only stack with Postgres, TLS,
+  vLLM and monitoring profiles. An exact merge needs `!override` tags across files,
+  which Docker's own guidance says gets hard to manage, and it cannot be proved
+  unchanged without running both stacks. The distinct file name, the docs that name
+  the stack (`COMPOSE_FILE=App/docker-compose.full.yml`), and the build-path test
+  below cover the risk that the two are mistaken for one.
 - A checkout now has `App/Model/bm25_state.json`, as the image does, so
   `_simple_search` scores with BM25 locally too. With it, one Kiswahili FAQ row
   does not retrieve itself (G673). The acronym test runs without the state, as it

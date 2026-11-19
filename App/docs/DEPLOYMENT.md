@@ -31,7 +31,7 @@ openssl rand -hex 32
 
 ## 2. Docker Compose Production
 
-The full stack is `App/docker-compose.full.yml`, run from the repository root with `docker compose -f App/docker-compose.full.yml`. It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
+The full stack is `App/docker-compose.full.yml`. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` is a different stack, for local work and its overlays.) It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
 
 ### Build and start
 
@@ -699,7 +699,7 @@ Run through every item before go-live:
 - [ ] `FLAG_VOICE_FIRST_MOBILE=true`, `FLAG_VOICE_VISION=true`
 
 **Quantized Serving (Optional GPU):**
-- [ ] `docker compose --profile vllm-quantized up` starts successfully
+- [ ] `docker compose --profile vllm up` starts successfully
 - [ ] AWQ model loads within 180s start period
 - [ ] p95 latency measured ≤ 1.8s for full RAG pipeline
 - [ ] Memory usage measured ≥ 38% reduction from bfloat16 baseline
