@@ -7,7 +7,7 @@ into structured JSONL files for:
 - Regression test set expansion
 
 Usage:
-    python -m ml.pipelines.export_feedback --output-dir Data/eval/feedback
+    python -m ml.pipelines.export_feedback --output-dir App/Data/eval/feedback
     python -m ml.pipelines.export_feedback --days 7 --min-reviews 5
 """
 

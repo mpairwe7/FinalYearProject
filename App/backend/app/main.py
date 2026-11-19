@@ -624,6 +624,25 @@ async def _call_process_gauge_loop(stop: asyncio.Event, interval: float) -> None
             continue
 
 
+#: Controls that keep their records in the analytics database (sessions' revocations too).
+_STORAGE_BACKED_CONTROLS = ("audit_ledger", "multi_tenant", "ticket_queue", "voice_consent")
+
+
+def _storage_failure_stops_startup() -> bool:
+    """Whether a storage failure at startup must stop the process rather than degrade it.
+
+    Always in production. Elsewhere, when a control that keeps its records in
+    the database is on: the Space runs ``APP_ENV=development`` with the audit
+    ledger, tenancy, tickets and voice consent on, and used to keep serving
+    without them after a failed initialisation (G681).
+    """
+    if (os.getenv("APP_ENV") or "development").lower() == "production":
+        return True
+    from .config.flags import flags
+
+    return any(flags.is_enabled(name) for name in _STORAGE_BACKED_CONTROLS)
+
+
 def _initialize_analytics_database() -> None:
     """Initialize persistence, failing closed when production storage is unavailable.
 
@@ -655,9 +674,9 @@ def _initialize_analytics_database() -> None:
         overrides = db.load_flag_overrides()
     except Exception as exc:
         logger.exception("Analytics database initialisation failed")
-        if (os.getenv("APP_ENV") or "development").lower() == "production":
+        if _storage_failure_stops_startup():
             message = (
-                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the analytics "
+                "SAFETY CHECK FAILED — refusing to start because the analytics "
                 "database is unavailable. Audit, tenancy, consent, and ticket controls "
                 "cannot run without it."
             )
@@ -674,18 +693,19 @@ def _load_session_revocations_at_start() -> None:
 
     The periodic sync is a lifespan task: its first pass ran only once the
     application was already serving, so a process that had just restarted
-    accepted a signed-out token until then. In production a store that cannot
-    be read here refuses to start, as unreadable flag overrides do; elsewhere
-    the failure is logged and counted by the sync, which keeps trying.
+    accepted a signed-out token until then. A store that cannot be read here
+    refuses to start wherever storage failures stop startup
+    (:func:`_storage_failure_stops_startup`); elsewhere the failure is logged and
+    counted by the sync, which keeps trying.
     """
     from .auth import revocation
 
     try:
         revocation.sync(strict=True)
     except Exception as exc:
-        if (os.getenv("APP_ENV") or "development").lower() == "production":
+        if _storage_failure_stops_startup():
             message = (
-                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the stored "
+                "SAFETY CHECK FAILED — refusing to start because the stored "
                 "session revocations cannot be read. Tokens that were signed out of, or "
                 "revoked by an administrator, would be accepted until a later read."
             )

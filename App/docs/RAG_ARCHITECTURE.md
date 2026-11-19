@@ -39,7 +39,8 @@ User Query
   ├─► Stage 1: Input Guardrails (guardrails/ → InputGuard)
   │     ├── Length check (MAX_INPUT_LENGTH=2000)
   │     ├── 11 prompt-injection regex patterns (OWASP LLM01)
-  │     └── Harmful intent detection (tax fraud, evasion, forgery, money laundering)
+  │     ├── Harmful intent detection (tax fraud, evasion, forgery, money laundering)
+  │     └── A tax in force said to be abolished is corrected before any fast route (premise.check_abolished_claim, G675)
   │
   ├─► Stage 1b: Workflow Routing (workflows/registry.py)  [FLAG_WORKFLOWS]
   │     └── Check if query triggers a guided workflow (TIN registration, filing, etc.)
@@ -81,7 +82,7 @@ User Query
   │     └── Single-word stop-words or very low scores → ask for more details
   │
   ├─► Stage 4: Abstention Check (guardrails/ → OutputGuard.should_abstain)
-  │     └── Best retrieval score < ABSTENTION_THRESHOLD → refuse politely
+  │     └── Best reranked score < ABSTENTION_THRESHOLD_NORM (per-locale floors) → refuse politely
   │
   ├─► Stage 5: LLM Generation (rag/generator.py)
   │     ├── Standard path: Qwen3-8B with spotlight-marked passages (LLM01 defence)
@@ -472,7 +473,7 @@ App/backend/app/
 ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 ├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
 ├── calculator_router.py # Single-calculator fast path & multi-turn amount carryover
-├── guardrails/premise.py     # False-premise detector & legitimate statutory modifier allowlist
+├── guardrails/premise.py     # False-premise detector, legitimate statutory modifier allowlist, abolished-tax claims
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── observability/tracing.py           # OpenTelemetry GenAI 2025 semconv tracing

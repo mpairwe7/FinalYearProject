@@ -160,13 +160,10 @@ class LiveCorpusAcronymTest(unittest.TestCase):
 
         cls._no_bm25_state = mock.patch.multiple(pipeline, _BM25_ENCODER=None, _BM25_LOAD_ATTEMPTED=True)
         cls._no_bm25_state.start()
+        cls.addClassCleanup(cls._no_bm25_state.stop)  # runs even if setUpClass raises
         cls.index, _ = pipeline._load_faq_data(pipeline._DATA_DIR)
         if not cls.index:
             raise unittest.SkipTest("FAQ corpus not present")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._no_bm25_state.stop()
 
     def test_acronyms_are_learned_from_the_shipped_corpus(self):
         self.assertGreaterEqual(len(pipeline._FAQ_ACRONYM_EXPANSIONS), 10)

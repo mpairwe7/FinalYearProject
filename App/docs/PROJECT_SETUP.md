@@ -142,7 +142,7 @@ RATE_LIMIT=30/minute
 
 # Guardrails & Privacy
 STORE_RAW_PROMPTS=false      # Set true only for debugging
-ABSTENTION_THRESHOLD=0.15    # Min score before abstaining
+ABSTENTION_THRESHOLD_NORM=0.30    # Min normalized reranker score before abstaining
 ESCALATION_THRESHOLD=0.25    # Faithfulness below which to flag for human review
 GROUNDING_THRESHOLD=0.3      # Score below which to append disclaimer
 CONVERSATION_TTL_DAYS=7      # Auto-purge conversation data

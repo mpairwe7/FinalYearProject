@@ -13,9 +13,12 @@ event (``guardrail_strike_cooldown``), so the ``GuardrailProbingCampaign``
 alert sees a probing campaign rather than a scatter of refusals.
 
 A principal is the signed-in user, else the session, else the conversation,
-hashed so this module never holds a raw identifier. State is per replica and
-bounded; a client that discards its session and conversation starts afresh,
-which is why the IP rate limit stays in front of this (OWASP LLM10).
+hashed so this module never holds a raw identifier. With ``REDIS_URL`` set the
+strikes and pauses live in Redis, so every worker and replica counts the same
+principal together; Compose runs four workers, and per-process counts gave an
+attacker four times the tries (G679). Without Redis, or when it fails, state is
+per process and bounded. A client that discards its session and conversation
+starts afresh, which is why the IP rate limit stays in front of this (OWASP LLM10).
 """
 
 from __future__ import annotations
@@ -26,8 +29,9 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import OrderedDict, deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -93,12 +97,15 @@ class StrikeTracker:
         cooldown_s: float = COOLDOWN_S,
         max_tracked: int = MAX_TRACKED,
         clock: Callable[[], float] = time.monotonic,
+        shared: Callable[[], Any] | None = None,
     ) -> None:
         self._threshold = max(1, threshold)
         self._window_s = max(1.0, window_s)
         self._cooldown_s = max(0.0, cooldown_s)
         self._max_tracked = max(1, max_tracked)
         self._clock = clock
+        #: Returns the Redis client every worker shares, or None to keep state in this process.
+        self._shared = shared or (lambda: None)
         self._lock = threading.Lock()
         self._strikes: OrderedDict[str, deque[float]] = OrderedDict()
         #: Insertion order is expiry order, because every cool-down lasts the same time.
@@ -108,6 +115,13 @@ class StrikeTracker:
         """Seconds left in *key*'s cool-down, ``0.0`` when there is none."""
         if not key:
             return 0.0
+        r = self._shared()
+        if r is not None:
+            try:
+                ms = r.pttl(f"{_SHARED_PREFIX}cooldown:{key}")
+                return ms / 1000 if ms and ms > 0 else 0.0
+            except Exception:  # noqa: BLE001 - fall back to this process's own state
+                logger.debug("shared strike store unavailable; using this process's", exc_info=True)
         now = self._clock()
         with self._lock:
             until = self._cooldown_until.get(key, 0.0)
@@ -120,6 +134,12 @@ class StrikeTracker:
         """Count one guard block for *key*. True when this strike starts a cool-down."""
         if not key:
             return False
+        r = self._shared()
+        if r is not None:
+            try:
+                return self._record_shared_strike(r, key)
+            except Exception:  # noqa: BLE001 - fall back to this process's own state
+                logger.debug("shared strike store unavailable; using this process's", exc_info=True)
         now = self._clock()
         with self._lock:
             strikes = self._strikes.pop(key, None) or deque()
@@ -147,15 +167,65 @@ class StrikeTracker:
                 self._cooldown_until.popitem(last=False)
             return started
 
+    def _record_shared_strike(self, r: Any, key: str) -> bool:
+        """The sliding window as a Redis sorted set; the pause as a key that expires."""
+        now = time.time()  # wall clock: every process scores against the same one
+        strikes = f"{_SHARED_PREFIX}strikes:{key}"
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(strikes, "-inf", now - self._window_s)
+        pipe.zadd(strikes, {f"{now}:{uuid.uuid4().hex[:8]}": now})
+        pipe.zcard(strikes)
+        pipe.expire(strikes, int(self._window_s) + 1)
+        count = pipe.execute()[2]
+        if count < self._threshold:
+            return False
+        pipe = r.pipeline()
+        pipe.set(f"{_SHARED_PREFIX}cooldown:{key}", "1", px=max(1, int(self._cooldown_s * 1000)))
+        pipe.delete(strikes)
+        pipe.execute()
+        return True
+
     def reset(self) -> None:
         """Forget every principal (tests and operator reset)."""
         with self._lock:
             self._strikes.clear()
             self._cooldown_until.clear()
+        r = self._shared()
+        if r is not None:
+            try:
+                for name in r.scan_iter(f"{_SHARED_PREFIX}*"):
+                    r.delete(name)
+            except Exception:  # noqa: BLE001 - a reset of this process still happened
+                logger.debug("shared strike store not reset", exc_info=True)
+
+
+_SHARED_PREFIX = "guard:friction:"
+_redis_client: Any = None
+_redis_checked = False
+
+
+def _shared_redis() -> Any:
+    """The Redis client at ``REDIS_URL``, once per process, or None."""
+    global _redis_client, _redis_checked
+    if _redis_checked:
+        return _redis_client
+    _redis_checked = True
+    url = os.getenv("REDIS_URL", "")
+    if not url:
+        return None
+    try:
+        import redis
+
+        client = redis.from_url(url, socket_timeout=1)
+        client.ping()
+        _redis_client = client
+    except Exception:  # noqa: BLE001 - no Redis means per-process state, as before
+        logger.warning("REDIS_URL is set but unreachable; guard strikes stay per process")
+    return _redis_client
 
 
 #: The process-wide tracker the chat service consults.
-strike_tracker = StrikeTracker()
+strike_tracker = StrikeTracker(shared=_shared_redis)
 
 
 def _friction_enabled() -> bool:

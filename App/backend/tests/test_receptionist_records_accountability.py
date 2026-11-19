@@ -738,6 +738,27 @@ class AuditTrailTests(BrainCase):
         self.assertIn(luganda, rows[0]["result"]["reply"])
         self.assertNotIn("You can register", rows[0]["result"]["reply"])
 
+    async def test_a_rate_only_inside_reasoning_does_not_pass_the_figure_check(self):
+        """The figure check reads the words the caller hears; the guard deletes reasoning blocks."""
+        from unittest.mock import AsyncMock
+
+        self.state.locale = "lg"
+        self.chat_model._maybe_handle_fast_paths.return_value = None
+        self.chat_model.generate.return_value = {
+            **self.chat_model.generate.return_value,
+            "reply": "VAT is charged at 18 percent.",
+        }
+        thinking = "<think>The rate is 18 percent.</think>Omusolo gwa VAT gusasulwa buli mwezi."
+        with (
+            patch.object(self.brain, "_synthesize_luganda_reply", return_value=thinking),
+            patch.object(self.brain, "_extract_english_tax_query", return_value="What is the VAT rate?"),
+            patch.object(self.brain, "_into_luganda", AsyncMock(return_value="VAT eri ebitundu 18 ku kikumi.")) as fallback,
+        ):
+            await self.hear("VAT eri ku bitundu bimeka?")
+
+        fallback.assert_awaited_once()
+        self.assertNotIn("buli mwezi", " ".join(self.voiced()))
+
     async def test_a_turn_while_an_officer_has_the_call_is_not_an_ai_turn(self):
         self.state.mode = "bridged"
 

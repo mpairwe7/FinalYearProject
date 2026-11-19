@@ -3287,7 +3287,7 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `INDEX_API_KEY` | Bearer token for `/v1/index` (empty = auth disabled) | `` |
 | `MAX_INPUT_LENGTH` | Maximum input characters | `2000` |
 | `GROUNDING_THRESHOLD` | Faithfulness threshold for disclaimer | `0.3` |
-| `ABSTENTION_THRESHOLD` | Score below which to refuse answering | `0.15` |
+| `ABSTENTION_THRESHOLD_NORM` | Normalized (0-1) reranker score below which to refuse answering; `_LG`, `_SW`, `_NYN` and `_ACH` set each locale's floor | `0.30` (`0.20` per locale) |
 | `ESCALATION_THRESHOLD` | Faithfulness below which to flag for human review | `0.25` |
 | **Privacy** | | |
 | `STORE_RAW_PROMPTS` | Store unredacted prompts (false = PII redacted) | `false` |

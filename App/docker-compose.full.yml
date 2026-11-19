@@ -61,7 +61,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - POSTGRES_DB=${POSTGRES_DB:-ura_analytics}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only: the API reaches it over the Compose network (G676).
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

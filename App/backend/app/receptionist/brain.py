@@ -1726,6 +1726,16 @@ class UraReceptionistBrain(LLMService):
         from .. import mt
 
         luganda_reply = await _blocking(self._synthesize_luganda_reply, context_text, question)
+        if luganda_reply:
+            # A second model answer goes through the output guard like every chat reply (G668),
+            # before the figure check: the check must read the words the caller hears (G674).
+            from ..guardrails.output_checks import OutputGuard
+
+            if OutputGuard.check_prompt_leakage(luganda_reply).flags:
+                logger.info("Direct Luganda call synthesis leaked prompt text; using the guarded _localize_reply")
+                luganda_reply = ""
+            else:
+                luganda_reply = OutputGuard.sanitize(luganda_reply)
         if luganda_reply and not (
             mt.figures_survived(english_reply, luganda_reply, locale="lg")
             and mt.units_survived(english_reply, luganda_reply)
@@ -1736,15 +1746,6 @@ class UraReceptionistBrain(LLMService):
         ):
             logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
             luganda_reply = ""
-        if luganda_reply:
-            # A second model answer goes through the output guard like every chat reply (G668).
-            from ..guardrails.output_checks import OutputGuard
-
-            if OutputGuard.check_prompt_leakage(luganda_reply).flags:
-                logger.info("Direct Luganda call synthesis leaked prompt text; using the guarded _localize_reply")
-                luganda_reply = ""
-            else:
-                luganda_reply = OutputGuard.sanitize(luganda_reply)
         if not luganda_reply:
             luganda_reply = await self._into_luganda(english_reply)
 

@@ -480,6 +480,110 @@ def check_false_premise(
 
 
 # ---------------------------------------------------------------------------
+# A real tax said to be abolished (G675)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _TaxHead:
+    """A tax in force, as taxpayers name it, and the rate-table key that shows it is."""
+
+    names: str  # regex alternation, matched as whole words
+    display: str
+    key: str
+    rate_phrase: str = ""  # filled with the table's rate, e.g. "at a standard rate of {rate}"
+
+
+_TAX_HEADS_IN_FORCE = (
+    _TaxHead(r"vat|value[ -]added tax", "VAT", "vat_standard", " at a standard rate of {rate}"),
+    _TaxHead(r"paye|pay[ -]as[ -]you[ -]earn", "PAYE", "paye_bands_resident"),
+    _TaxHead(r"income tax|corporation tax|corporate (?:income )?tax", "Income tax", "corporation_tax"),
+    _TaxHead(r"withholding tax|wht", "Withholding tax", "withholding_services"),
+    _TaxHead(r"rental (?:income )?tax", "Rental tax", "rental_tax_individual"),
+    _TaxHead(r"capital gains tax", "Capital gains tax", "capital_gains_corporate"),
+    _TaxHead(r"excise duty|excise tax", "Excise duty", "excise_duty_telecom_data"),
+    _TaxHead(r"customs duty|import duty", "Customs duty", "customs_duty_common"),
+    _TaxHead(r"stamp duty", "Stamp duty", "stamp_duty_property_transfer"),
+    _TaxHead(r"presumptive tax", "Presumptive tax", "presumptive_tax_lower_threshold"),
+    _TaxHead(r"digital services? tax", "Digital services tax", "digital_services_tax_non_resident"),
+)
+
+_TAX_NAME = "|".join(f"(?:{head.names})" for head in _TAX_HEADS_IN_FORCE)
+_ENDED = r"(?:abolished|scrapped|repealed|removed|eliminated|cancell?ed|withdrawn|phased out|done away with)"
+# One taxpayer's account ("my PAYE was stopped") is not the tax.
+_NOT_THEIRS = r"(?<!\bmy\s)(?<!\bour\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bher\s)(?<!\btheir\s)"
+# One relief or item ("the VAT exemption", "VAT on sugar") is not the tax either.
+_THE_TAX_ITSELF = (
+    r"(?!\s+(?:exemptions?|refunds?|registration|returns?|deductions?|deferments?|waivers?|relief|"
+    r"penalt(?:y|ies)|rates?|thresholds?|credits?|arrears|on|for|from|in|to)\b)"
+)
+_NOT_AN_ITEM = r"(?!\s+(?:from|on|for)\b)"  # "repealed in 2025" is still the tax
+_ABOLISHED_CLAIMS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # "VAT was abolished", "has PAYE been scrapped?", "VAT abolished"
+        rf"{_NOT_THEIRS}\b(?P<tax>{_TAX_NAME})\b(?:\s+(?:has|have|had)\s+been|\s+(?:was|were|is|are|got|been|being))?"
+        rf"\s+(?:now\s+|officially\s+|finally\s+)?{_ENDED}\b{_NOT_AN_ITEM}",
+        # "the abolition of VAT"
+        rf"\b(?:abolition|scrapping|repeal|removal|elimination|cancell?ation)\s+of\s+(?:the\s+)?"
+        rf"(?P<tax>{_TAX_NAME})\b{_THE_TAX_ITSELF}",
+        # "the government scrapped withholding tax"
+        rf"\b{_ENDED}\s+(?:the\s+)?(?P<tax>{_TAX_NAME})\b{_THE_TAX_ITSELF}",
+        # "VAT no longer exists"
+        rf"{_NOT_THEIRS}\b(?P<tax>{_TAX_NAME})\b\s+(?:no\s+longer\s+(?:exists?|applies|apply)(?!\s+(?:to|on|for)\b)"
+        rf"|(?:does\s+not|doesn't)\s+exist\s+any\s?more)",
+    )
+)
+# A question about a hypothetical is not a claim: "if VAT were abolished, would prices fall?"
+_HYPOTHETICAL = re.compile(r"\b(?:if|suppose|supposing|imagine|hypothetically|were\s+to)\b", re.IGNORECASE)
+
+
+def _head_for(name: str) -> _TaxHead:
+    return next(h for h in _TAX_HEADS_IN_FORCE if re.fullmatch(h.names, name, re.IGNORECASE))
+
+
+def check_abolished_claim(query: str) -> FalsePremiseResult:
+    """Correct a claim that a tax in force was abolished, before anything answers on it.
+
+    "Since VAT was abolished, do I still need to file VAT returns?" once reached
+    the portal co-pilot, which answered with a sign-in card and never said VAT
+    still applies. A tax counts as in force when the current rate table holds
+    its key; a tax that really ended, such as the social media (OTT) tax, has
+    none, so a claim about it passes.
+    """
+    from ..tax import tables
+
+    text = query or ""
+    for claim in _ABOLISHED_CLAIMS:
+        match = claim.search(text)
+        if match is None:
+            continue
+        clause_start = max(text.rfind(mark, 0, match.start()) for mark in ".?!;\n") + 1
+        if _HYPOTHETICAL.search(text[clause_start : match.start()]):
+            continue
+        head = _head_for(match.group("tax"))
+        try:
+            table = tables.get_table()
+        except tables.RateTableError:
+            return FalsePremiseResult(is_false_premise=False)
+        if head.key not in table.rates:
+            continue
+        value = table.rates[head.key]
+        rate = (
+            head.rate_phrase.format(rate=f"{value * 100:g}%")
+            if head.rate_phrase and isinstance(value, (int, float))
+            else ""
+        )
+        reply = (
+            f"{head.display} has not been abolished. It still applies in Uganda in {table.fiscal_year}{rate}. "
+            "Keep registering, filing and paying as before: stopping leads to penalties and interest. "
+            "If you read about a change, it may be an exemption for particular goods or services. "
+            "Ask me about that change and I will check it."
+        )
+        logger.warning("abolished-tax premise corrected (tax: %s)", head.display)
+        return FalsePremiseResult(is_false_premise=True, concept=head.display, reply=reply)
+    return FalsePremiseResult(is_false_premise=False)
+
+
+# ---------------------------------------------------------------------------
 # Phase F.5: Data-driven premise and fact contradiction checks
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)

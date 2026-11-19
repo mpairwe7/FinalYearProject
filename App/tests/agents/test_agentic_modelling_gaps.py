@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from app.workflows.graph import AgentGraphState, GraphOutcome
 from app.workflows.graph.main_graph import bind_arguments, build_main_graph
-from app.guardrails.premise import check_false_premise
+from app.guardrails.premise import check_abolished_claim, check_false_premise
 from app.rag.pipeline import ChatModel, _call_llm_agentic, run_chat_turn
 
 
@@ -310,6 +310,54 @@ class TestEpistemicFalsePremiseRejection:
         ]
         res = check_false_premise("What is the URA Digital Nomad Levy?", hits=valid_hits)
         assert res.is_false_premise is False
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "Since VAT was abolished, do I still need to file VAT returns?",
+            "Has PAYE been scrapped?",
+            "I heard the government scrapped withholding tax",
+            "After the abolition of VAT, what replaced it?",
+            "Corporate income tax was repealed in 2025",
+        ],
+    )
+    def test_a_tax_in_force_said_to_be_abolished_is_corrected(self, query):
+        res = check_abolished_claim(query)
+        assert res.is_false_premise is True, query
+        assert "has not been abolished" in res.reply
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "VAT was removed from sanitary pads",
+            "The government removed the VAT exemption on sugar",
+            "If VAT was abolished, would prices fall?",
+            "My PAYE was removed by my employer",
+            "VAT no longer applies to exports?",
+            "Was the OTT social media tax abolished?",
+            "What is the VAT rate?",
+        ],
+    )
+    def test_an_item_a_hypothetical_or_an_ended_tax_is_not_corrected(self, query):
+        assert check_abolished_claim(query).is_false_premise is False, query
+
+    def test_every_tax_head_it_defends_is_in_the_current_table(self):
+        from app.guardrails.premise import _TAX_HEADS_IN_FORCE
+        from app.tax import tables
+
+        table = tables.get_table()
+        assert [h.key for h in _TAX_HEADS_IN_FORCE if h.key not in table.rates] == []
+
+    def test_generate_corrects_an_abolished_tax_before_any_fast_route(self, fresh_registry, tmp_db):
+        """The portal co-pilot used to answer this with a sign-in card, never saying VAT applies."""
+        model = ChatModel()
+        result = model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
+            "Since VAT was abolished, do I still need to file VAT returns?"
+        )
+        assert result["retrieval_mode"] == "false_premise_rejected"
+        assert "VAT" in result["reply"] and "has not been abolished" in result["reply"]
+        assert "18%" in result["reply"]
+        assert not result.get("portal_copilot")
 
     def test_generate_rejects_false_premise_without_hallucination(self, fresh_registry, tmp_db):
         model = ChatModel()
