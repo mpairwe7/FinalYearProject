@@ -1,11 +1,20 @@
-"""Every Compose build names a Dockerfile that exists (ADR-0064).
+"""Every Compose build names a Dockerfile that exists, and the full stack is one overlay (ADR-0064).
 
-`docker compose config` does not check that, so moving the root Dockerfile to
-App/ left four builds pointing at a file that was gone, and nothing failed.
+`docker compose config` does not check that a Dockerfile exists, so moving the
+root Dockerfile to App/ left four builds pointing at a file that was gone, and
+nothing failed.
+
+`docker-compose.full.yml` used to define the base's four services a second
+time. It is now an overlay on `docker-compose.yml`, and the tests at the end
+keep it one.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -60,3 +69,68 @@ def test_the_dockerfile_of_every_build_exists(compose: str, service: str, contex
     # Compose resolves a context against the first file's folder, and every stack here starts in App/.
     target = (APP / context / dockerfile).resolve()
     assert target.is_file(), f"{compose}: service {service} builds from {target}, which does not exist"
+
+
+BASE, FULL = APP / "docker-compose.yml", APP / "docker-compose.full.yml"
+# `docker-compose.local-sunflower.yml` defines its own `vllm` on the base, and Compose would merge the two.
+ONLY_IN_THE_OVERLAY = {"vllm"}
+
+
+def test_the_full_file_only_changes_services_the_base_defines() -> None:
+    assert set(_services(FULL)) - set(_services(BASE)) == ONLY_IN_THE_OVERLAY
+
+
+def test_the_full_file_repeats_nothing_the_base_says() -> None:
+    base = _services(BASE)
+    repeated = [
+        f"{name}.{key}"
+        for name, service in _services(FULL).items()
+        for key, value in service.items()
+        if key in base.get(name, {}) and base[name][key] == value
+    ]
+    assert not repeated, f"already set by docker-compose.yml: {repeated}"
+
+
+def _compose(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["docker", "compose", *args], capture_output=True, text=True, timeout=120, check=False)  # noqa: S603, S607
+
+
+def _has_compose() -> bool:
+    return shutil.which("docker") is not None and _compose("version").returncode == 0
+
+
+def _resolved_full_stack(tmp_path: Path) -> dict:
+    """The model Compose builds from the pair, read beside an empty `.env` so no real setting is loaded."""
+    tree = tmp_path / "App"
+    tree.mkdir()
+    (tmp_path / ".env").write_text("")
+    for path in (BASE, FULL):
+        shutil.copy(path, tree / path.name)
+    done = _compose("-f", str(tree / BASE.name), "-f", str(tree / FULL.name), "config", "--no-interpolate", "--format", "json")
+    assert done.returncode == 0, done.stderr[-400:]
+    return json.loads(done.stdout)["services"]
+
+
+# CI always has Compose, so there the test runs or fails. It never skips unseen.
+@pytest.mark.skipif(not os.environ.get("CI") and not _has_compose(), reason="needs Docker Compose to merge the two files")
+def test_the_full_stack_resolves_to_the_hardened_variant(tmp_path: Path) -> None:
+    services = _resolved_full_stack(tmp_path)
+    overlay = _services(FULL)
+
+    for name in ("redis", "qdrant", "api", "frontend"):
+        assert services[name]["cap_drop"] == ["ALL"], name
+    for name in ("redis", "api", "frontend"):
+        assert "no-new-privileges:true" in services[name]["security_opt"], name
+    for name in ("api", "frontend"):
+        assert services[name]["read_only"] is True, name
+    assert services["redis"]["user"] == "999:1000"
+    assert [volume["target"] for volume in services["qdrant"]["volumes"]] == ["/qdrant/storage"]
+
+    # `!override` replaces the base's lists. Without it Compose appends, and the base's settings leak in.
+    api = services["api"]
+    assert api["environment"] == overlay["api"]["environment"]
+    assert api["ports"] == ["${API_PORT:-8000}:8000"]
+    assert services["frontend"]["ports"] == ["${FRONTEND_PORT:-3000}:3000"]
+    # `!reset` drops the base's GPU reservation and host alias, which this variant never had.
+    assert "deploy" not in api
+    assert "extra_hosts" not in api

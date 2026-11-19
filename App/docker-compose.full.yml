@@ -1,6 +1,23 @@
 # =============================================================================
-# URA Chatbot - Docker Compose Configuration
-# Development and Production environments
+# URA Chatbot — the image-based, hardened variant of the base stack (an overlay)
+#
+# Not a stack of its own: it layers on docker-compose.yml, which defines every
+# service but one. This file changes four of them: redis, qdrant, api and
+# frontend run from published images, read-only and with dropped capabilities,
+# and publish the ports named in .env. It also adds vllm (profile: vllm).
+#
+#   cd App && docker compose -f docker-compose.yml -f docker-compose.full.yml up -d
+#   export COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml   # from the root
+#
+# Needs Docker Compose v2.24.4 or later, for `!override`.
+#
+# A full stack started before this layout runs on the old `ura-network`. Stop it
+# once with `docker compose -p app down`, before the first `up`: it needs no Compose file, stops
+# the containers of every profile, removes the old network and keeps the volumes.
+#
+# `!override` replaces the base's value outright, where Compose would otherwise
+# merge the two lists. `!reset` removes a key the base sets. Dropping either tag
+# lets the base's settings into this variant (ADR-0064).
 # =============================================================================
 
 services:
@@ -9,20 +26,10 @@ services:
   # (multi-worker / multi-replica correctness)
   # ---------------------------------------------------------------------------
   redis:
-    image: redis:7.4-alpine
     container_name: ura-redis
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    command: !override ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
-    restart: unless-stopped
     # Run as the image's own redis user (999:1000) rather than starting as root
     # and dropping down.
     #
@@ -44,83 +51,31 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    networks:
-      - ura-network
-
-  # ---------------------------------------------------------------------------
-  # PostgreSQL — optional multi-replica analytics store
-  # Enable with: docker compose --profile postgres up
-  # Then set in .env: ANALYTICS_BACKEND=postgres
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:16.6-alpine
-    container_name: ura-postgres
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-ura}
-      # No committed default: set POSTGRES_PASSWORD (e.g. `openssl rand -base64 24`).
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
-      - POSTGRES_DB=${POSTGRES_DB:-ura_analytics}
-    ports:
-      # Loopback only: the API reaches it over the Compose network (G676).
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-ura} -d $${POSTGRES_DB:-ura_analytics}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    profiles:
-      - postgres
-    networks:
-      - ura-network
 
   # ---------------------------------------------------------------------------
   # Qdrant Vector Store (first-class RAG dependency)
   # ---------------------------------------------------------------------------
   qdrant:
-    # Existing v1.17 storage must be upgraded one minor version at a time;
-    # see App/docs/runbooks/qdrant-staged-rebuild.md before starting this v1.19 image.
-    image: qdrant/qdrant:v1.19.0
     container_name: ura-qdrant
     ports:
       - "${QDRANT_PORT:-6333}:6333"
       - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
+    volumes: !override
       - qdrant_data:/qdrant/storage
-    environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-    healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'passed' <&3"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
     cap_drop:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
-    networks:
-      - ura-network
 
   # ---------------------------------------------------------------------------
   # Backend API Service
   # ---------------------------------------------------------------------------
   api:
-    build:
-      context: ..
-      dockerfile: App/Dockerfile
-      target: runtime
     image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:${IMAGE_TAG:-latest}
     container_name: ura-chatbot-api
-    ports:
+    ports: !override
       - "${API_PORT:-8000}:8000"
-    environment:
+    environment: !override
       - APP_ENV=${APP_ENV:-development}
       - PORT=8000
       - WORKERS=${WORKERS:-2}
@@ -142,24 +97,17 @@ services:
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
       - LOG_FORMAT=${LOG_FORMAT:-json}
-    env_file:
-      - ../.env
-    init: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
     read_only: true
     # Owned by the image's appuser (10001). A bare tmpfs entry mounts root:root
     # 0755 over the image's appuser-owned directory, so the API — which runs as
     # appuser on a read-only root — could not create /app/data_store/analytics.db:
     # conversations, workflow state, tombstones and discrepancy reports all
     # failed at startup with "unable to open database file" (G296).
-    tmpfs:
+    tmpfs: !override
       - /tmp
       - /app/cache:uid=10001,gid=10001
       - /app/data_store:uid=10001,gid=10001
-    volumes:
+    volumes: !override
       - ../artifacts/models:/app/models:ro
       - ../artifacts/offline:/app/offline:ro
       - ../artifacts/quantized:/app/quantized:ro
@@ -167,46 +115,30 @@ services:
       # analytics_data volume removed — /app/data_store is already mounted as
       # tmpfs (required for the read_only container). A named volume and tmpfs
       # cannot share the same target path in Docker Compose.
-    healthcheck:
+    healthcheck: !override
       test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
-    depends_on:
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - ura-network
+    extra_hosts: !reset null  # the base sets it; this variant does not
+    deploy: !reset null  # the base sets it; this variant does not
 
   # ---------------------------------------------------------------------------
-  # Development API (with hot-reload)
+  # Frontend Service
   # ---------------------------------------------------------------------------
-  api-dev:
-    build:
-      context: ..
-      dockerfile: App/Dockerfile
-      target: runtime
-    image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:dev
-    container_name: ura-chatbot-api-dev
-    ports:
-      - "${API_PORT:-8000}:8000"
-    environment:
-      - APP_ENV=development
-      - PORT=8000
-      - WORKERS=1
-      - LOG_LEVEL=debug
-    volumes:
-      - ./backend:/app:ro
-      - ../artifacts/models:/app/models:ro
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    profiles:
-      - dev
-    networks:
-      - ura-network
+  frontend:
+    build: !override
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: ${DOCKER_IMAGE_FRONTEND:-landwind/ura-chatbot-frontend}:${IMAGE_TAG:-latest}
+    container_name: ura-chatbot-frontend
+    ports: !override
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment: !override
+      - NODE_ENV=production
 
   # ---------------------------------------------------------------------------
   # vLLM — high-throughput LLM inference server (profile: vllm)
@@ -254,306 +186,7 @@ services:
     profiles:
       - vllm
     networks:
-      - ura-network
+      - app-network
 
-  # ---------------------------------------------------------------------------
-  # Caddy — automatic-TLS reverse proxy (profile: tls)
-  # Enable with: docker compose --profile tls up
-  # Point DNS at the host; Caddy auto-provisions Let's Encrypt certs.
-  # ---------------------------------------------------------------------------
-  caddy:
-    image: caddy:2.8-alpine
-    container_name: ura-caddy
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"  # HTTP/3 QUIC
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      - CADDY_DOMAIN=${CADDY_DOMAIN:-localhost}
-      - CADDY_ACME_EMAIL=${CADDY_ACME_EMAIL:-admin@example.com}
-    depends_on:
-      api:
-        condition: service_healthy
-      frontend:
-        condition: service_started
-    profiles:
-      - tls
-    networks:
-      - ura-network
-
-  # ---------------------------------------------------------------------------
-  # Frontend Service
-  # ---------------------------------------------------------------------------
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-    image: ${DOCKER_IMAGE_FRONTEND:-landwind/ura-chatbot-frontend}:${IMAGE_TAG:-latest}
-    container_name: ura-chatbot-frontend
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    environment:
-      - NODE_ENV=production
-    init: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
-    restart: unless-stopped
-    depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - ura-network
-
-  # ===========================================================================
-  # Observability stack (profile: monitoring) — App/docs/MONITORING.md
-  #   docker compose --profile monitoring up -d
-  # Required env: METRICS_TOKEN (>=32 chars; the API and Prometheus share it),
-  # GRAFANA_PASSWORD, ALERTMANAGER_WEBHOOK_URL. UIs bind to 127.0.0.1 only;
-  # reach them through an SSH tunnel or a reverse proxy with auth.
-  # ===========================================================================
-  prometheus:
-    image: prom/prometheus:v3.13.4
-    container_name: ura-prometheus
-    profiles: [monitoring]
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=30d"
-      - "--web.enable-lifecycle"
-    ports:
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
-      - ./monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
-      - prometheus_data:/prometheus
-    secrets:
-      - ura_metrics_token
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  alertmanager:
-    image: prom/alertmanager:v0.34.1
-    container_name: ura-alertmanager
-    profiles: [monitoring]
-    command:
-      - "--config.file=/etc/alertmanager/alertmanager.yml"
-      - "--storage.path=/alertmanager"
-    ports:
-      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
-    volumes:
-      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - alertmanager_data:/alertmanager
-    secrets:
-      - alertmanager_webhook_url
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  blackbox-exporter:
-    image: prom/blackbox-exporter:v0.28.0
-    container_name: ura-blackbox-exporter
-    profiles: [monitoring]
-    command:
-      - "--config.file=/etc/blackbox/blackbox.yml"
-    volumes:
-      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
-    read_only: true
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  redis-exporter:
-    image: oliver006/redis_exporter:v1.93.0
-    container_name: ura-redis-exporter
-    profiles: [monitoring]
-    environment:
-      - REDIS_ADDR=redis://redis:6379
-    read_only: true
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  # Host filesystem metrics let the Qdrant volume's capacity be alerted on.
-  node-exporter:
-    image: prom/node-exporter:v1.12.1
-    container_name: ura-node-exporter
-    profiles: [monitoring]
-    command:
-      - "--path.rootfs=/host"
-    volumes:
-      - /:/host:ro,rslave
-    read_only: true
-    pid: host
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  # GPU metrics for the inference cards (needs nvidia-container-toolkit).
-  dcgm-exporter:
-    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04
-    container_name: ura-dcgm-exporter
-    profiles: [monitoring-gpu]
-    cap_add:
-      - SYS_ADMIN
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
-    networks:
-      - ura-network
-
-  # The API exports traces, logs and GenAI metrics here over OTLP
-  # (OTEL_ENABLED=true, OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317).
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.162.0
-    container_name: ura-otel-collector
-    profiles: [monitoring]
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
-    ports:
-      - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
-      - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  loki:
-    image: grafana/loki:3.7.8
-    container_name: ura-loki
-    profiles: [monitoring]
-    command: ["-config.file=/etc/loki/config.yaml"]
-    volumes:
-      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
-      - loki_data:/loki
-    ports:
-      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  # Traces from the Collector. In-memory storage: a restart drops them, which
-  # suits the demo stack; keep traces you need as evidence in an export.
-  # Pinned to 2.20: 2.21 removed the /api/* query API that Grafana's Jaeger
-  # data source calls (its health check returns 404 against 2.21).
-  jaeger:
-    image: jaegertracing/jaeger:2.20.0
-    container_name: ura-jaeger
-    profiles: [monitoring]
-    ports:
-      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-  grafana:
-    image: grafana/grafana-oss:13.0.2
-    container_name: ura-grafana
-    profiles: [monitoring]
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      # No committed default: set GRAFANA_PASSWORD (e.g. `openssl rand -base64 24`).
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=false
-    ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
-    volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - ura-network
-
-# -----------------------------------------------------------------------------
-# Networks
-# -----------------------------------------------------------------------------
-networks:
-  ura-network:
-    driver: bridge
-
-# -----------------------------------------------------------------------------
-# Volumes
-# -----------------------------------------------------------------------------
 volumes:
-  api_logs:
-  qdrant_data:
-  redis_data:
-  postgres_data:
   hf_cache:
-  caddy_data:
-  caddy_config:
-  prometheus_data:
-  grafana_data:
-  alertmanager_data:
-  loki_data:
-
-# -----------------------------------------------------------------------------
-# Secrets (monitoring profile) — read from the environment, never committed.
-# -----------------------------------------------------------------------------
-secrets:
-  ura_metrics_token:
-    environment: METRICS_TOKEN
-  alertmanager_webhook_url:
-    environment: ALERTMANAGER_WEBHOOK_URL

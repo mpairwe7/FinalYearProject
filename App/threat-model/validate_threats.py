@@ -797,6 +797,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "slowapi rate limiter, input length caps, request timeouts, resource limits in Docker",
         "evidence": [
             "App/backend/app/main.py",
+            "App/docker-compose.yml",
             "App/docker-compose.full.yml",
         ],
         "status": "mitigated",
@@ -912,6 +913,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/api/models.py",
             "App/backend/app/documents.py",
+            "App/docker-compose.yml",
             "App/docker-compose.full.yml",
         ],
         "status": "mitigated",
@@ -925,6 +927,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Non-root users, CAP_DROP ALL, read-only root FS, no-new-privileges, seccomp default",
         "evidence": [
             "App/Dockerfile",
+            "App/docker-compose.yml",
             "App/docker-compose.full.yml",
         ],
         "status": "mitigated",

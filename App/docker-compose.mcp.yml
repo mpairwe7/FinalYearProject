@@ -9,7 +9,7 @@
 #
 # Usage:
 #   export MCP_LINK_TOKEN=$(openssl rand -hex 32)
-#   cd App && docker compose -f docker-compose.full.yml -f docker-compose.mcp.yml up -d
+#   cd App && docker compose -f docker-compose.yml -f docker-compose.full.yml -f docker-compose.mcp.yml up -d
 #
 # MCP_LINK_TOKEN is the shared secret both ends of every link are given
 # below. It is never written to a file by this stack; keep it in the shell
@@ -44,7 +44,7 @@ x-mcp-server: &mcp-server
     # the read-only appuser container cannot write (G296).
     - /app/data_store:uid=10001,gid=10001
   networks:
-    - ura-network
+    - app-network
 
 # The image's ENTRYPOINT starts the chat API and ignores `command`, so each
 # server replaces the entrypoint. The image has no curl; the health check is

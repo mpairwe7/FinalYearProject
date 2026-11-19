@@ -167,7 +167,7 @@ def test_dashboard_queries_name_real_series():
 
 
 def test_compose_monitoring_files_exist():
-    compose = yaml.safe_load((ROOT / "App" / "docker-compose.full.yml").read_text())
+    compose = yaml.safe_load((ROOT / "App" / "docker-compose.yml").read_text())
     for name, service in compose["services"].items():
         if "monitoring" not in service.get("profiles", []):
             continue
@@ -182,6 +182,6 @@ def test_compose_monitoring_files_exist():
 
 def test_compose_postgres_ships_no_default_password():
     """Port 5432 is published, so a committed default would be a known login."""
-    compose = yaml.safe_load((ROOT / "App" / "docker-compose.full.yml").read_text())
+    compose = yaml.safe_load((ROOT / "App" / "docker-compose.yml").read_text())
     postgres_env = " ".join(compose["services"]["postgres"]["environment"])
     assert "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}" in postgres_env.split(), postgres_env

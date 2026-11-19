@@ -8,7 +8,7 @@ Covers the full stack: **FastAPI API**, **Next.js frontend**, **Qdrant vector DB
 
 | Requirement | Minimum version |
 |---|---|
-| Docker Engine + Compose v2 | 24.0+ / 2.24+ |
+| Docker Engine + Compose v2 | 24.0+ / 2.24.4+ |
 | Domain name (A/AAAA record) | e.g. `ura-chatbot.example.com` |
 | TLS certificate | Let's Encrypt or organisational CA |
 | `.env` file | Copy from `App/.env.example`, fill secrets |
@@ -31,7 +31,7 @@ openssl rand -hex 32
 
 ## 2. Docker Compose Production
 
-The full stack is `App/docker-compose.full.yml`. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` is a different stack, for local work and its overlays.) It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
+The full stack is two files: `App/docker-compose.yml`, which defines the services, and the overlay `App/docker-compose.full.yml`, which makes them image-based and hardened. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` alone is the source-built stack for local work and its overlays.) A full stack started before ADR-0064 phase E runs on the old `ura-network`: stop it once with `docker compose -p app down` before the first `up`. That needs no Compose file, stops the containers of every profile, removes the old network and keeps the volumes. It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
 
 ### Build and start
 
@@ -82,8 +82,10 @@ services:
 Launch with overrides:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml -f App/docker-compose.prod.yml up -d
 ```
+
+Explicit `-f` options replace `COMPOSE_FILE`, so the command names all three files.
 
 ### Image scanning before deploy
 

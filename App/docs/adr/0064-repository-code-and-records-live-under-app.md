@@ -153,17 +153,34 @@ Option 1, chosen by the service owner over the narrower option 2.
 - After phase D the root holds only what a tool reads from there: `.github/`, the
   ignore files, `.pre-commit-config.yaml`, `.coderabbit.yaml` and `.gitguardian.yaml`.
   It also holds the readme, the licence and the agent guides.
-- `App/` keeps two Compose stacks, `docker-compose.yml` and `docker-compose.full.yml`.
-  A merge was planned and then measured, and it is not done. The four services both
-  define share 96 of 209 lines (45%), most of it `redis` and `qdrant` boilerplate; the
-  `api` service has 47 environment settings in one and 14 in the other, with two
-  identical. They are two deployment shapes. One is the source-built stack that ten
-  overlays layer on. The other is the image-based, read-only stack with Postgres, TLS,
-  vLLM and monitoring profiles. An exact merge needs `!override` tags across files,
-  which Docker's own guidance says gets hard to manage, and it cannot be proved
-  unchanged without running both stacks. The distinct file name, the docs that name
-  the stack (`COMPOSE_FILE=App/docker-compose.full.yml`), and the build-path test
-  below cover the risk that the two are mistaken for one.
+- `App/` has one Compose stack (phase E, 2026-11-19). `docker-compose.yml` defines the
+  services. `docker-compose.full.yml` is an overlay that turns it into the image-based,
+  hardened variant, so that variant is now two files:
+  `COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml`.
+  - **The decision changed.** The merge was first measured and declined. The four
+    services both files defined shared 96 of 209 lines (45%), an exact merge needs
+    `!override` tags, and the stacks cannot be run here. The owner then asked for the
+    merge. The two files had already drifted once without notice: phase D left four
+    builds pointing at a Dockerfile that was gone.
+  - **What moved.** The base took the 13 services only the full file defined
+    (`postgres`, `api-dev`, `caddy` and the ten monitoring services), with their seven
+    volumes and two secrets. Each sits behind a profile, so the base starts the same
+    four services as before. The overlay keeps only what differs for `redis`, `qdrant`,
+    `api` and `frontend`, and is 186 lines where the file had 559. The two files
+    together went from 780 lines to 731; the gain is one home for each setting, not size.
+  - **`vllm` stays in the overlay.** `docker-compose.local-sunflower.yml` defines its
+    own `vllm` on the base, and Compose would merge the two.
+  - **One network.** The full stack's `ura-network` is now the base's `app-network`. A
+    running full stack stays on the old network, and a `down` with the new files does
+    not remove it. Stop it once with `docker compose -p app down` before the first `up`. That needs no
+    Compose file, stops the containers of every profile, removes the old network and
+    keeps the volumes.
+  - **Compose v2.24.4 or later.** The overlay uses `!override`.
+  - **The overlay alone is not a stack.** `docker compose -f App/docker-compose.full.yml`
+    now stops with "service redis has neither an image nor a build context".
+  - **The OWASP ZAP job runs again.** It called `docker compose` from the repository
+    root, where no Compose file has been since phase D, so it failed on every push to
+    `dev` from then on (G691). It now names the pair.
 - A checkout now has `App/Model/bm25_state.json`, as the image does, so
   `_simple_search` scores with BM25 locally too. The committed state dates from
   May, and with it one Kiswahili FAQ row did not retrieve itself (G673). That is
@@ -182,4 +199,19 @@ Option 1, chosen by the service owner over the narrower option 2.
   passes. `docker compose config` resolves the full stack with its monitoring
   profiles, and the full stack with the MCP overlay. A second run of the script
   finds nothing to move.
+- The Compose merge was compared, not run. `docker compose config --no-interpolate --format json`
+  resolved 26 combinations before and after: the base alone, every overlay and documented
+  chain on it, the full stack under eight profile sets, and the full stack with the MCP
+  overlay. Nothing differs except the network's name, the profile-gated definitions the
+  base gained, and one volume the full model now declares and does not mount
+  (`qdrant_backups`). The services each combination starts are the same.
+- The review then changed `api-dev` (dev profile) on purpose (G693). It had not worked:
+  the image's entrypoint ignores `command`, so its `--reload` never applied, and its
+  read-only source mount hid the folder the database is created in. It now sets its own
+  entrypoint with `--reload` and keeps the database in `/tmp/ura-data`. The comparison,
+  rerun, differs in `api-dev` alone.
+- `App/tests/test_compose_build_paths.py` keeps the overlay an overlay: it may only change
+  services the base defines (and add `vllm`), it may not repeat a setting the base already
+  has, and the pair must resolve to the hardened variant. That last test merges the two
+  files with Docker Compose, and fails if an `!override` or `!reset` tag is dropped.
 - `App/tests/test_compose_build_paths.py` checks that every Compose build names a Dockerfile that exists. `docker compose config` does not check that. After phase D, four builds in `App/docker-compose.yml` and two overlays still named the root `Dockerfile`; they now name `App/Dockerfile`.

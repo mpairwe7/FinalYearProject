@@ -243,7 +243,7 @@ PYTHONPATH=App/backend python3 -m pytest App/tests/test_all_endpoints_e2e.py -q
 To launch decoupled MCP microservices in isolated container runtimes:
 ```bash
 export MCP_LINK_TOKEN=$(openssl rand -hex 32)   # the shared secret for every link; not stored by the stack
-docker compose -f App/docker-compose.full.yml -f App/docker-compose.mcp.yml up -d \
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml -f App/docker-compose.mcp.yml up -d \
   mcp-tax-calculator mcp-ura-account mcp-efris mcp-dts mcp-payment mcp-tin mcp-ursb mcp-bwims
 ```
 
