@@ -178,3 +178,10 @@ def test_compose_monitoring_files_exist():
     assert set(compose["secrets"]) >= {"ura_metrics_token", "alertmanager_webhook_url"}
     grafana_env = " ".join(compose["services"]["grafana"]["environment"])
     assert "GRAFANA_PASSWORD:-}" in grafana_env, "Grafana must not ship a default admin password"
+
+
+def test_compose_postgres_ships_no_default_password():
+    """Port 5432 is published, so a committed default would be a known login."""
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    postgres_env = " ".join(compose["services"]["postgres"]["environment"])
+    assert "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}" in postgres_env.split(), postgres_env
