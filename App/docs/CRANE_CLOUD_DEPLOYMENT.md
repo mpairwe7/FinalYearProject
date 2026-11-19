@@ -112,8 +112,8 @@ sibling image from 5.5 GB to 1.2 GB). Three stages:
 Build the image locally:
 
 ```bash
-cd App
-docker build -t landwind/ura-chatbot:latest -f Dockerfile.cranecloud .
+# From the repository root: the Dockerfile copies App/... paths.
+docker build -t landwind/ura-chatbot:latest -f App/Dockerfile.cranecloud .
 
 # Verify size — should be <1.5 GB after cleanup
 docker images landwind/ura-chatbot:latest --format '{{.Size}}'
@@ -551,8 +551,8 @@ bash scripts/release_gate.sh
 
 # 2. Rebuild BM25 state (Section 6) and commit the updated JSON
 
-# 3. Build and push the Crane Cloud image
-docker build -t landwind/ura-chatbot:latest -f Dockerfile.cranecloud .
+# 3. Build and push the Crane Cloud image (from the repository root)
+docker build -t landwind/ura-chatbot:latest -f App/Dockerfile.cranecloud .
 docker push landwind/ura-chatbot:latest
 
 # 4. Crane Cloud dashboard: create/update app

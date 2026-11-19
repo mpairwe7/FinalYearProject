@@ -54,7 +54,7 @@ source .venv/bin/activate  # Linux/Mac
 # or: .\.venv\Scripts\activate  # Windows
 
 # Install dependencies
-uv pip install -r requirements.txt
+uv pip install -r App/requirements.txt
 uv pip install -r App/backend/requirements.txt
 ```
 
@@ -1002,7 +1002,7 @@ docker compose up --build
 source .venv/bin/activate
 
 # Reinstall dependencies
-uv pip install -r requirements.txt --reinstall
+uv pip install -r App/requirements.txt --reinstall
 ```
 
 ### Bun/Node Issues
