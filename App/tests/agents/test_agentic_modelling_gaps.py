@@ -346,8 +346,9 @@ class TestEpistemicFalsePremiseRejection:
             "My rental income tax was removed",
             # Another country's tax is the jurisdiction guard's to answer.
             "Since VAT was abolished in Kenya, do I still need to file VAT returns there?",
-            # A year no loaded rate table covers.
+            # A year no loaded rate table covers, in the claim or the question.
             "Since VAT was abolished in 2031, what VAT rate applies in 2032?",
+            "VAT was abolished. What is the VAT rate in 2032?",
         ],
     )
     def test_an_item_a_hypothetical_or_an_ended_tax_is_not_corrected(self, query):
@@ -370,6 +371,35 @@ class TestEpistemicFalsePremiseRejection:
         assert "VAT" in result["reply"] and "has not been abolished" in result["reply"]
         assert "18%" in result["reply"]
         assert not result.get("portal_copilot")
+
+    @pytest.mark.parametrize(
+        ("query", "mode"),
+        [
+            ("Since VAT was abolished, do I still need to file VAT returns?", "false_premise_rejected"),
+            # Another country's tax is declined before the portal co-pilot (G684).
+            ("Since VAT was abolished in Kenya, do I still need to file VAT returns there?", "out_of_jurisdiction"),
+        ],
+    )
+    def test_both_paths_answer_an_abolished_claim_before_the_portal_co_pilot(self, query, mode, fresh_registry, tmp_db):
+        import uuid
+
+        model = ChatModel()
+        turn = model.generate(query)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        stream = model.generate_retrieval_only(message=query, conversation_id=str(uuid.uuid4()))
+
+        assert (turn["retrieval_mode"], stream["retrieval_mode"]) == (mode, mode)
+        assert not turn.get("portal_copilot") and not stream.get("portal_copilot")
+
+    def test_both_paths_leave_a_year_beyond_the_tables_uncorrected(self, fresh_registry, tmp_db):
+        import uuid
+
+        model = ChatModel()
+        query = "VAT was abolished. What is the VAT rate in 2032?"
+        turn = model.generate(query)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        stream = model.generate_retrieval_only(message=query, conversation_id=str(uuid.uuid4()))
+
+        assert "false_premise_rejected" not in (turn["retrieval_mode"], stream["retrieval_mode"])
+        assert "18%" not in turn["reply"]
 
     def test_generate_rejects_false_premise_without_hallucination(self, fresh_registry, tmp_db):
         model = ChatModel()

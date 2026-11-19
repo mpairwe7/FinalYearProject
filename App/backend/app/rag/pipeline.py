@@ -11754,6 +11754,17 @@ class ChatModel:
             if abolished is not None and abolished.is_false_premise:
                 return _with_discrepancy(_reject_premise(abolished))
 
+            # Another country's tax is declined before the portal co-pilot can answer it
+            # with a URA filing card; the fast paths below repeat the check (G684).
+            if not attachments and connector_intent is None:
+                foreign = self._maybe_decline_out_of_jurisdiction(
+                    message=router_message, rewritten=router_rewritten, thread_id=thread_id, locale=locale
+                )
+                if foreign is not None:
+                    trace_ctx["agent_role"] = foreign.get("agent_role", "tool_specialist")
+                    self._audit_turn(message=message, result=foreign, session_id=session_id, trace_ctx=trace_ctx)
+                    return _with_discrepancy(foreign)
+
             # Phase 42 — URA Portal Task Execution & Stuck-User DOM Co-Pilot
             copilot_sc, copilot_card = self._evaluate_portal_copilot(
                 message=message,
@@ -13919,6 +13930,12 @@ class ChatModel:
                 "_rewritten": rewritten,
                 "_short_circuit": True,
             }
+        if not attachments and connector_intent is None:
+            foreign_s = self._maybe_decline_out_of_jurisdiction(
+                message=router_message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            if foreign_s is not None:
+                return {**foreign_s, "_hits": [], "_history": [], "_rewritten": rewritten, "_short_circuit": True}
 
         # Phase 42 — URA Portal Task Execution & Stuck-User DOM Co-Pilot (streaming parity)
         copilot_sc_s, copilot_card_s = self._evaluate_portal_copilot(

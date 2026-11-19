@@ -562,8 +562,6 @@ def check_abolished_claim(query: str) -> FalsePremiseResult:
     for claim in _ABOLISHED_CLAIMS:
         for match in claim.finditer(text):
             clause_start = max(text.rfind(mark, 0, match.start()) for mark in _CLAUSE_MARKS) + 1
-            ends = [i for i in (text.find(mark, match.end()) for mark in _CLAUSE_MARKS) if i != -1]
-            clause = text[clause_start : min(ends, default=len(text)) + 1]
             before = text[clause_start : match.start()]
             # The possessive may sit one word back ("my corporate income tax"); a word
             # check, not a regex anchored at the end of user text (CodeQL py/polynomial-redos).
@@ -576,8 +574,10 @@ def check_abolished_claim(query: str) -> FalsePremiseResult:
                 except tables.RateTableError:
                     return FalsePremiseResult(is_false_premise=False)
             last_year = int(table.fiscal_year[2:6]) + 1  # FY2026-27 ends in 2027
-            if any(int(year) > last_year for year in _YEAR.findall(clause)):
-                continue  # a year no loaded table covers: not ours to correct
+            if any(int(year) > last_year for year in _YEAR.findall(text)):
+                # A year no loaded table covers, in the claim or in the question
+                # ("VAT was abolished. What is the VAT rate in 2032?"): not ours to answer.
+                return FalsePremiseResult(is_false_premise=False)
             head = _head_for(match.group("tax"))
             if head.key not in table.rates:
                 continue

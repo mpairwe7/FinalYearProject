@@ -15,8 +15,9 @@
 # Retrieval uses an embedded sparse-only Qdrant sidecar. Its BM25 query vector
 # is computed in pure Python, so it needs neither torch nor an embedding model.
 #
-# Build:
-#   docker build -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
+# Build (a changing AUTHORITY_BUILD_ID renews the authority manifest, ADR-0065):
+#   docker build --build-arg AUTHORITY_BUILD_ID=$(date +%s) \
+#     -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
 #
 # Run locally:
 #   docker run --rm -p 8080:8080 \

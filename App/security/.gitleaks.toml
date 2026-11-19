@@ -22,6 +22,9 @@ regex = '''(?i)\b(tin|taxpayer)[\s:=_-]*\d{10}\b'''
 tags = ["pii", "uganda"]
 keywords = ["tin", "taxpayer"]
 
+[rules.allowlist]
+description = "Synthetic PII in test fixtures: redaction and guard tests need it (G682)"
+paths = ['''App/tests/.*''']
 [[rules]]
 id = "uganda-nin"
 # A NIN is 14 characters: C + M/F (or R) + 12 letters and digits (13-15 accepted,
@@ -31,6 +34,9 @@ regex = '''(?i)\b(nin|national[_\s-]?id)[\s:=_-]*["\']?C[MFR][0-9A-Z]{11,13}\b''
 tags = ["pii", "uganda"]
 keywords = ["nin", "national"]
 
+[rules.allowlist]
+description = "Synthetic PII in test fixtures: redaction and guard tests need it (G682)"
+paths = ['''App/tests/.*''']
 [[rules]]
 id = "uganda-mobile"
 description = "Uganda Mobile Number (potential PII in code)"
@@ -40,6 +46,9 @@ keywords = ["phone", "mobile", "256"]
 
 # ── ML/AI platform API keys ─────────────────────────────────────────────────
 
+[rules.allowlist]
+description = "Synthetic PII in test fixtures: redaction and guard tests need it (G682)"
+paths = ['''App/tests/.*''']
 [[rules]]
 id = "openai-api-key"
 description = "OpenAI API Key"
@@ -118,9 +127,7 @@ paths = [
     '''Podfile\.lock$''',
     '''go\.sum$''',
     '''.*_test\.py$''',
-    '''App/tests/.*''',
     '''App/Results/.*''',
-    '''App/Data/.*''',
     '''.*\.ipynb$''',
     '''App/docs/capstone/sbom-cyclonedx\.json$''',
 ]
