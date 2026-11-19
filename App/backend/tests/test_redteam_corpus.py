@@ -16,7 +16,7 @@ from pathlib import Path
 from app.guardrails.input_checks import InputGuard, injection_present
 from app.guardrails.output_checks import OutputGuard
 
-_DATA = Path(__file__).resolve().parents[3] / "Data" / "eval"
+_DATA = Path(__file__).resolve().parents[3] / "App" / "Data" / "eval"
 _CORPUS = _DATA / "redteam_corpus.jsonl"
 _BENIGN = _DATA / "guardrail_benign_controls.jsonl"
 

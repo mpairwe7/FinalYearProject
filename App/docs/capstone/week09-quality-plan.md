@@ -44,7 +44,7 @@ The ISO/IEC 25010:2023 quality model defines 8 quality characteristics. Below is
 
 | Activity | Owner | Frequency | Automation |
 |----------|-------|-----------|------------|
-| Code review (PR-based) | CODEOWNERS | Every PR | GitHub branch protection |
+| Code review (PR-based) | .github/CODEOWNERS | Every PR | GitHub branch protection |
 | Backend testing (pytest, >= 80% cov) | CI Pipeline | Every commit | `ci-ml-pipeline.yml` (`--cov-fail-under=80`) |
 | Frontend testing (Vitest + RTL) | CI Pipeline | Every commit | `frontend-deploy.yml` (test-frontend stage) |
 | E2E smoke testing (Playwright) | CI Pipeline | Pre-release | `frontend-deploy.yml` + `playwright.config.ts` |
@@ -54,7 +54,7 @@ The ISO/IEC 25010:2023 quality model defines 8 quality characteristics. Below is
 | ML model evaluation | CI Pipeline | Every training run | quality_gates.py |
 | Container security scan | CI Pipeline | Every build | Trivy + cosign signing + SLSA provenance |
 | Accessibility audit (WCAG 2.1 AA) | CI Pipeline | Every PR | axe-core + Lighthouse CI (>= 90) |
-| DAST penetration testing | CI Pipeline | Weekly + main push | OWASP ZAP baseline (`.zap-rules.tsv`) |
+| DAST penetration testing | CI Pipeline | Weekly + main push | OWASP ZAP baseline (`App/security/.zap-rules.tsv`) |
 | Load/performance testing | Manual | Pre-release | k6 (`App/tests/load/k6-chat-slo.js`) |
 | AI red team evaluation | Manual | Pre-release | `App/scripts/ai_red_team.py` (50 NIST prompts, >= 90% block) |
 | Bias & fairness audit | Manual | Pre-release | `App/scripts/bias_fairness_audit.py` (>= 70% parity) |

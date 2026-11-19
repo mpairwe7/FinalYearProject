@@ -512,7 +512,7 @@ _DEFAULT_EXTRA_LINK_HOSTS = frozenset(
         "bou.or.ug",
         "nda.or.ug",
         "eac.int",
-        # Linked from the reviewed corpus (Data/dataset, Data/crawl). doi.org is
+        # Linked from the reviewed corpus (App/Data/dataset, App/Data/crawl). doi.org is
         # left out: the resolver redirects to whatever a registrant names.
         "wto.org",
         "wcoeacaeo-tpf.net",

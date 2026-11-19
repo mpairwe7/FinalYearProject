@@ -1,4 +1,4 @@
-# Build the HF Space image before a change to its Dockerfile is merged.
+# Build the HF Space image before a change to its App/Dockerfile is merged.
 #
 # The roll pushes App/deploy/hf-space/Dockerfile to the Space whole, and the
 # Space builds it there. Until this job existed nothing built that file before
@@ -39,7 +39,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           docker system prune -af
           df -h /
-      - name: Build the Space Dockerfile
+      - name: Build the Space App/Dockerfile
         run: docker build -f App/deploy/hf-space/Dockerfile -t hf-space-check App/deploy/hf-space
       - name: Start Postgres as supervisord would and query pgvector
         run: |

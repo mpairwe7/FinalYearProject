@@ -1146,7 +1146,7 @@ def _extract_image(data: bytes) -> _Extraction:
             text = ""
         if not text:
             # Direct tesseract CLI fallback when the system binary is installed
-            # (baked into Dockerfile.gpu; omitted from the minimal CPU Dockerfile).
+            # (baked into App/Dockerfile.gpu; omitted from the minimal CPU Dockerfile).
             try:
                 import shutil
                 import subprocess  # nosec B404

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # =============================================================================
-# URA Chatbot API - Production Dockerfile
+# URA Chatbot API - Production App/Dockerfile
 # Multi-stage build for optimized image size
 # =============================================================================
 
@@ -41,7 +41,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Install Python dependencies
 COPY App/backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
+    uv pip install -r App/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
 
 # Voice receptionist (Pipecat + jellyfish phonetic keys). Override pipecat-ai's
 # conservative Pillow<13 metadata cap via uv --override so the resolver keeps

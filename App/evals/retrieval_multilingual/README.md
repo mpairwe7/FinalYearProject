@@ -23,7 +23,7 @@ coverage pool.
 |---|---|---|---|
 | `faq` | 2,223 | 225 indexed FAQ rows (≤ 3 per source file, 75 files), asked verbatim, as a paraphrase, and in Luganda and Swahili (plain and code-switched), plus `typo` and `asr` copies | the point(s) carrying that question |
 | `native` | 126 | the 23 rows whose Luganda/Swahili questions are written into the corpus (`question_lg`, `question_sw`), plus perturbed copies | the row |
-| `coverage` | 315 | `Data/eval/coverage_bank.jsonl`, 105 curated questions × 3 languages | judged pool (`qrels_coverage.jsonl`) |
+| `coverage` | 315 | `App/Data/eval/coverage_bank.jsonl`, 105 curated questions × 3 languages | judged pool (`qrels_coverage.jsonl`) |
 | `ood` | 87 | questions the corpus must not answer: general knowledge, other countries' tax, other Ugandan agencies, chit-chat | none — any answer is wrong |
 
 **Caveat.** The `faq` paraphrases and translations come from Sunflower, the model

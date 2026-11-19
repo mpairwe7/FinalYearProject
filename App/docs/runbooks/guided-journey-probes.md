@@ -113,7 +113,7 @@ corpus. Build from the branch, recreate from the main checkout:
 docker tag app-api:gpu app-api:gpu-pre-<change>
 
 # 2. build from the branch checkout (context = repo root, as in docker-compose.yml)
-cd <branch checkout> && docker build -q -f Dockerfile.gpu -t app-api:gpu .
+cd <branch checkout> && docker build -q -f App/Dockerfile.gpu -t app-api:gpu .
 
 # 3. recreate only the api, from the MAIN checkout, same GPU pinning as the stack
 cd ~/Mpairwe7/FinalYearProject/App
@@ -176,6 +176,6 @@ and at least every quarter.
 ## Committing
 
 The `ggshield` pre-commit hook needs a GitGuardian API key; without one it
-fails before scanning. `SECURITY.md` records that ggshield skips without a key,
+fails before scanning. `.github/SECURITY.md` records that ggshield skips without a key,
 so `SKIP=ggshield git commit …` matches that policy — TruffleHog, Gitleaks,
 detect-secrets, Semgrep and Bandit still run on every commit.

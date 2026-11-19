@@ -315,7 +315,7 @@ into the collection and `HybridRetriever._verify_bm25_binding` disables sparse
 retrieval when the two disagree — so a standalone refit degrades search silently
 rather than failing loudly at build time.
 
-Do not commit generated `Model/bm25_state.json`: the Docker build derives it
+Do not commit generated `App/Model/bm25_state.json`: the Docker build derives it
 from the release corpus and embeds a matching copy in Qdrant.
 
 ### 6.1 Vectorize is preferred over the sidecar — and must fall back to it

@@ -61,7 +61,7 @@ class BM25:
     """BM25 over the eval entries, scored by the **production** encoder.
 
     This used to be a separate implementation with its own ``k1`` (1.5 against
-    production's 1.2) reading IDF out of a committed ``Model/bm25_state.json``
+    production's 1.2) reading IDF out of a committed ``App/Model/bm25_state.json``
     whose provenance nothing checked.  It was therefore blind to the ranker it
     was meant to gate: while ``BM25SparseEncoder`` encoded the document and the
     query the same way — applying IDF twice — this script scored a textbook

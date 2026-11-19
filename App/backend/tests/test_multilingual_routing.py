@@ -2,7 +2,7 @@
 
 Two things are being pinned. The first is that Luganda routes at all:
 measured before the locale tables existed, all twelve real questions in
-``Data/eval/rag_eval_lg.jsonl`` fell through every table to plain
+``App/Data/eval/rag_eval_lg.jsonl`` fell through every table to plain
 retrieval, including ``"Njagala okwogera n'omuntu"`` — an explicit
 request for a human that was silently answered by a bot.
 
@@ -33,7 +33,7 @@ from app.agents.state import AgentRoute
 from app.agents.supervisor import supervisor
 
 _LG_CORPUS = (
-    pathlib.Path(__file__).resolve().parents[3] / "Data" / "eval" / "rag_eval_lg.jsonl"
+    pathlib.Path(__file__).resolve().parents[3] / "App" / "Data" / "eval" / "rag_eval_lg.jsonl"
 )
 
 

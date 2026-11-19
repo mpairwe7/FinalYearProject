@@ -5314,21 +5314,21 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Evaluation results — serves pre-computed Results/ JSON for the dashboard
+# Evaluation results — serves pre-computed App/Results/ JSON for the dashboard
 # ---------------------------------------------------------------------------
 @app.get("/v1/evaluation/results", tags=["evaluation"])
 def evaluation_results(_ctx: AuthContext = Depends(require_admin_access)) -> dict:
     """Serve all pre-computed evaluation metrics for the IEEE-standard dashboard.
 
-    Reads JSON files from the ``Results/`` directory relative to the
+    Reads JSON files from the ``App/Results/`` directory relative to the
     project root and returns a consolidated bundle.
     """
     import json as _json
     from pathlib import Path
 
-    from ._root import PROJECT_ROOT as _pr2
+    from ._root import CODE_ROOT
 
-    results_dir = _pr2 / "Results"
+    results_dir = CODE_ROOT / "Results"
     metrics_dir = results_dir / "metrics"
 
     def _load(path: Path) -> dict | list | None:
@@ -5360,8 +5360,8 @@ def evaluation_results(_ctx: AuthContext = Depends(require_admin_access)) -> dic
 def export_artifacts(request: Request) -> dict:
     """Generate IEEE-standard figures and tables as PNG images.
 
-    Reads all pre-computed Results/ JSON files and renders publication-
-    quality charts, graphs, and metric tables into the Artifacts/ folder
+    Reads all pre-computed App/Results/ JSON files and renders publication-
+    quality charts, graphs, and metric tables into the App/Artifacts/ folder
     for inclusion in the final year project report.
 
     Requires the same ``Authorization: Bearer <INDEX_API_KEY>`` header

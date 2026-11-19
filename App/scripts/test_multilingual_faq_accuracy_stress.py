@@ -483,7 +483,7 @@ def run_multilingual_faq_accuracy_suite() -> dict[str, Any]:
           f"Post-Test={gpu_post['memory_used_mb']:.0f} MiB | Free Headroom={gpu_post['memory_free_mb']:.0f} MiB")
 
     # Save JSON Report
-    out_file = BASE_DIR / "Results" / "metrics" / "multilingual_faq_full_stack_accuracy_report.json"
+    out_file = BASE_DIR / "App" / "Results" / "metrics" / "multilingual_faq_full_stack_accuracy_report.json"
     out_file.parent.mkdir(parents=True, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

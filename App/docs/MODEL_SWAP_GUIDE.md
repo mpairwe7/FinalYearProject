@@ -323,7 +323,7 @@ verifies the collection has vectors with the correct dimension.
 ### Manual re-index
 
 ```bash
-# Full re-index (drops old collection, rebuilds from Data/)
+# Full re-index (drops old collection, rebuilds from App/Data/)
 python -m App.backend.app.ingestion.indexer --recreate
 
 # CSVs only (useful when only FAQ data changed)

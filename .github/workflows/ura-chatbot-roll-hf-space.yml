@@ -1,13 +1,13 @@
 # =============================================================================
 # URA Chatbot — roll the HF Docker Space to a built image
 #
-# The Space runs the same prebuilt image Crane Cloud runs; its Dockerfile is a
+# The Space runs the same prebuilt image Crane Cloud runs; its App/Dockerfile is a
 # one-line `FROM landwind/ura-chatbot:sha-<short>` pin. Two things made rolling
 # it a manual chore that was repeatedly forgotten:
 #
 #   1. The Space's git repo (huggingface.co/spaces/landwind22/ura-chatbot) has
 #      no webhook from GitHub. Merging a roll PR updates this repo and nothing
-#      else — confirmed by diffing the Space's raw Dockerfile right after a
+#      else — confirmed by diffing the Space's raw App/Dockerfile right after a
 #      merge and finding the PREVIOUS roll's sha. Every roll therefore needed a
 #      hand-run `HfApi.upload_file`, and a missed one looks exactly like "the
 #      fix is on dev but the Space still behaves old".
@@ -16,7 +16,7 @@
 #      "data update" half: new data only reaches the demo surface via a roll.
 #
 # So this runs after a green build and does both halves — moves the pin in this
-# repo AND pushes the Dockerfile to the Space — leaving the two in sync.
+# repo AND pushes the App/Dockerfile to the Space — leaving the two in sync.
 #
 # Triggers:
 #   * dispatched by ura-chatbot-build-push.yml on a successful dev build
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      # The tag ends up in a Dockerfile line / deploy request, so it must be a
+      # The tag ends up in a App/Dockerfile line / deploy request, so it must be a
       # plain Docker tag (no spaces, newlines, quotes, |, & or $) before any
       # later step expands it.
       - name: Validate image tag
@@ -145,7 +145,7 @@ jobs:
           git pull --rebase origin "${GITHUB_REF_NAME}" || true
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      - name: Push the Dockerfile to the Space
+      - name: Push the App/Dockerfile to the Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TAG: ${{ inputs.image_tag }}
@@ -164,7 +164,7 @@ jobs:
           space = os.environ["SPACE_ID"]
           commit = api.upload_file(
               path_or_fileobj=os.environ["PIN_FILE"],
-              path_in_repo="Dockerfile",
+              path_in_repo="App/Dockerfile",
               repo_id=space,
               repo_type="space",
               commit_message=f"Roll to {os.environ['IMAGE_BASE']}:{os.environ['TAG']}",

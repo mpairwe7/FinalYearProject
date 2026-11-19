@@ -19,7 +19,7 @@ Read it end to end before starting. Build in the phase order given; each phase e
   - **Every new FastAPI route** goes into `App/tests/test_all_endpoints_e2e.py`: `EXPECTED_ENDPOINTS`,
     `COVERAGE`, and the locked counts in `test_manifest_endpoint_count` (currently **74 HTTP + 7 WS**;
     this plan adds **11 HTTP, 0 WS** → 85 + 7).
-  - A new flag lands in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md` (table + count) and `.env.example`.
+  - A new flag lands in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md` (table + count) and `App/.env.example`.
     This plan adds **no new flag** — everything sits under the existing `voice_receptionist` flag.
   - Every route into the officer queue honours `ticket_queue` (never promise a handoff when it is off).
   - Runtime code stays under `App/backend/app`. Do not move `App/backend` or `App/frontend`.
@@ -551,7 +551,7 @@ Existing `snapshot`, `turn`, `caption`, `status`, plus `brief` (full brief JSON)
 `PUT /v1/admin/officers/me/presence` · `GET /v1/admin/officers/presence`.
 Update `test_manifest_endpoint_count` to **85 HTTP + 7 WS**.
 
-### Environment variables (document in `.env.example`, read in `receptionist/config.py`)
+### Environment variables (document in `App/.env.example`, read in `receptionist/config.py`)
 
 `RECEPTIONIST_BRIEF_EVERY_TURNS=3` · `RECEPTIONIST_BRIEF_MODEL=gemini-2.5-flash-lite` ·
 `RECEPTIONIST_CLAIM_TIMEOUT_S=20` · `RECEPTIONIST_OFFICER_RECONNECT_GRACE_S=30` ·

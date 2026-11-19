@@ -17,7 +17,7 @@ Supersedes the CPU-fallback conclusions of
 | Host | shared 8x NVIDIA RTX A6000 48 GiB; driver reports CUDA 12.2 |
 | Pinned GPU | **GPU 7** (`GPU_ID=7`), chosen by `App/scripts/select_free_gpu.sh` |
 | Overlay order | `docker-compose.yml` → `local-retrieval.yml` → `local-sunflower.yml` → `gpu-salt.yml` |
-| API image | `app-api:gpu`, rebuilt from `Dockerfile.gpu` — `torch 2.11.0+cu128`, `torchaudio 2.11.0+cu128` |
+| API image | `app-api:gpu`, rebuilt from `App/Dockerfile.gpu` — `torch 2.11.0+cu128`, `torchaudio 2.11.0+cu128` |
 | LLM | `App/Model/Sunflower-14B-FP8` served by `vllm/vllm-openai:v0.8.5` as `Sunbird/Sunflower-14B-FP8` |
 | ASR | `Sunbird/asr-whisper-large-v3-salt`, `WHISPER_SALT_DEVICE=cuda:0` |
 | TTS | `Sunbird/spark-tts-salt` + BiCodec, `SPARK_TTS_DEVICE=cuda:0` |

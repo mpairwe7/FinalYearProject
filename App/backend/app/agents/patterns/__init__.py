@@ -2,7 +2,7 @@
 
 The supervisor's routing tables were English regex, and only English.
 Measured against the twelve real Luganda questions in
-``Data/eval/rag_eval_lg.jsonl``, **all twelve** fell through every table
+``App/Data/eval/rag_eval_lg.jsonl``, **all twelve** fell through every table
 to the default retrieval route — including ``"Njagala okwogera
 n'omuntu"`` ("I want to speak to a person"), which is an explicit
 request for a human that the English escalation patterns cannot see.
@@ -32,7 +32,7 @@ English first. Two reasons, and the second is the load-bearing one:
 
 ## Confidence in the vocabulary
 
-The Luganda tables are derived from ``Data/eval/rag_eval_lg.jsonl`` —
+The Luganda tables are derived from ``App/Data/eval/rag_eval_lg.jsonl`` —
 real questions, not invented ones. The Runyankole and Acholi tables are
 a **conservative seed** of terms only, and are marked as such on each
 table. They need native-speaker review before ``multilingual_routing``

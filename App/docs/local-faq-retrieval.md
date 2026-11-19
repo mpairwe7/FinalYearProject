@@ -2,13 +2,13 @@
 
 The retrieval inputs are stored locally under `App/Data`:
 
-- `Data/dataset/`: the 40 curated FAQ CSV source files.
+- `App/Data/dataset/`: the 40 curated FAQ CSV source files.
 - `Data/faq_jsonl/`: generated canonical FAQ JSONL and a coverage manifest.
-- `Data/teacher_qa/`: QA pairs generated from PDFs, normalised from four
+- `App/Data/teacher_qa/`: QA pairs generated from PDFs, normalised from four
   supported JSONL schemas before indexing.
-- `Data/pdfs/`: source material for generating/refreshing teacher-QA pairs;
+- `App/Data/pdfs/`: source material for generating/refreshing teacher-QA pairs;
   it must not be embedded directly into the Qdrant FAQ collection.
-- `Data/eval/`: RAG and red-team fixtures; it must not be embedded.
+- `App/Data/eval/`: RAG and red-team fixtures; it must not be embedded.
 
 Use the local-only Qdrant profile after the corpus has been populated:
 
@@ -57,7 +57,7 @@ PYTHONPATH=. python -m app.ingestion.indexer --recreate
 
 The resulting `ura_knowledge_base_jsonl` collection contains `faq_jsonl` and
 `teacher_qa_jsonl` points only. It leaves any legacy collection untouched;
-PDFs and `Data/eval/*.jsonl` are rejected by construction.
+PDFs and `App/Data/eval/*.jsonl` are rejected by construction.
 
 `HF_HUB_OFFLINE=1` means the required embedding and reranker assets must be
 available locally before that rebuild. See

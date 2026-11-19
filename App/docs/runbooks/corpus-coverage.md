@@ -10,7 +10,7 @@ Operator guide for issue #303. The harness is
 Every other retrieval gate in this repository scores rows the corpus was built
 from. `App/backend/tests/test_retrieval_regression_gate.py` asks each indexed
 FAQ its own question; `App/ml/pipelines/evaluate_rag.py` scores
-`Data/eval/rag_eval.jsonl`. Both answer *"does retrieval still return what it
+`App/Data/eval/rag_eval.jsonl`. Both answer *"does retrieval still return what it
 returned yesterday"*. Neither can answer *"is there a common taxpayer question
 the corpus cannot answer at all"* — by construction, every question they ask
 already has an answer indexed.
@@ -27,8 +27,8 @@ phrased the way contact-centre callers phrase them.
 
 | File | What it is |
 | --- | --- |
-| `Data/eval/coverage_bank.jsonl` | The question bank. One row per question, with `en`/`lg`/`sw` phrasings and `expect_any` — the facts a correct answer has to carry. |
-| `Data/eval/coverage_domains.yaml` | Domain registry: which corpus CSVs answer for each domain, that domain's floor, and its review record. |
+| `App/Data/eval/coverage_bank.jsonl` | The question bank. One row per question, with `en`/`lg`/`sw` phrasings and `expect_any` — the facts a correct answer has to carry. |
+| `App/Data/eval/coverage_domains.yaml` | Domain registry: which corpus CSVs answer for each domain, that domain's floor, and its review record. |
 | `App/ml/pipelines/corpus_coverage.py` | The harness. Three modes; see below. |
 
 ## Statuses
@@ -52,7 +52,7 @@ model, no vector store; runs in seconds.
 
 ```bash
 cd App/backend
-PYTHONPATH=.:$PWD/../.. LLM_ENABLED=false QDRANT_ENABLED=false SPEECH_ENABLED=false \
+PYTHONPATH=.:$PWD/.. LLM_ENABLED=false QDRANT_ENABLED=false SPEECH_ENABLED=false \
   python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor
 ```
 
@@ -69,9 +69,9 @@ where the Luganda and Kiswahili numbers come from.
 
 ```bash
 cd App/backend
-PYTHONPATH=.:$PWD/../.. python -m ml.pipelines.corpus_coverage \
+PYTHONPATH=.:$PWD/.. python -m ml.pipelines.corpus_coverage \
   --mode api --base-url http://127.0.0.1:8083 --languages en,lg,sw \
-  --timeout 180 --output ../../Results/eval/coverage_api.json
+  --timeout 180 --output ../Results/eval/coverage_api.json
 ```
 
 Budget roughly 10–20 s per probe against a local GPU stack: the full bank in
@@ -91,16 +91,16 @@ domain per language unless told otherwise.
 
 ```bash
 cd App/backend
-PYTHONPATH=.:$PWD/../.. python -m ml.pipelines.corpus_coverage \
+PYTHONPATH=.:$PWD/.. python -m ml.pipelines.corpus_coverage \
   --mode voice --base-url http://127.0.0.1:8083 --languages en,lg,sw \
-  --sample-per-domain 1 --timeout 240 --output ../../Results/eval/coverage_voice.json
+  --sample-per-domain 1 --timeout 240 --output ../Results/eval/coverage_voice.json
 ```
 
 The report adds a voice block: TTS backend and voice actually used per
 language, ASR backend, mean transcript recall, empty transcripts, and replies
 that came back with no audio. Transcript recall is round-trip fidelity of
 synthesized speech, **not** a WER claim against human speech — for that, use
-the Common Voice Luganda clips under `Data/lgaudio/`.
+the Common Voice Luganda clips under `App/Data/lgaudio/`.
 
 Two things to check in that block before believing the numbers:
 
@@ -166,7 +166,7 @@ To re-measure after a corpus change:
 
 ```bash
 cd App/backend
-PYTHONPATH=.:$PWD/../.. LLM_ENABLED=false QDRANT_ENABLED=false SPEECH_ENABLED=false \
+PYTHONPATH=.:$PWD/.. LLM_ENABLED=false QDRANT_ENABLED=false SPEECH_ENABLED=false \
   python -m ml.pipelines.corpus_coverage --languages en --output /tmp/coverage.json
 ```
 
@@ -176,7 +176,7 @@ The gate fails if a new `ura_*_faqs.csv` is not listed under a domain in
 `coverage_domains.yaml`, and if a domain has no question in the bank. So the
 order is:
 
-1. Add the CSV to `Data/dataset/`.
+1. Add the CSV to `App/Data/dataset/`.
 2. Add its filename to a domain's `sources` in `coverage_domains.yaml`
    (or add a new domain with a `floor` and a `review` block).
 3. Add at least one question to `coverage_bank.jsonl` in all three languages,

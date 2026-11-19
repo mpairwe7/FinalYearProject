@@ -77,7 +77,7 @@ with the passages beside it. A passage stating a different figure is attached to
 ## Verified figures
 
 On 2026-11-08 the figures with no legal basis were checked against URA's published law and guidance
-(`Data/pdfs`, URA's site). Six were wrong or stale and were corrected, and 13 of 14 now cite a
+(`App/Data/pdfs`, URA's site). Six were wrong or stale and were corrected, and 13 of 14 now cite a
 document and page. The rest of the year's figures were checked against URA's FY2026-27
 amendments booklet, which also corrected the quarterly VAT test.
 

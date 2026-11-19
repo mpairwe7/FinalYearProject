@@ -19,7 +19,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from ._root import APP_DATA_ROOT, PROJECT_ROOT
+from ._root import APP_DATA_ROOT
 from .freshness import FreshnessReport, enqueue_reindex_request
 from .ingestion.pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
 
@@ -82,13 +82,7 @@ def fixture_path() -> Path:
     configured = (os.getenv("PUBLICATIONS_FIXTURE_PATH") or "").strip()
     if configured:
         return Path(configured)
-    for candidate in (
-        PROJECT_ROOT / "Data" / "eval" / "publications_fixture.txt",
-        APP_DATA_ROOT / "eval" / "publications_fixture.txt",
-    ):
-        if candidate.is_file():
-            return candidate
-    return PROJECT_ROOT / "Data" / "eval" / "publications_fixture.txt"
+    return APP_DATA_ROOT / "eval" / "publications_fixture.txt"
 
 
 def load_fixture_body() -> bytes:

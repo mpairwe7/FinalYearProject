@@ -143,7 +143,7 @@ User Query
 |---------|---------|---------|
 | Model | `Sunbird/Sunflower-Qwen3.5-9B` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
-| Context window | 8192 code default (`262144` in `.env.example` — 256K / 262K native `max_position_embeddings` without YaRN) | `LLM_CONTEXT_WINDOW` |
+| Context window | 8192 code default (`262144` in `App/.env.example` — 256K / 262K native `max_position_embeddings` without YaRN) | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
@@ -386,7 +386,7 @@ chat's owner (`receptionist/carryover.py`).
 - Ordering follows retrieval rank and truncation is declared in the block rather than silent, because a partial list that reads as exhaustive is worse than no list.
 
 **Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`ingestion/faq_corpus.py`, `rag/pipeline.py`, `mt.py`):
-- High-frequency statutory FAQ CSVs in `Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
+- High-frequency statutory FAQ CSVs in `App/Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
 - During corpus compilation (`python -m app.ingestion.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
 - `_simple_search` in `rag/pipeline.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
 - When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
@@ -951,7 +951,7 @@ actually shipped.
 
 * **Collapse** (`mt.length_plausible`) — a translation far shorter than its
   source is a degraded model response, not an answer. The floor is **measured**:
-  across the 23,838 aligned human pairs in `Data/online_corpora/salt/`, one in a
+  across the 23,838 aligned human pairs in `App/Data/online_corpora/salt/`, one in a
   thousand falls below 0.449 (en→lg) and 0.434 (en→sw), and below 0.4 lies
   0.04%. `MT_MIN_LENGTH_RATIO` defaults to 0.35, under both. It was a tenth of
   the source, which caught a *collapsed* response and not a *truncated* one — and
@@ -1009,7 +1009,7 @@ over the localized text and a per-locale golden set to gate it (G58).
 | `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
 | `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
 | `MT_PROTECT_FIGURES` | `true` | Mask figures behind sentinels before translation and restore after (`app/mt.py`); kill switch only — a tier that cannot carry them is retried unprotected |
-| `MT_MIN_LENGTH_RATIO` | 0.35 | Shortest a translation may be, as a fraction of the source (`app/mt.py`). Measured from the 23,838 aligned pairs in `Data/online_corpora/salt/`: the one-in-a-thousand ratio is 0.449 (en→lg) and 0.434 (en→sw). Replaces a floor at one tenth, which passed a translation that had dropped nine tenths of the answer |
+| `MT_MIN_LENGTH_RATIO` | 0.35 | Shortest a translation may be, as a fraction of the source (`app/mt.py`). Measured from the 23,838 aligned pairs in `App/Data/online_corpora/salt/`: the one-in-a-thousand ratio is 0.449 (en→lg) and 0.434 (en→sw). Replaces a floor at one tenth, which passed a translation that had dropped nine tenths of the answer |
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —
@@ -1112,7 +1112,7 @@ When `FLAG_MODEL_TIERING=true`, `providers/routing.py` (`select_tier`, `ENDPOINT
 - **Code-Owned Tax Scenario Planner (`memory/case_facts.py`, `scenario_planner.py`, `guardrails/premise.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
 - **Polarity-Aware Faithfulness & Figure Lock (`rag/claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
 
-Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
+Eval set: `App/Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
 
 Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md](./traceability/retrieval-agentic-upgrade-2026-08-17.md).
 

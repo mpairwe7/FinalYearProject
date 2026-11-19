@@ -37,7 +37,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
 - **Feature Flags:** Any new flag must land in **all three** files in the same commit:
   1. `App/backend/app/config/flags.py`
   2. `App/docs/RAG_ARCHITECTURE.md` (including updating the total flag count in the summary paragraph)
-  3. `.env.example`
+  3. `App/.env.example`
 - **FastAPI Route Coverage:** Any new FastAPI route must be added to `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`), and backend behaviour must be exercised by tests under `App/tests/` (which CI runs for the `--cov=App/backend` gate).
 - **Session & Sign-In Invariants (`ADR-0013`):**
   - "Signed in" is a property of the **current request** (`bool(ctx.user_id)`), never read back from stored workflow slots.
@@ -141,7 +141,7 @@ Every URA portal service is deterministically mapped in `PORTAL_TASK_CATALOG` (`
    Add `Flag("portal_copilot", True, "Phase 42 (FLAG_PORTAL_COPILOT): 4-tier URA portal task execution, Claude-style HITL confirmation cards, inline form elicitation, and inbuilt stuck-user DOM co-pilot.", category="kill_switch", owner="agentic_runtime")` to `_REGISTRY`.
 2. **`App/docs/RAG_ARCHITECTURE.md`:**
    Add `portal_copilot` (`FLAG_PORTAL_COPILOT`, default `on`) to the Feature Flags table and increment the total flag count in the summary sentence below the table (`85` → `86`).
-3. **`.env.example`:**
+3. **`App/.env.example`:**
    Add `# FLAG_PORTAL_COPILOT=true` under a `# Phase 42` comment header.
 
 ### 3.2 Expand `get_portal_dom_recipe` & Portal Metadata (`App/backend/app/tools/portal_navigator_data.py`)
@@ -216,7 +216,7 @@ Implement the core backend engine with the following pure, well-typed functions 
 
 ### 3.4 Phase A Verification
 Run unit tests in `App/tests/agents/test_portal_copilot_phase_a.py` verifying:
-- `portal_copilot` flag registration in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- `portal_copilot` flag registration in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`.
 - All 4 tiers in `PORTAL_TASK_CATALOG` and `get_portal_dom_recipe` across all 9 portal keys.
 - Password/OTP/PIN/CVV selector and field scrubbing in `analyze_portal_context`.
 

@@ -749,8 +749,8 @@ uv pip install -r requirements.txt
 
 # Full production startup with local LoRA adapters and speech:
 WHISPER_ADAPTER_LG="../../artifacts/speech/asr/whisper_lg/final" \
-WHISPER_ADAPTER_SW="../../Model/adapters/whisper-sw" \
-WHISPER_ADAPTER_NYN="../../Model/adapters/whisper-nyn" \
+WHISPER_ADAPTER_SW="../Model/adapters/whisper-sw" \
+WHISPER_ADAPTER_NYN="../Model/adapters/whisper-nyn" \
 WHISPER_DEVICE=cpu \
 SPEECH_ENABLED=true \
 SPEECH_MT_BACKEND=prompted \
@@ -761,10 +761,10 @@ LLM_BACKEND=local \
 LLM_DEVICE=auto \
 LLM_LOAD_IN_4BIT=true \
 LLM_TORCH_DTYPE=bfloat16 \
-LORA_ADAPTER_LG="../../Model/adapters/luganda-lora" \
-LORA_ADAPTER_SW="../../Model/adapters/sw-lora" \
-LORA_ADAPTER_NYN="../../Model/adapters/nyn-lora" \
-LORA_ADAPTER_ACH="../../Model/adapters/ach-lora" \
+LORA_ADAPTER_LG="../Model/adapters/luganda-lora" \
+LORA_ADAPTER_SW="../Model/adapters/sw-lora" \
+LORA_ADAPTER_NYN="../Model/adapters/nyn-lora" \
+LORA_ADAPTER_ACH="../Model/adapters/ach-lora" \
 SUNBIRD_API_TOKEN="<your-sunbird-jwt>" \
 CORS_ORIGINS="http://localhost:3300" \
 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8887 --reload
@@ -1390,7 +1390,7 @@ empty.
   GPU passthrough and a `/v1/models` healthcheck.
 - `docker-compose.yml` — `caddy:2.8-alpine` reverse proxy behind
   `--profile tls` with HTTP/2 + HTTP/3 and auto Let's Encrypt.
-- New `Caddyfile` — HSTS, CSP, security headers, SSE-safe reverse
+- New `App/Caddyfile` — HSTS, CSP, security headers, SSE-safe reverse
   proxy to `api:8000`, frontend to `frontend:3000`, JSON access logs.
 
 **Phase 10 — Continuous evaluation (Ragas-compatible)**
@@ -1538,7 +1538,7 @@ diagnosis phase.
 
 - Python 3.11+
 - Node.js 20.9+ (Next.js 16 minimum) / Bun ≥ 1.1
-- Trained model files in `Model/` directory
+- Trained model files in `App/Model/` directory
 
 ### Quick Start (2026 stack)
 
@@ -1621,7 +1621,7 @@ GPU_ID=2 docker compose \
   -f docker-compose.gpu-salt.yml up -d --build
 ```
 
-Same as Option B, plus: builds `api` from `Dockerfile.gpu` (repo root)
+Same as Option B, plus: builds `api` from `App/Dockerfile.gpu` (repo root)
 instead of the base `Dockerfile` so Spark-TTS-SALT's BiCodec checkout
 (`SPARK_TTS_REPO_DIR`) is present, and pins both GPU consumers (`api`,
 `vllm`) to `${GPU_ID:-2}` instead of whatever the base files default to.
@@ -1680,7 +1680,7 @@ the Next.js `/api` rewrite.
 
 ```bash
 # Put CADDY_DOMAIN / CADDY_ACME_EMAIL / POSTGRES_PASSWORD in .env
-docker compose --profile postgres --profile vllm --profile tls up -d
+docker compose -f App/docker-compose.full.yml --profile postgres --profile vllm --profile tls up -d
 ```
 
 Requires ports 80/443 free, a public domain pointing at the host,
@@ -1773,7 +1773,7 @@ tool — see:
   Model type detection recognises "qwen" and routes to the correct template.
 - `App/backend/app/rag/pipeline.py` — Model name derived dynamically from
   `LLM_MODEL` env var instead of hardcoded `"ura-qwen2.5-3b-instruct"`.
-- `.env.example` — Added `LLM_BACKEND`, `VLLM_BASE_URL`, `VLLM_API_KEY`,
+- `App/.env.example` — Added `LLM_BACKEND`, `VLLM_BASE_URL`, `VLLM_API_KEY`,
   `VLLM_HTTP_TIMEOUT`, and all `FLAG_*` env vars.
 
 **Phase 16 — Agentic mode activation + vLLM tool-calling**
@@ -1882,7 +1882,7 @@ tool — see:
 - **GDPR compliance:** Analytics `trackEvent()` respects consent stored
   in `ura_analytics_consent` localStorage key.
 - **Backend evaluation API:** New `GET /v1/evaluation/results` endpoint
-  serves all pre-computed Results/ JSON files as a consolidated bundle
+  serves all pre-computed App/Results/ JSON files as a consolidated bundle
   for the IEEE evaluation dashboard.
 - **PWA:** `manifest.json`, service worker (cache-first assets,
   network-first pages), app icons (SVG), `robots.txt`, Apple Web App
@@ -1930,7 +1930,7 @@ tool — see:
 - **Response budget:** compose sets `LLM_MAX_TOKENS=512` for vLLM chat calls to allow complete procedural answers. Qwen3 thinking mode is suppressed via `/no_think` system prompt tag and `chat_template_kwargs: {"enable_thinking": False}` in vLLM requests, so the full token budget goes to answer content.
 - **4-bit Qwen fallback:** local Transformers can still load Qwen with BitsAndBytes NF4 when `LLM_BACKEND=local` and `LLM_LOAD_IN_4BIT=true`.
 - **GPU split:** compose maps the API container to host GPU 2 (`NVIDIA_VISIBLE_DEVICES=2`) so `RETRIEVER_DENSE_DEVICE=cuda:0` uses that free mapped GPU; reranking runs on CPU (`RERANKER_DEVICE=cpu`) to avoid GPU 0 startup stalls; vLLM serves Qwen on GPU 7; Whisper remains on CPU.
-- **Locale LoRA routing:** production compose mounts `../Model/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
+- **Locale LoRA routing:** production compose mounts `./Model/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
 - **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen or retrieval GPU workloads.
 - **Redis cache:** compose runs `redis:7.4-alpine`; the API uses `CACHE_BACKEND=redis`, `REDIS_URL=redis://redis:6379/0`, and `SLOWAPI_STORAGE_URI=redis://redis:6379/1`.
 - **Anonymous public assistant:** `/v1/chat`, `/v1/chat/stream`, speech health, TTS, translation, and consented voice processing work without login. Anonymous requests use `role=public` and cannot access account/action tools.
@@ -1976,7 +1976,7 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 
 **GPU + SALT speech variant** (`docker-compose.gpu-salt.yml`, see Option B
 above): `vllm` and `api` both pin to a single `GPU_ID` (default 2) instead
-of the default split above; `api` builds from `Dockerfile.gpu` and runs
+of the default split above; `api` builds from `App/Dockerfile.gpu` and runs
 both Sunbird SALT speech tiers under CPU fallback on hosts with a
 pre-CUDA-13-generation driver. Verified 2026-08-22:
 [`docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`](../docs/traceability/local-gpu-salt-ngrok-2026-08-22.md).
@@ -2046,14 +2046,14 @@ model training, evaluation, and deployment. Configuration lives in
 
 | Source | Location | Description |
 |--------|----------|-------------|
-| CSV FAQs | `Data/dataset/ura_*_faqs.csv` | 41 structured Q&A files covering all URA tax categories |
-| PDF Handbooks | `Data/pdfs/` | 45+ URA guidance documents (VAT, TIN, customs, EFRIS, sector guides) |
-| Web Crawl | `Data/crawl/` | Daily crawled content from ura.go.ug (HTML pages + discovered PDFs) |
-| Luganda Parallel | `Data/TTT/` | Luganda-English sentence pairs for translation training |
-| Teacher QA | `Data/teacher_qa/` | LLM-generated QA from domain expert prompts |
-| Online Corpora | `Data/online_corpora/` | OPUS, JW300 for translation model training |
-| Audio | `Data/lgaudio/`, `Data/speech/` | Luganda speech clips for ASR/TTS training |
-| Evaluation | `Data/eval/` | `rag_eval.jsonl` (EN), `rag_eval_lg.jsonl` (LG), `redteam_corpus.jsonl` |
+| CSV FAQs | `App/Data/dataset/ura_*_faqs.csv` | 41 structured Q&A files covering all URA tax categories |
+| PDF Handbooks | `App/Data/pdfs/` | 45+ URA guidance documents (VAT, TIN, customs, EFRIS, sector guides) |
+| Web Crawl | `App/Data/crawl/` | Daily crawled content from ura.go.ug (HTML pages + discovered PDFs) |
+| Luganda Parallel | `App/Data/TTT/` | Luganda-English sentence pairs for translation training |
+| Teacher QA | `App/Data/teacher_qa/` | LLM-generated QA from domain expert prompts |
+| Online Corpora | `App/Data/online_corpora/` | OPUS, JW300 for translation model training |
+| Audio | `App/Data/lgaudio/`, `App/Data/speech/` | Luganda speech clips for ASR/TTS training |
+| Evaluation | `App/Data/eval/` | `rag_eval.jsonl` (EN), `rag_eval_lg.jsonl` (LG), `redteam_corpus.jsonl` |
 
 ### Data Augmentation Pipeline (4-stage)
 
@@ -2104,7 +2104,7 @@ only the publisher's live site, and it proposes rather than publishes (ADR-0023)
 3. Live fetch    — honest identity, robots.txt, one request per host, every redirect checked
 4. Extraction    — hidden text removed, tables kept in place with merged cells, publisher dates
 5. No regression — a response older than what is held does not replace it
-6. Ledger        — Data/crawl/crawl_state.json: status, current capture and run record
+6. Ledger        — App/Data/crawl/crawl_state.json: status, current capture and run record
 7. Gate          — app.crawl_gate: pass, review or hold, with the figures that moved
 8. Proposal      — a pull request a person merges; that merge builds and rolls
 ```
@@ -2176,7 +2176,7 @@ The evaluation system runs across 5 dimensions via dedicated scripts in
 
 ### Production Quality Gates
 
-Latest results from `Results/rag_quality_gates.json` (9/9 passed, score 1.0):
+Latest results from `App/Results/rag_quality_gates.json` (9/9 passed, score 1.0):
 
 | Gate | Actual | Target | Status |
 |------|--------|--------|--------|

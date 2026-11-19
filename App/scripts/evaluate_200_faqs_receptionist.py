@@ -285,7 +285,7 @@ def compile_receptionist_report(results: list[dict[str, Any]]) -> dict[str, Any]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate 200 FAQs on Call Receptionist Pipeline")
-    parser.add_argument("--out", default="Results/metrics/receptionist_200_faqs_evaluation_report.json")
+    parser.add_argument("--out", default="App/Results/metrics/receptionist_200_faqs_evaluation_report.json")
     parser.add_argument("--limit", type=int, default=200)
     args = parser.parse_args()
 

@@ -427,7 +427,7 @@ def run_document_e2e_suite() -> dict[str, Any]:
         "results": results,
     }
 
-    out_path = Path("Results/metrics/document_processing_e2e_report.json")
+    out_path = Path("App/Results/metrics/document_processing_e2e_report.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     log(f"\nReport written to: {out_path}")

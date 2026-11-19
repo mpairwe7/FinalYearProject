@@ -16,7 +16,7 @@ bare "18" kept every digit and passed.
 the answer. It caught a collapsed response and not a truncated one, and a
 truncated answer reads as a complete answer that happens to omit the taxpayer's
 obligations. The replacement floor is measured from the aligned SALT pairs in
-``Data/online_corpora/salt/``.
+``App/Data/online_corpora/salt/``.
 
 *Citations.* ``claim_verifier`` keys off the ``[n]`` markers to decide whether
 a claim was supported at all. A translation that drops or renumbers one ships

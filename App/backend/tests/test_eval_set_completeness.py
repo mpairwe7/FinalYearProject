@@ -2,7 +2,7 @@
 
 The 21-question English set missed three production bugs in one week
 (see test_retrieval_regression_gate.py). Those cases now live in
-Data/eval/rag_eval.jsonl with stable case_ids so a silent deletion
+App/Data/eval/rag_eval.jsonl with stable case_ids so a silent deletion
 fails CI the same way the keyword gate does.
 """
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app._root import PROJECT_ROOT  # noqa: E402
+from app._root import APP_DATA_ROOT  # noqa: E402
 from app.rag.query import decompose_query, extract_retrieval_filters, plan_retrieval  # noqa: E402
 from app.rag.pipeline import (  # noqa: E402
     ChatModel,
@@ -28,7 +28,7 @@ from app.rag.pipeline import (  # noqa: E402
     _simple_search,
 )
 
-EVAL_PATH = PROJECT_ROOT / "Data" / "eval" / "rag_eval.jsonl"
+EVAL_PATH = APP_DATA_ROOT / "eval" / "rag_eval.jsonl"
 
 REQUIRED_CASE_IDS = (
     "reg-how-file-returns",

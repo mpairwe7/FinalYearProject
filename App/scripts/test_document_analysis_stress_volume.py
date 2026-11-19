@@ -522,8 +522,8 @@ def run_benchmark() -> dict[str, Any]:
     results["boundary_security_hardening"].append(b2)
     print(f"  - 40.0 MiB + 1 KiB Oversize Rejection: {b2['status']}")
 
-    # Save output to Results/metrics
-    output_path = BASE_DIR / "Results" / "metrics" / "document_scaling_stress_report.json"
+    # Save output to App/Results/metrics
+    output_path = BASE_DIR / "App" / "Results" / "metrics" / "document_scaling_stress_report.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

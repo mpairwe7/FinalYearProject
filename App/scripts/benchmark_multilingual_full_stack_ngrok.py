@@ -498,7 +498,7 @@ def main():
     )
     parser.add_argument(
         "--out",
-        default="Results/metrics/multilingual_ngrok_load_stress_report.json",
+        default="App/Results/metrics/multilingual_ngrok_load_stress_report.json",
         help="Output report JSON file path",
     )
     args = parser.parse_args()

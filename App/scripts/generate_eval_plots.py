@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate evaluation and comparison plots from Results/ JSON data.
+"""Generate evaluation and comparison plots from App/Results/ JSON data.
 
 Produces publication-quality PNG charts for:
   1. RAG quality radar (8 metrics)
@@ -12,7 +12,7 @@ Produces publication-quality PNG charts for:
 
 Usage:
     python App/scripts/generate_eval_plots.py
-    python App/scripts/generate_eval_plots.py --output-dir Results/plots
+    python App/scripts/generate_eval_plots.py --output-dir App/Results/plots
 
 Standards: ISO 25010:2023 (Functional Suitability), NIST AI RMF MEASURE 2.6
 """
@@ -53,7 +53,7 @@ RED = "#ef4444"
 ORANGE = "#f97316"
 CYAN = "#06b6d4"
 
-OUTPUT_DIR = Path("Results/plots")
+OUTPUT_DIR = Path("App/Results/plots")
 
 
 def load_json(path: str) -> dict | None:
@@ -250,7 +250,7 @@ def plot_quality_gates(data: dict) -> None:
 # -----------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate evaluation plots")
-    parser.add_argument("--output-dir", default="Results/plots")
+    parser.add_argument("--output-dir", default="App/Results/plots")
     args = parser.parse_args()
 
     global OUTPUT_DIR
@@ -262,8 +262,8 @@ def main() -> None:
     print()
 
     # RAG evaluation — normalize to standard format
-    raw_rag = load_json("Results/rag_evaluation_results.json")
-    gates = load_json("Results/rag_quality_gates.json")
+    raw_rag = load_json("App/Results/rag_evaluation_results.json")
+    gates = load_json("App/Results/rag_quality_gates.json")
     if raw_rag:
         # Convert flat {metric: {mean, min, max}} to standard format
         threshold_map = {
@@ -304,14 +304,14 @@ def main() -> None:
         plot_language_parity(rag_data)
         plot_quality_gates(rag_data)
     else:
-        print("  [!] Results/rag_evaluation_results.json not found — skipping RAG plots")
+        print("  [!] App/Results/rag_evaluation_results.json not found — skipping RAG plots")
 
     # Red team
-    red_data = load_json("Results/red_team_report.json")
+    red_data = load_json("App/Results/red_team_report.json")
     if red_data:
         plot_red_team(red_data)
     else:
-        print("  [!] Results/red_team_report.json not found — skipping red team plot")
+        print("  [!] App/Results/red_team_report.json not found — skipping red team plot")
 
     print()
     plots = list(OUTPUT_DIR.glob("*.png"))

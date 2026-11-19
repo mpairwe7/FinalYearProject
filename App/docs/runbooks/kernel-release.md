@@ -111,7 +111,7 @@ A snapshot whose hash does not match its release is refused. Do not edit it: res
    An FAQ page is not a gazetted schedule; a figure resting on one stays in `unverified`.
 2. Write the `legal_basis`: the provision, then the document and page.
 3. Add an entry to `app/tax/evidence/rate_evidence.json`:
-   - a document entry: fiscal years, key, value, `Data/pdfs/...`, page, the words that state the
+   - a document entry: fiscal years, key, value, `App/Data/pdfs/...`, page, the words that state the
      figure (`needle`) and a verbatim `quote` around them;
    - or a web entry: URL, `checked_on` and the quote.
 

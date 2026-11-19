@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # The tag ends up in a Dockerfile line / deploy request, so it must be a
+      # The tag ends up in a App/Dockerfile line / deploy request, so it must be a
       # plain Docker tag (no spaces, newlines, quotes, |, & or $) before any
       # later step expands it.
       - name: Validate image tag

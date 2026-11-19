@@ -16,8 +16,8 @@ framework:
 skip-path:
   - node_modules/
   - .next/
-  - Data/
-  - Results/
+  - App/Data/
+  - App/Results/
   - __pycache__/
   - .git/
   - artifacts/
@@ -25,9 +25,9 @@ skip-path:
 
 # Specific checks to skip (with justification)
 skip-check:
-  # CKV_DOCKER_2: HEALTHCHECK — we define healthchecks in docker-compose.yml instead
+  # CKV_DOCKER_2: HEALTHCHECK — we define healthchecks in App/docker-compose.full.yml instead
   - CKV_DOCKER_2
-  # CKV_DOCKER_7: Multiple RUN in Dockerfile — we optimise layers deliberately
+  # CKV_DOCKER_7: Multiple RUN in App/Dockerfile — we optimise layers deliberately
   - CKV_DOCKER_7
   # CKV_DOCKER_3: USER — supervisord is PID 1 to supervise multi-service stack (nginx, redis, qdrant, uvicorn, next.js)
   - CKV_DOCKER_3

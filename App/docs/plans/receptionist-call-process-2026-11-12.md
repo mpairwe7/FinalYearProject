@@ -179,7 +179,7 @@ call.
 updated; new rows for per-process flag overrides and the multi-replica
 remainder); the voice receptionist runbook (process roles, kill switch through
 a secret, the probes, rollback); MONITORING.md (counter and alert); the API
-reference (421 and the header); `.env.example` (`URA_PROCESS_ROLE`,
+reference (421 and the header); `App/.env.example` (`URA_PROCESS_ROLE`,
 `URA_CALLS_PROCESS_URL`, `VOICE_RECEPTIONIST_REPLICAS`); an AGENTS.md invariant
 (a new call route goes on the list); `App/governance/systems/ura-ai-chatbot/manifest.yaml`
 `verified_by` pointers; the review plan's Phase 5 section.

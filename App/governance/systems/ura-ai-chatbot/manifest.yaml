@@ -31,10 +31,10 @@ nist_ai_rmf:
       evidence: "App/governance/systems/ura-ai-chatbot/manifest.yaml"
     - control: "GOVERN 1.2 – Trustworthy AI characteristics prioritised"
       status: "implemented"
-      evidence: "SECURITY.md, App/backend/app/guardrails/"
+      evidence: ".github/SECURITY.md, App/backend/app/guardrails/"
     - control: "GOVERN 2.1 – Roles and responsibilities defined"
       status: "implemented"
-      evidence: "CODEOWNERS"
+      evidence: ".github/CODEOWNERS"
     - control: "GOVERN 4.1 – Organisational practices for AI risk"
       status: "implemented"
       evidence: ".github/workflows/ci-ml-pipeline.yml (quality gates)"
@@ -62,10 +62,10 @@ nist_ai_rmf:
       evidence: "App/ml/pipelines/evaluate_rag.py, App/ml/pipelines/corpus_coverage.py"
     - control: "MEASURE 2.1 – AI system evaluated using test sets"
       status: "implemented"
-      evidence: "App/tests/test_api.py, App/tests/test_ml_pipeline.py, Results/"
+      evidence: "App/tests/test_api.py, App/tests/test_ml_pipeline.py, App/Results/"
     - control: "MEASURE 2.5 – Acquired components assessed"
       status: "implemented"
-      evidence: "requirements.txt (pinned), .github/workflows/security-trivy.yml (Trivy), .github/workflows/ci-ml-pipeline.yml"
+      evidence: "App/requirements.txt (pinned), .github/workflows/security-trivy.yml (Trivy), .github/workflows/ci-ml-pipeline.yml"
     - control: "MEASURE 2.6 – Computational bias assessment"
       status: "partial"
       evidence: >
@@ -125,7 +125,7 @@ iso_42001:
     evidence: "App/governance/systems/ura-ai-chatbot/manifest.yaml"
   - clause: "5.1 Leadership and commitment"
     status: "partial"
-    evidence: "SECURITY.md"
+    evidence: ".github/SECURITY.md"
     gap: "Formal management review record needed"
   - clause: "6.1 Actions to address risks and opportunities"
     status: "implemented"
@@ -135,11 +135,11 @@ iso_42001:
     evidence: "App/ml/configs/training_config.yaml (quality_gates, rag_quality_gates)"
   - clause: "7.2 Competence"
     status: "partial"
-    evidence: "CODEOWNERS"
+    evidence: ".github/CODEOWNERS"
     gap: "Team competency matrix"
   - clause: "8.1 Operational planning and control"
     status: "implemented"
-    evidence: ".github/workflows/ci-ml-pipeline.yml, Dockerfile, docker-compose.yml"
+    evidence: ".github/workflows/ci-ml-pipeline.yml, App/Dockerfile, App/docker-compose.full.yml"
   - clause: "8.4 AI system impact assessment"
     status: "implemented"
     evidence: "App/governance/systems/ura-ai-chatbot/manifest.yaml"
@@ -384,7 +384,7 @@ devsecops_threat_modelling:
     - framework: "OWASP LLM Top 10 (2025 IDs; 2026 crosswalk in this file)"
       tool: "Custom threat registry + Semgrep rules"
       status: "implemented"
-      evidence: "App/threat-model/validate_threats.py, .semgrep/ura-chatbot-rules.yaml"
+      evidence: "App/threat-model/validate_threats.py, App/security/.semgrep/ura-chatbot-rules.yaml"
       description: >
         45 threats mapped to OWASP LLM 2025 categories with evidence-based
         mitigation validation in CI (10/10 LLM IDs; T21 accepted).
@@ -401,7 +401,7 @@ devsecops_threat_modelling:
     - tool: "Semgrep v1.114+"
       type: "Multi-language SAST"
       status: "implemented"
-      evidence: ".github/workflows/devsecops-sast-dast.yml, .semgrep/"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, App/security/.semgrep/"
       languages: ["python", "typescript", "javascript"]
       rule_sets:
         - "Community: OWASP Top 10, security-audit, gitleaks, docker, supply-chain"
@@ -410,7 +410,7 @@ devsecops_threat_modelling:
     - tool: "Bandit v1.8+"
       type: "Python SAST"
       status: "implemented"
-      evidence: ".github/workflows/devsecops-sast-dast.yml, .bandit.yaml"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, App/security/.bandit.yaml"
       focus: "AST-based analysis for Python security anti-patterns"
 
   sca:
@@ -428,7 +428,7 @@ devsecops_threat_modelling:
     - tool: "OWASP ZAP v2.15+"
       type: "DAST baseline scan"
       status: "implemented"
-      evidence: ".github/workflows/devsecops-sast-dast.yml, .zap-rules.tsv"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, App/security/.zap-rules.tsv"
       description: >
         Automated baseline scan against live API in CI. Configured with
         custom rule severity (FAIL for XSS/SQLi, WARN for headers).
@@ -437,8 +437,8 @@ devsecops_threat_modelling:
     - tool: "Checkov"
       type: "IaC compliance"
       status: "implemented"
-      evidence: ".github/workflows/devsecops-sast-dast.yml, .checkov.yaml"
-      frameworks: ["Dockerfile", "GitHub Actions", "docker-compose"]
+      evidence: ".github/workflows/devsecops-sast-dast.yml, App/security/.checkov.yaml"
+      frameworks: ["App/Dockerfile", "GitHub Actions", "docker-compose"]
       benchmarks: ["CIS Docker", "NIST 800-190"]
     - tool: "Trivy config"
       type: "IaC misconfiguration"
@@ -609,7 +609,7 @@ owasp_agentic_2026:
     - id: "ASI05"
       name: "Unexpected Code Execution (RCE)"
       status: "mitigated"
-      evidence: "App/backend/app/documents.py, App/backend/app/document_worker.py, App/backend/app/ephemeral_pdf_sandbox.py, App/backend/app/tax/schedule_sandbox.py, .bandit.yaml"
+      evidence: "App/backend/app/documents.py, App/backend/app/document_worker.py, App/backend/app/ephemeral_pdf_sandbox.py, App/backend/app/tax/schedule_sandbox.py, App/security/.bandit.yaml"
       controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED, document_worker.py with secret env scrubbing, POSIX RLIMITs, SIGKILL escalation, and parent-process pure-Python PDF pre-checks; ephemeral_pdf_sandbox.py — ADR-0008, ADR-0024), capability-restricted Decimal AST schedule sandbox (schedule_sandbox.py), and PDF structural/malware guards"
       verified_by:
         - "App/backend/tests/test_pdf_guards.py"
@@ -812,7 +812,7 @@ aibom_inventory:
       replay: "Hash-verified snapshot per released content hash in App/backend/app/kernel/snapshots/"
       refinement: "Turn traces (kernel misses, uncited figures served; keys only) feed app.kernel.refine proposals to the review queue; nothing applied without a reviewer"
       backends: "In memory (default); optional Neo4j copy behind GraphStore (GRAPH_STORE_BACKEND=neo4j, verified TLS required in production)"
-      verification: "2026-11-08: figures checked against URA's law and guidance; 13 of 14 uncited figures now cited, 6 corrected; evidence ledger App/backend/app/tax/evidence/rate_evidence.json re-checked against Data/pdfs in CI; one figure open (duplicate logbook fee)"
+      verification: "2026-11-08: figures checked against URA's law and guidance; 13 of 14 uncited figures now cited, 6 corrected; evidence ledger App/backend/app/tax/evidence/rate_evidence.json re-checked against App/Data/pdfs in CI; one figure open (duplicate logbook fee)"
       freshness: "One Kampala clock; explicit caveat after the last table; edition-aware precedence ranks contradicting passages last"
     - id: "ura-dense-corpus-vectors"
       role: "The retrieval corpus embedded with multilingual-e5-small for the local pgvector leg (ADR-0034)"
@@ -829,7 +829,7 @@ aibom_inventory:
     - id: "ura-website-crawl"
       role: "Crawled ura.go.ug and parliament.go.ug pages in the retrieval corpus"
       source: "Publisher's live https site only, per App/ml/scripts/data_aug/crawl_policy.py; never an archive"
-      provenance: "Each capture records final URL, HTTP status, raw SHA-256, fetch time and the publisher's dates. Data/crawl/crawl_state.json is the per-URL ledger and run record"
+      provenance: "Each capture records final URL, HTTP status, raw SHA-256, fetch time and the publisher's dates. App/Data/crawl/crawl_state.json is the per-URL ledger and run record"
       release_control: "app.crawl_gate verdict plus a reviewed pull request (ADR-0023)"
       freshness_objective: "A complete crawl merged within 38 days (ura_crawl_last_full_run_timestamp_seconds); a page expires after 45 days unverified"
       pending: "Pages captured before ADR-0023 carry no provenance (source_kind unverified) until the first full crawl re-reads them"

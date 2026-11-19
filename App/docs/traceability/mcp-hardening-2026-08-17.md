@@ -55,7 +55,7 @@ Shipped in five phases in one change set.
 | `MCP_IDEMPOTENCY_TTL_S` | 86400 | in-process fallback if Redis down |
 | `REDIS_URL` | unset | shared replay off |
 
-All of the above are in `.env.example`.
+All of the above are in `App/.env.example`.
 
 ## 5. How to re-verify
 

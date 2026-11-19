@@ -8,7 +8,7 @@ collection that is rebuilt in place.
 ## Normal operation
 
 The Crane image-build workflow runs automatically when a corpus source changes
-under `Data/dataset`, `Data/teacher_qa`, `Data/pdfs`, or `Data/crawl`. It
+under `App/Data/dataset`, `App/Data/teacher_qa`, `App/Data/pdfs`, or `App/Data/crawl`. It
 regenerates the validated JSONL corpus, builds a new embedded Qdrant candidate,
 and promotes its alias only after all batches and the source-hash sentinel have
 been written. If that build fails, the deployed image and its previous index
@@ -24,7 +24,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
   up -d --build qdrant qdrant-indexer qdrant-backup api
 ```
 
-The generated `Data/{faq_jsonl,teacher_qa,pdf_jsonl,crawl_jsonl}` inputs must
+The generated `App/Data/{faq_jsonl,teacher_qa,pdf_jsonl,crawl_jsonl}` inputs must
 exist before the local build. Generate them from a full checkout when source
 documents changed:
 

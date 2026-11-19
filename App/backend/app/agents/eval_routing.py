@@ -140,7 +140,7 @@ class RoutingReport:
 
 
 #: Luganda cases.  Every query without a marked source is taken from
-#: ``Data/eval/rag_eval_lg.jsonl`` — real taxpayer questions — so this
+#: ``App/Data/eval/rag_eval_lg.jsonl`` — real taxpayer questions — so this
 #: set measures the language people actually write, not a translation of
 #: the English set.
 #:

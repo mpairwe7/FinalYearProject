@@ -33,7 +33,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
   ~/bin/gh auth switch --user mpairwe7
   ~/bin/gh api user --jq .login   # must output: mpairwe7
   ```
-- Any new feature flag must land in **all three** files: `App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- Any new feature flag must land in **all three** files: `App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`.
 - Any new FastAPI route must land in `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 - Metrics go through `App/backend/app/observability/analytics.py` (`metrics.inc(...)` / `metrics.observe(...)`) only, with bounded label values.
 
@@ -168,8 +168,8 @@ Incoming Chat Turn (REST `/v1/chat` or SSE `/v1/chat/stream`)
 ### A.1 Commit the Existing Streaming Guard Parity Fix
 The working tree currently has uncommitted fixes in `App/backend/app/rag/pipeline.py` and `App/backend/app/calculator_router.py` that wire `verified_facts_block` and `_case_facts` into the SSE streaming path (`_apply_output_guards`, `generate_retrieval_only`, `_run_chat_turn_events`) and add `"compared to"` / `"versus"` to `_SCENARIO_PLANNER_BYPASS_RE`. Keep those changes and include a regression test in `tests/agents/test_streaming_verified_facts_parity.py`.
 
-### A.2 Feature Flags (`App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, `.env.example`)
-Add two flags to `config/flags.py` (and document in `App/docs/RAG_ARCHITECTURE.md` and `.env.example`):
+### A.2 Feature Flags (`App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, `App/.env.example`)
+Add two flags to `config/flags.py` (and document in `App/docs/RAG_ARCHITECTURE.md` and `App/.env.example`):
 - `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`, default `False` in unit-test registry so offline CI tests stay 100% deterministic; enabled via `FLAG_LIVE_WEB_RESEARCH=true` in `App/docker-compose.gpu-salt.yml` and `configs/prototype.env`): enables live FX lookup (`xe.com` / Google Currency) and tiered official web/PDF research.
 - `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`, default `False` in unit-test registry; enabled via `FLAG_AUTO_QDRANT_WEB_SYNC=true` on the live stack): enables automatic comparison of `ura.go.ug` PDFs against Qdrant, deletion/tombstoning of outdated Qdrant documents, upsert of newer `ura.go.ug` PDFs, and `web_sync_ledger` tracking.
 
@@ -399,6 +399,6 @@ Read `App/backend/app/rag/pipeline.py` (lines `1830–1940`, `2200–2360`, `110
 ### G.2 Documentation & Governance (Same PR as Final Verification)
 - **ADR-0008:** `App/docs/adr/0008-live-web-research-ephemeral-pdf-sandbox-and-self-updating-qdrant.md` (registered in `App/docs/adr/README.md`).
 - **Runbook:** `App/docs/runbooks/live-web-research-and-qdrant-sync.md` (configuring `FLAG_LIVE_WEB_RESEARCH`, `FLAG_AUTO_QDRANT_WEB_SYNC`, inspecting `web_sync_ledger` and `corpus_tombstones`, rolling back an auto-synced document from `App/Data/archive/`).
-- **Update:** `App/docs/RAG_ARCHITECTURE.md`, `App/governance/systems/ura-ai-chatbot/model_card.md`, `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` (closing `G222` live FX / BoU rate gap), and `.env.example`.
+- **Update:** `App/docs/RAG_ARCHITECTURE.md`, `App/governance/systems/ura-ai-chatbot/model_card.md`, `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` (closing `G222` live FX / BoU rate gap), and `App/.env.example`.
 
 **Deliverable / PR #7:** `docs(governance): ADR-0008, live web research & Qdrant auto-sync runbook, and evaluation report`.

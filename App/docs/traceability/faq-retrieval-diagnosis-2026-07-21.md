@@ -4,10 +4,10 @@
 
 | Source | Intended role | Qdrant eligibility |
 | --- | --- | --- |
-| `Data/dataset/ura_*_faqs.csv` | Curated authoritative FAQ answers | Include |
-| `Data/teacher_qa/*.jsonl` | Teacher QA pairs generated from PDFs | Include after schema normalisation and validation |
-| `Data/pdfs/*.pdf` | Upstream material for teacher-QA generation | Exclude |
-| `Data/eval/*.jsonl` | Evaluation/red-team cases | Exclude |
+| `App/Data/dataset/ura_*_faqs.csv` | Curated authoritative FAQ answers | Include |
+| `App/Data/teacher_qa/*.jsonl` | Teacher QA pairs generated from PDFs | Include after schema normalisation and validation |
+| `App/Data/pdfs/*.pdf` | Upstream material for teacher-QA generation | Exclude |
+| `App/Data/eval/*.jsonl` | Evaluation/red-team cases | Exclude |
 
 ## Implemented source-policy correction
 
@@ -29,7 +29,7 @@ is not an input directory and its malformed final record remains excluded.
 - The backend now defaults to `App/Data/dataset` and loads 40 FAQ tags / 487
   valid CSV rows without relying on a parent-directory data mount.
 - Local Qdrant is bound only to `127.0.0.1:6333`. The successful local rebuild
-  writes `Model/bm25_state.json` with a corpus hash and a matching collection
+  writes `App/Model/bm25_state.json` with a corpus hash and a matching collection
   sentinel, preventing sparse-vector queries from using a mismatched corpus.
 
 ## Retrieval quality findings

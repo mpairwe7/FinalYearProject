@@ -212,7 +212,7 @@ def test_the_corpus_reaches_the_vernacular_input_path_at_all():
     # the absence of, so asserting both unconditionally would fail a checkout
     # without it rather than the behaviour under test (CodeRabbit, #487).
     assert "sw" in locales
-    if (REPO_ROOT / "Data" / "eval" / "rag_eval_lg.jsonl").exists():
+    if (REPO_ROOT / "App" / "Data" / "eval" / "rag_eval_lg.jsonl").exists():
         assert "lg" in locales
 
 
@@ -239,7 +239,7 @@ def test_every_reviewed_luganda_question_is_actually_used():
     count reported in a PR or a runbook drifts from the count that runs. Four
     of the twelve were unused when this was first written.
     """
-    corpus = REPO_ROOT / "Data" / "eval" / "rag_eval_lg.jsonl"
+    corpus = REPO_ROOT / "App" / "Data" / "eval" / "rag_eval_lg.jsonl"
     if not corpus.exists():
         pytest.skip("Luganda eval corpus not present in this checkout")
     questions = {

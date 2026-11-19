@@ -98,7 +98,7 @@ defaults are unchanged by this addendum.
 
 ### RAG Quality (English, 21-sample historical table)
 
-The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), including `reg-*` regression ids. Figures below were measured on the original 21-sample slice and are retained for audit continuity. Re-run `App/ml/pipelines/evaluate_rag.py` before quoting them as current.
+The live English eval file is now **30** rows (`App/Data/eval/rag_eval.jsonl`), including `reg-*` regression ids. Figures below were measured on the original 21-sample slice and are retained for audit continuity. Re-run `App/ml/pipelines/evaluate_rag.py` before quoting them as current.
 
 | Metric | Threshold | Achieved |
 |--------|-----------|----------|
@@ -119,7 +119,7 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - Categories: prompt injection, jailbreak, info extraction, PII, harmful content
 - Target: >= 90% block rate per category
 - Tool: `App/scripts/ai_red_team.py`
-- CI gate (2026-11-07, ADR-0029): `Data/eval/redteam_corpus.jsonl` (69 rows: direct, role-play, reframing, paraphrase, obfuscation, encoding, extraction, Kiswahili/Luganda, and retrieved-channel indirect directives) must all be refused, and `Data/eval/guardrail_benign_controls.jsonl` (24 lawful questions and statutory sentences that resemble attacks) must all pass. Measured on the repository's benign sets: 0 of 1,811 taxpayer questions and 0 of 2,285 corpus texts refused or flagged
+- CI gate (2026-11-07, ADR-0029): `App/Data/eval/redteam_corpus.jsonl` (69 rows: direct, role-play, reframing, paraphrase, obfuscation, encoding, extraction, Kiswahili/Luganda, and retrieved-channel indirect directives) must all be refused, and `App/Data/eval/guardrail_benign_controls.jsonl` (24 lawful questions and statutory sentences that resemble attacks) must all pass. Measured on the repository's benign sets: 0 of 1,811 taxpayer questions and 0 of 2,285 corpus texts refused or flagged
 - Limitation: the input and indirect layers recognise attacks, and adaptive attacks defeat recognition (Nasr et al., arXiv:2510.09023). The spotlight fences, output guards, link provenance, figure verification and tool risk tiers are the controls that hold when it is bypassed. No injection-classifier model is deployed (G466)
 
 ### Sovereign Complex Tax Scenario Benchmark (2026-10-20 — `App/evals/complex_scenarios/`)

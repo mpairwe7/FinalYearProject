@@ -167,14 +167,14 @@ def test_dashboard_queries_name_real_series():
 
 
 def test_compose_monitoring_files_exist():
-    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    compose = yaml.safe_load((ROOT / "App" / "docker-compose.full.yml").read_text())
     for name, service in compose["services"].items():
         if "monitoring" not in service.get("profiles", []):
             continue
         for volume in service.get("volumes", []):
             source = volume.split(":", 1)[0]
             if source.startswith("./"):
-                assert (ROOT / source).exists(), f"{name} mounts missing {source}"
+                assert (ROOT / "App" / source).exists(), f"{name} mounts missing {source}"
     assert set(compose["secrets"]) >= {"ura_metrics_token", "alertmanager_webhook_url"}
     grafana_env = " ".join(compose["services"]["grafana"]["environment"])
     assert "GRAFANA_PASSWORD:-}" in grafana_env, "Grafana must not ship a default admin password"

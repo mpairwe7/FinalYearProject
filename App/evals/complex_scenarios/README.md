@@ -36,7 +36,7 @@ This benchmark measures all eight dimensions deterministically without calling a
 
 ## Review Status
 
-All scenarios are authored from the tracked URA statutory corpus (`Data/pdfs/*`, `Data/dataset/*.csv`, and `App/backend/app/tax/data/FY*.json`) with explicit `basis` citations and dynamically evaluated tool figure specs (never hardcoded expected money amounts). Every scenario carries `"reviewed": false` until reviewed by a human tax domain specialist; the runner reports both `reviewed_scenarios` and `unreviewed_scenarios`.
+All scenarios are authored from the tracked URA statutory corpus (`App/Data/pdfs/*`, `App/Data/dataset/*.csv`, and `App/backend/app/tax/data/FY*.json`) with explicit `basis` citations and dynamically evaluated tool figure specs (never hardcoded expected money amounts). Every scenario carries `"reviewed": false` until reviewed by a human tax domain specialist; the runner reports both `reviewed_scenarios` and `unreviewed_scenarios`.
 
 ## Route Mapping
 

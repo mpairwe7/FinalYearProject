@@ -624,7 +624,7 @@ def test_efris_handbooks_en_lg_nyn_sw_chunking_and_vernacular_normalization(tmp_
         "URA-EFRIS-Handbook-FY2026-27-Runyakole.pdf": ("nyn", "1. EFRIS Nenki?"),
         "URA-EFRIS-Handbook-FY2026-27-Swahili.pdf": ("sw", "1.EFRIS ni nini?"),
     }
-    repo_pdf_dir = Path(__file__).resolve().parents[3] / "Data" / "pdfs"
+    repo_pdf_dir = Path(__file__).resolve().parents[3] / "App" / "Data" / "pdfs"
     sub_pdf_dir = tmp_path / "pdfs"
     sub_jsonl_dir = tmp_path / "pdf_jsonl"
     sub_pdf_dir.mkdir()

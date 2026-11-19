@@ -4,7 +4,7 @@
 > **Environment:** Dedicated NVIDIA RTX A6000 48GB (GPU 4), Driver 535.183.01, CUDA 12.2  
 > **Tunnel:** `https://struttingly-nongeological-briella.ngrok-free.dev/api`  
 > **Docker Overlay:** `docker-compose.yml` → `local-retrieval.yml` → `local-sunflower.yml` → `gpu-salt.yml`  
-> **Image Variant:** `app-api:gpu` (`Dockerfile.gpu`, PyTorch 2.11.0+cu128, Torchaudio 2.11.0+cu128)  
+> **Image Variant:** `app-api:gpu` (`App/Dockerfile.gpu`, PyTorch 2.11.0+cu128, Torchaudio 2.11.0+cu128)  
 > **Artifacts Generated:**  
 > - `Results/metrics/400_faqs_ngrok_evaluation_report.json`  
 > - `docs/Reports/data/eval_400_faqs_ngrok.json`  

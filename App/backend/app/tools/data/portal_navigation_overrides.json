@@ -1,6 +1,6 @@
 {
   "schema_version": "2026-10-23",
-  "description": "Declarative URA & Cross-MDA Portal Navigation Knowledge Pack (MOD-GAP-03). Every workflow cites its sources: tracked corpus files under Data/ or official ura.go.ug pages (G246).",
+  "description": "Declarative URA & Cross-MDA Portal Navigation Knowledge Pack (MOD-GAP-03). Every workflow cites its sources: tracked corpus files under App/Data/ or official ura.go.ug pages (G246).",
   "workflows": {
     "mda_ntr_prn_reconciliation": {
       "title": "A paid PRN not reflecting at the agency, and refunds of Non-Tax Revenue paid in error",
@@ -18,9 +18,9 @@
         "Other Non-Tax Revenue paid in error is refunded manually: download Form DT-3008 (e-Services > Download Manual Forms > Domestic > Refund), attach the original bank payment slip, the correct PRN if you re-paid, and the MDA confirmation letter, and deliver it to your local URA domestic tax office."
       ],
       "sources": [
-        "Data/dataset/ura_make_a_payment_faqs.csv",
-        "Data/dataset/ura_tax_refunds_faqs.csv",
-        "Data/dataset/ura_non_tax_revenues_faqs.csv",
+        "App/Data/dataset/ura_make_a_payment_faqs.csv",
+        "App/Data/dataset/ura_tax_refunds_faqs.csv",
+        "App/Data/dataset/ura_non_tax_revenues_faqs.csv",
         "https://ura.go.ug/en/tax-education/tax-refunds/",
         "https://ura.go.ug/en/tax-education/non-tax-revenues/"
       ]

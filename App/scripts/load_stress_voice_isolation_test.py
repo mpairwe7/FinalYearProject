@@ -412,7 +412,7 @@ def run_voice_isolation_benchmark() -> dict[str, Any]:
               f"({g['utilization_pct']:.0f}% util, {g['temperature_c']:.0f}°C)")
 
     # Save Results JSON
-    out_path = BASE_DIR / "Results" / "metrics" / "voice_multilingual_isolation_report.json"
+    out_path = BASE_DIR / "App" / "Results" / "metrics" / "voice_multilingual_isolation_report.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

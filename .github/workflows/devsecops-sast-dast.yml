@@ -71,11 +71,11 @@ jobs:
             --config=p/docker \
             --config=p/supply-chain \
             --config=p/secrets \
-            --config=.semgrep/ \
+            --config=App/security/.semgrep/ \
             --sarif --output=semgrep-results.sarif \
             --severity=WARNING \
-            --exclude='Data/' \
-            --exclude='Results/' \
+            --exclude='App/Data/' \
+            --exclude='App/Results/' \
             --exclude='node_modules/' \
             --exclude='*.lock' \
             --metrics=off \
@@ -118,11 +118,11 @@ jobs:
             --config=p/docker \
             --config=p/supply-chain \
             --config=p/secrets \
-            --config=.semgrep/ \
+            --config=App/security/.semgrep/ \
             --json --output=semgrep-results.json \
             --severity=WARNING \
-            --exclude='Data/' \
-            --exclude='Results/' \
+            --exclude='App/Data/' \
+            --exclude='App/Results/' \
             --exclude='node_modules/' \
             --exclude='*.lock' \
             --metrics=off \
@@ -213,7 +213,7 @@ jobs:
             --severity-level medium \
             --confidence-level medium \
             -x "*/tests/*,*/test_*" \
-            -c .bandit.yaml \
+            -c App/security/.bandit.yaml \
             || true
 
       - name: Upload Bandit SARIF
@@ -234,7 +234,7 @@ jobs:
             --severity-level medium \
             --confidence-level medium \
             -x "*/tests/*,*/test_*" \
-            -c .bandit.yaml \
+            -c App/security/.bandit.yaml \
             || true
 
           FINDINGS=0
@@ -270,10 +270,10 @@ jobs:
       # numpy 2.5, i.e. 3.12+), writes no report, and used to pass vacuously.
       matrix:
         include:
-          - requirements: requirements.txt
+          - requirements: App/requirements.txt
             python: "3.11"          # ci-ml-pipeline.yml PYTHON_VERSION
           - requirements: App/backend/requirements.txt
-            python: "3.14"          # Dockerfile / Dockerfile.gpu base image
+            python: "3.14"          # App/Dockerfile / App/Dockerfile.gpu base image
           - requirements: App/ml/requirements-crawl.txt
             python: "3.11"          # scheduled-crawl.yml PYTHON_VERSION
           # The call receptionist's stack was installed in every image and
@@ -284,7 +284,7 @@ jobs:
             python: "3.11"          # Dockerfile.cranecloud base image (the Space)
             override: "Pillow>=13.0.0"
           - requirements: App/backend/requirements-receptionist.txt
-            python: "3.14"          # Dockerfile / Dockerfile.gpu base image
+            python: "3.14"          # App/Dockerfile / App/Dockerfile.gpu base image
             override: "Pillow>=13.0.0"
     steps:
       - name: Checkout code
@@ -355,7 +355,7 @@ jobs:
 
       # The scan above ends in `|| true` so the summary is always produced.
       # This is the part that actually gates: it fails on advisory IDs that
-      # are not in .security/dependency-advisories.json.
+      # are not in App/security/dependency-advisories.json.
       - name: Gate on new dependency advisories
         run: |
           REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
@@ -397,8 +397,8 @@ jobs:
           output_format: cli,sarif,json
           output_file_path: console,checkov-results.sarif,checkov-results.json
           soft_fail: true
-          skip_path: node_modules/,Data/,Results/,.next/
-          config_file: .checkov.yaml
+          skip_path: node_modules/,App/Data/,App/Results/,.next/
+          config_file: App/security/.checkov.yaml
 
       - name: Upload Checkov SARIF
         if: always() && hashFiles('checkov-results.sarif') != ''
@@ -481,7 +481,7 @@ jobs:
         uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
           target: "http://localhost:8087"
-          rules_file_name: ".zap-rules.tsv"
+          rules_file_name: "App/security/.zap-rules.tsv"
           cmd_options: >-
             -J report_json.json
             -w report_md.md
@@ -756,7 +756,7 @@ jobs:
             | **Semgrep** | Multi-language SAST | ${semgrepErrors} error(s), ${semgrepWarnings} warning(s) | ${semgrepErrors > 0 ? '❌' : '✅'} |
             | **Bandit** | Python AST SAST | ${banditFindings} finding(s) | ${banditFindings > 0 ? '⚠️' : '✅'} |
             | **pip-audit** | Dependency SCA | Gated against advisory baseline | ✅ |
-            | **Checkov** | IaC / Dockerfile | ${checkovFailed} issue(s) | ${checkovFailed > 0 ? '⚠️' : '✅'} |
+            | **Checkov** | IaC / App/Dockerfile | ${checkovFailed} issue(s) | ${checkovFailed > 0 ? '⚠️' : '✅'} |
             | **Threat Model** | Registry & PyTM | ${openCritical} open critical | ${openCritical > 0 ? '❌' : '✅'} |
 
             ${semgrepErrors > 0 || openCritical > 0 ? `

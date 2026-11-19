@@ -63,7 +63,7 @@ uv pip install -r App/backend/requirements.txt
 ```bash
 cd App/frontend
 bun install
-cd ../..
+cd ./../..
 ```
 
 ### 4. Secret Scanning & Pre-commit Hooks
@@ -77,17 +77,17 @@ pip install pre-commit detect-secrets ggshield
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-This installs 4-layer defence-in-depth secret scanning (see [SECURITY.md](../../SECURITY.md#secret-scanning-defence-in-depth)):
+This installs 4-layer defence-in-depth secret scanning (see [.github/SECURITY.md](../../.github/SECURITY.md#secret-scanning-defence-in-depth)):
 1. **TruffleHog v3** — verified credential detection (800+ detectors)
 2. **ggshield** — GitGuardian ML-based detection (requires `GITGUARDIAN_API_KEY`)
-3. **Gitleaks v8** — regex + entropy with custom URA rules (`.gitleaks.toml`)
-4. **detect-secrets** — baseline-aware entropy scanner (`.secrets.baseline`)
+3. **Gitleaks v8** — regex + entropy with custom URA rules (`App/security/.gitleaks.toml`)
+4. **detect-secrets** — baseline-aware entropy scanner (`App/security/.secrets.baseline`)
 
 ### 5. Environment Configuration
 
 ```bash
 # Copy example environment file
-cp .env.example .env
+cp App/.env.example .env
 
 # Edit with your credentials
 nano .env
@@ -761,7 +761,7 @@ FinalYearProject/
 │       ├── package.json
 │       └── next.config.mjs # CSP, security headers, API proxy
 │
-├── Data/                    # Training Data
+├── App/Data/                    # Training Data
 │   ├── dataset/            # CSV FAQ files (41 files)
 │   ├── pdfs/               # Reference PDFs (45 files)
 │   ├── TTT/                # Translation corpus
@@ -789,12 +789,12 @@ FinalYearProject/
 │       └── data_aug/             # Corpus chunking/cleaning used by App/backend's
 │                                  # PDF/crawl export tooling
 │
-├── Model/                   # Trained Models
+├── App/Model/                   # Trained Models
 │   ├── tag_classifier.joblib
 │   ├── label_encoder.joblib
 │   └── manifest.json
 │
-├── Results/                 # Training Outputs
+├── App/Results/                 # Training Outputs
 │   ├── metrics/            # JSON metrics
 │   ├── plots/              # PNG visualizations
 │   └── reports/            # CSV reports
@@ -927,10 +927,10 @@ python App/ml/pipelines/quality_gates.py
 ### Evaluate RAG Pipeline
 ```bash
 # English eval set
-python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl
+python -m ml.pipelines.evaluate_rag --eval-set App/Data/eval/rag_eval.jsonl
 
 # Luganda eval set
-python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval_lg.jsonl
+python -m ml.pipelines.evaluate_rag --eval-set App/Data/eval/rag_eval_lg.jsonl
 ```
 
 ### Run Governance Check

@@ -1,7 +1,7 @@
 """Runyankole routing patterns — conservative seed.
 
 ``corpus_backed=False``. Unlike Luganda, there is no Runyankole eval
-corpus in ``Data/eval/``, so this table is assembled from vocabulary
+corpus in ``App/Data/eval/``, so this table is assembled from vocabulary
 rather than from observed taxpayer text. It contains only terms whose
 meaning is unambiguous, and it deliberately stops short of the
 learning-intent and greeting coverage the Luganda table carries —

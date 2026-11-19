@@ -443,7 +443,7 @@ def main():
         },
     }
 
-    out_path = Path("Results/metrics/senior_qa_ngrok_benchmark_report.json")
+    out_path = Path("App/Results/metrics/senior_qa_ngrok_benchmark_report.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(master_report, indent=2), encoding="utf-8")
     log(f"Detailed Senior QA Report saved to: {out_path}")

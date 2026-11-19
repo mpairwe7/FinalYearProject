@@ -329,7 +329,7 @@ def main() -> int:
         print("=" * 80 + "\n")
 
         # Save results
-        report_path = "Results/metrics/enterprise_memory_and_long_horizon_regression.json"
+        report_path = "App/Results/metrics/enterprise_memory_and_long_horizon_regression.json"
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump({
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),

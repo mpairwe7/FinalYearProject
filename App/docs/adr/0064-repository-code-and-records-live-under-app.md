@@ -2,11 +2,13 @@
 
 ## Status
 
-Accepted, 2026-11-18. Carried out in three phases, one pull request each.
+Accepted, 2026-11-18. Carried out in four phases, one pull request each.
 
 - Phase A (done): remove the root pointer folders and the fine-tuning code, and move `configs/`.
-- Phase B (done): remove the byte-identical duplicate PDFs from `Data/pdfs`.
+- Phase B (done): remove the byte-identical duplicate PDFs from `App/Data/pdfs`.
 - Phase C (done): move the root code and record folders under `App/`.
+- Phase D (done): move the root data, build and security files under `App/`, and
+  remove the duplicate Trivy steps.
 
 ## Context and Problem Statement
 
@@ -24,10 +26,20 @@ Other code sat at the root although the application lives in `App/`:
   `App/evals/`, `App/governance/`, `App/plugins/`, `App/monitoring/`, `App/infra/` and
   `App/threat-model/`
 
-`Data/pdfs` also stored 11 PDFs twice under two names.
+`App/Data/pdfs` also stored 11 PDFs twice under two names.
 
 The service owner asked on 2026-11-18 for the root redundancy to be resolved into
 `App/`.
+
+After phase C the root still held `Data/`, `Model/`, `Results/` and `Artifacts/`,
+the Dockerfiles and Compose files, `requirements.txt`, `pyproject.toml`, the
+`Caddyfile`, `.env.example`, and the configuration of nine security tools. The corpus
+was split in two: the tracked FAQ CSVs, PDFs and crawl sat in the root `Data/`, and
+the corpora derived from them sat in `App/Data`, so the image build copied one into
+the other before indexing. `frontend-deploy.yml` also ran its own Trivy filesystem
+scan and SBOM, which `security-trivy.yml` already runs. The service owner asked for
+the remaining root files and flows to move into `App/` too, and for duplicate files
+and workflows to go.
 
 ## Considered Options
 
@@ -52,7 +64,7 @@ Option 1, chosen by the service owner over the narrower option 2.
   (git-ignored) rather than the deleted `fine-tuning/adapters`. The download,
   export and inference scripts in `App/ml/scripts`, and `App/evals/export_preferences.py`,
   stay.
-- **Phase B.** `Data/pdfs` held 11 documents twice under two names. The export
+- **Phase B.** `App/Data/pdfs` held 11 documents twice under two names. The export
   already chunked only the first name in sort order and recorded the other as
   `duplicate_of`, so the copies removed are exactly the ones it skipped: the indexed
   corpus and every passage's source name stay the same. `crawl_state.json`'s
@@ -81,6 +93,45 @@ Option 1, chosen by the service owner over the narrower option 2.
   project root in the image), and three backend imports use it. It also covers the
   CI coverage and `PYTHONPATH` settings, and three shell scripts whose root lookup
   moved one level down. A second run finds nothing to move.
+- **Phase D.** The same script, now driven by one table of moves, moves 29 root names
+  (76 entries):
+  - `Data/` merges into `App/Data/`. Its README becomes the "Source corpora" section
+    of `App/Data/README.md`. `Model/`, `Results/` and `Artifacts/` move to `App/`.
+  - `.semgrep/`, `.security/` and the nine tool configurations move to `App/security/`.
+  - The Dockerfiles, Compose files, requirements files, `pyproject.toml`, `Caddyfile`
+    and `.env.example` move to `App/`. The root `docker-compose.yml` becomes
+    `App/docker-compose.full.yml`, because `App/docker-compose.yml` is a different stack.
+  - `SECURITY.md`, `CONTRIBUTING.md` and `CODEOWNERS` move to `.github/`, where GitHub
+    also reads them.
+
+  Four moved names also exist under `App/` (`Dockerfile`, `requirements.txt`,
+  `pyproject.toml`, `docker-compose.yml`). The script rewrites those names only in
+  files that address the root: root files, `.github/`, `App/governance/` and
+  `App/threat-model/`. It rebases the `./` paths in moved Compose files, the quoted
+  paths in `pyproject.toml`, and the anchored patterns in `CODEOWNERS` and the ignore
+  files. Three more rules cover what a path rule cannot see:
+  - Scripts run from the root wrote `Results/...` and `Data/eval/feedback`, outputs
+    that do not exist until a run makes them. Their 29 defaults now name `App/`.
+  - `APP_DATA_ROOT` now names the tracked corpora in a checkout. Seven backend paths
+    that joined `PROJECT_ROOT / "Data"` use it, and the BM25, `Results` and
+    `Artifacts` lookups use `CODE_ROOT`. Both are `/app` paths in the image, as before.
+  - Tools that read their configuration from the working directory are told where it
+    is. Each Trivy step names `App/security/trivy.yaml`, which names its ignore file.
+    Coverage runs with `--cov-config=App/pyproject.toml`, and its omit patterns match
+    at any depth.
+
+  The build no longer copies `Data/` into `App/Data` before indexing.
+  `frontend-deploy.yml` loses its Trivy scan, SARIF upload and SBOM steps, which
+  `security-trivy.yml` already runs. `.gitignore` ignores `App/Model/*` except the
+  three tracked files: `.gitkeep`, `README.md` and `bm25_state.json`. Compose in
+  `App/` mounts the adapters from `./Model/adapters`. The full stack reads the root
+  `.env`.
+
+  The rate tables cite their source PDFs by path. Those citations now name
+  `App/Data/pdfs/`, which changes the kernel's content hash. Release 1.2.3 records
+  that change as an engineering baseline, the same status as 1.2.2. The graph is
+  unchanged (335 nodes, 618 edges) and no rate changed. The held-out complex-scenario
+  set names corpus files too, so its recorded digest is recomputed.
 
 ## Consequences
 
@@ -94,6 +145,17 @@ Option 1, chosen by the service owner over the narrower option 2.
 - The image build's path filter names only `App/backend/**`, `App/frontend/**` and
   the deploy files, so a change under `App/docs` or `App/governance` does not rebuild
   the Space. The image still copies `ml/scripts/lang_id.py`, now from `App/ml/`.
+- After phase D the root holds only what a tool reads from there: `.github/`, the
+  ignore files, `.pre-commit-config.yaml`, `.coderabbit.yaml` and `.gitguardian.yaml`.
+  It also holds the readme, the licence and the agent guides.
+- `App/` still has two Compose stacks, `docker-compose.yml` and
+  `docker-compose.full.yml`. A follow-up merges them. Until then the bare
+  `docker compose` commands in `App/docs/DEPLOYMENT.md` mean
+  `-f App/docker-compose.full.yml`.
+- A checkout now has `App/Model/bm25_state.json`, as the image does, so
+  `_simple_search` scores with BM25 locally too. With it, one Kiswahili FAQ row
+  does not retrieve itself (G672). The acronym test runs without the state, as it
+  always had.
 
 ## Confirmation
 
@@ -103,3 +165,7 @@ Option 1, chosen by the service owner over the narrower option 2.
   from the root, and `pytest tests/` from `App/backend`.
 - The link check finds no new broken link.
 - The governance and threat-model gates pass.
+- After phase D, both suites pass the same way. `python -m app.kernel.release check`
+  passes. `docker compose config` resolves the full stack with its monitoring
+  profiles, and the full stack with the MCP overlay. A second run of the script
+  finds nothing to move.

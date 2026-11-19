@@ -1,4 +1,4 @@
-# CODEOWNERS – URA Chat Bot MLOps Pipeline
+# .github/CODEOWNERS – URA Chat Bot MLOps Pipeline
 # Each line is a file pattern followed by one or more owners.
 # Order matters: last matching pattern takes precedence.
 
@@ -6,10 +6,10 @@
 *                       @mpairweLandwind
 
 # Training data (explicit review for data poisoning defence)
-/Data/                  @mpairweLandwind
+/App/Data/                  @mpairweLandwind
 
 # ML quality gates and corpus tooling
-/ml/                    @mpairweLandwind
+/App/ml/                    @mpairweLandwind
 
 # Backend API
 /App/backend/           @mpairweLandwind
@@ -21,8 +21,8 @@
 /.github/               @mpairweLandwind
 
 # Documentation
-/docs/                  @mpairweLandwind
+/App/docs/                  @mpairweLandwind
 
 # Security-sensitive files
-SECURITY.md             @mpairweLandwind
-.env.example            @mpairweLandwind
+.github/SECURITY.md             @mpairweLandwind
+App/.env.example            @mpairweLandwind

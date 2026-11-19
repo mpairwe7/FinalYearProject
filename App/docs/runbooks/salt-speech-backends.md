@@ -126,7 +126,7 @@ to begin with — the ids work despite it, not because of it).
 > newer NVIDIA driver on the host … not a build-time flag") is wrong, and the
 > torch downgrade it rejects is what actually shipped. CUDA *minor-version
 > compatibility* means any cu12x wheel runs on any >=525 driver, so pinning a
-> matched `torch`/`torchaudio` **2.11.0+cu128** pair in `Dockerfile.gpu` (GPU
+> matched `torch`/`torchaudio` **2.11.0+cu128** pair in `App/Dockerfile.gpu` (GPU
 > image only — `requirements.txt` is untouched) fixes it with no driver
 > change. Measured in the built image on this same host:
 > `torch 2.11.0+cu128`, `cuda_available True`, `NVIDIA RTX A6000`. Both SALT
@@ -167,7 +167,7 @@ That CPU number is not a code problem — it is what happens when
 `torch.cuda.is_available()` is `False`. On this exact sandbox, it is: the
 driver reports CUDA 12.2 (`nvidia-smi`'s top field), and
 `App/backend/requirements.txt` hard-pins `torch==2.12.1`, whose Linux wheel
-(from default PyPI — see the long comment in `Dockerfile.gpu` on why an
+(from default PyPI — see the long comment in `App/Dockerfile.gpu` on why an
 `--extra-index-url` can't override this) bundles CUDA 13.0-generation
 runtime libs that this driver is too old to run. No error, no crash —
 `torch.cuda.is_available()` just silently returns `False` and every request
@@ -181,7 +181,7 @@ docker run --rm --gpus all --entrypoint python ura-chatbot-api:gpu \
 
 If that prints `False`, the fix is a newer NVIDIA driver on the host (or
 waiting for `requirements.txt`'s torch pin to move to a version the host's
-driver already supports) — not a build-time flag. `Dockerfile.gpu` briefly
+driver already supports) — not a build-time flag. `App/Dockerfile.gpu` briefly
 carried a `TORCH_CUDA_TAG` build-arg meant to let operators target an
 older-driver host by picking a different `--extra-index-url`; it was built
 and tested and turned out to change nothing, because pip/uv can only
@@ -255,7 +255,7 @@ ASR model above:
 
 ### Enabling it
 
-**Baked in (2026-08-20), for GPU deployments — `Dockerfile.gpu`.** A
+**Baked in (2026-08-20), for GPU deployments — `App/Dockerfile.gpu`.** A
 separate Dockerfile at the repo root does everything below automatically at
 build time: pinned-commit checkout, its own dependency stack, and the
 torchaudio fix in the next section. `SPARK_TTS_ENABLED=true`,
@@ -263,7 +263,7 @@ torchaudio fix in the next section. `SPARK_TTS_ENABLED=true`,
 in the image.
 
 ```bash
-docker build -f Dockerfile.gpu -t ura-chatbot-api:gpu .
+docker build -f App/Dockerfile.gpu -t ura-chatbot-api:gpu .
 docker run --gpus all -p 8000:8000 --env-file .env ura-chatbot-api:gpu
 ```
 
@@ -307,9 +307,9 @@ needed for that half.
 
 ### HISTORICAL — the torchaudio/CUDA mismatch and its old `.so` fix
 
-> **Superseded 2026-09-04 — `Dockerfile.gpu` no longer deletes that file.**
+> **Superseded 2026-09-04 — `App/Dockerfile.gpu` no longer deletes that file.**
 > The mismatch analysed below is real, but it only arises when torchaudio is
-> installed *unpinned* next to `torch==2.12.1`. `Dockerfile.gpu` now strips
+> installed *unpinned* next to `torch==2.12.1`. `App/Dockerfile.gpu` now strips
 > requirements.txt's torch line and installs `torch==2.11.0`/
 > `torchaudio==2.11.0` together from the cu128 index, so both halves come from
 > one source at one CUDA generation and there is nothing to reconcile. The
@@ -324,7 +324,7 @@ Only relevant if you install sparktts's dependencies *alongside* this
 project's own pinned `torch==2.12.1` instead of following spark-tts's own
 `requirements.txt` exactly as shown above (which pins a self-consistent
 `torch==2.5.1`/`torchaudio==2.5.1` pair and does not hit this). That is
-what `Dockerfile.gpu` does, deliberately — installing spark-tts's
+what `App/Dockerfile.gpu` does, deliberately — installing spark-tts's
 `requirements.txt` verbatim would downgrade the project's own torch and
 transformers.
 
@@ -356,7 +356,7 @@ typo, a real currently-unresolvable-by-pinning gap upstream.
 to return `False` (a supported "extension unavailable" degraded mode,
 written for pex-style deployments) when the compiled `.so` file is simply
 *absent* — it only raises when the file is present but fails to load. So
-`Dockerfile.gpu`'s builder stage deletes it:
+`App/Dockerfile.gpu`'s builder stage deletes it:
 
 ```dockerfile
 RUN rm -f /opt/venv/lib/python3.11/site-packages/torchaudio/lib/_torchaudio*.so
@@ -453,7 +453,7 @@ anything user-facing:
    the existing Sunbird-cloud / edge-tts tiers for a side-by-side comparison
    on the same question bank (see `App/docs/runbooks/corpus-coverage.md`).
 
-### Verification status — `Dockerfile.gpu` bake-in (2026-08-20)
+### Verification status — `App/Dockerfile.gpu` bake-in (2026-08-20)
 
 The 2026-08-19 run above verified `spark_tts_salt.py`'s logic in an
 isolated venv with a driver-matched torch/torchaudio pair. This pass
@@ -478,7 +478,7 @@ above was needed at all. Layered verification, each step on the real
    documented `RuntimeError: The NVIDIA driver on your system is too old`,
    not a new failure mode.
 4. **Closing the loop:** ran the exact pinned-commit `sparktts` source
-   `Dockerfile.gpu` bakes in — `BiCodecTokenizer` construction and a real
+   `App/Dockerfile.gpu` bakes in — `BiCodecTokenizer` construction and a real
    `detokenize()` forward pass, real weights (`unsloth/Spark-TTS-0.5B`,
    public) — in the separate driver-matched environment from step 1 of the
    2026-08-19 run, since that's the only way to get genuine CUDA on this
@@ -509,7 +509,7 @@ Spark-TTS-SALT `/v1/tts` request's timing under CPU fallback:
 
 ### Both SALT tiers on GPU, end to end (2026-09-04)
 
-The CPU fallback the 2026-08-22 run accepted is gone. With `Dockerfile.gpu`'s
+The CPU fallback the 2026-08-22 run accepted is gone. With `App/Dockerfile.gpu`'s
 matched cu128 torch/torchaudio pin, `docker-compose.gpu-salt.yml` runs
 Whisper-SALT, Spark-TTS-SALT, `bge-m3` and the reranker all on the pinned
 card. Brought up on GPU 7 and exercised over the public tunnel; full record in

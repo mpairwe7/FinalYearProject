@@ -19,14 +19,14 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ._root import PROJECT_ROOT
+from ._root import APP_DATA_ROOT
 
 logger = logging.getLogger(__name__)
 
 SEED_PATH = Path(
     os.getenv(
         "PROTOTYPE_SEED_PATH",
-        str(PROJECT_ROOT / "Data" / "eval" / "prototype_seed.json"),
+        str(APP_DATA_ROOT / "eval" / "prototype_seed.json"),
     )
 )
 

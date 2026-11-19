@@ -33,7 +33,7 @@ Audience: a **new** coding session (any model) with no memory of the conversatio
 - Every change goes on a feature branch → PR against `dev` → CI green → address **every CodeRabbit comment** (threads *and* review-body nitpicks) → merge. Never push to `dev`/`main` directly.
 - Commits: conventional commits, author `mpairwe7`, **no `Co-Authored-By` trailers** (also pass an explicit `commit_message` when squash-merging through the API, otherwise GitHub adds one).
 - Use the real GitHub CLI at `~/bin/gh` (bare `gh` is a stub). Check `~/bin/gh auth status`; switch with `~/bin/gh auth switch --user mpairwe7` only if needed.
-- A new flag must land in **all three**: `App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, `.env.example`.
+- A new flag must land in **all three**: `App/backend/app/config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, `App/.env.example`.
 - New FastAPI routes must be added to `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`). This plan adds **no** routes; if you add one, update that file.
 - Answers are generated in **English** and localized in exactly one place (`localize_reply`). Every translation goes through `app/mt.py` (cache + `figures_survived`). Do not add a second translation path.
 - A new model client must wrap its HTTP call in `tracing.llm_call(...)` and report the provider's `usage`. Metrics go through `analytics.metrics` only, with bounded label values.
@@ -195,7 +195,7 @@ Create `App/evals/complex_scenarios/` containing:
 1. Write messages as a real taxpayer would: plain words, messy numbers ("6k dollars", "UGX 1.5m", "about 90 million a year"), sometimes misspellings. **Never** copy wording from regexes, tool names, FAQ questions, or the corpus.
 2. **Never hardcode an expected money figure.** Express expected figures as a **tool call spec** that the scorer evaluates against the current rate table at run time (schema in §12.4). For scenarios that need a tool that does not exist yet (BIK, residency), still write the spec; the scorer marks it `tool_missing` at baseline. That is the honest baseline.
 3. Expected facts must be checkable: `must_include` uses alternatives (`{"any": ["resident", "183 days"]}`); `must_not_include` lists known-wrong claims (e.g. `"subtracted from"` for BIK, `"flat rate"` for resident PAYE).
-4. For every legal fact you encode, add a `basis` field quoting the corpus passage (file + section) it comes from. **Use only the corpus** (`App/Data/pdf_jsonl/*.jsonl`, `Data/dataset/*.csv`) and `App/backend/app/tax/data/FY*.json`. If you cannot find a source, leave the fact out.
+4. For every legal fact you encode, add a `basis` field quoting the corpus passage (file + section) it comes from. **Use only the corpus** (`App/Data/pdf_jsonl/*.jsonl`, `App/Data/dataset/*.csv`) and `App/backend/app/tax/data/FY*.json`. If you cannot find a source, leave the fact out.
 5. Put the 8 probes from §1 / memory `accuracy-eval-2026-10-18` in **dev**, not held-out: we have already looked at them.
 6. Set `"reviewed": false` on every scenario. Tell the user that a human with tax knowledge should review the held-out expectations; the final report must state how many were reviewed.
 
@@ -323,7 +323,7 @@ Add a new overlay `App/docker-compose.reasoner.yml` (do not edit `docker-compose
 Document the bring-up command in a runbook (Phase I). Do **not** bring it up against the live stack yet. Verify it with the isolated recipe in §10.2.
 
 ### C.2 Sovereign-mode guard
-- New setting `SOVEREIGN_MODE` (env, default `false` in development, **`true` in the production profile and in `configs/prototype.env`**). Document it in `.env.example`.
+- New setting `SOVEREIGN_MODE` (env, default `false` in development, **`true` in the production profile and in `configs/prototype.env`**). Document it in `App/.env.example`.
 - Startup check in `app/production_readiness.py` (it already hosts production gap gates; follow its pattern): when `SOVEREIGN_MODE=true`, **fail startup** if any of these is true:
   - `flags.is_enabled("cloudflare_fallback")`
   - `LLM_FALLBACK_BACKEND` non-empty
@@ -392,7 +392,7 @@ Root cause (D8): `max_tokens` too small, and `finish_reason` is thrown away; the
 
 ### E.3 Budgets
 - Per tier: T1 `max_tokens` 768 (env `LLM_MAX_TOKENS`, raise the default from 512), T3 `REASONER_MAX_TOKENS` 1536 (nothink) / 4096 total (think). Respect `_fit_to_context`.
-- Raise the live env `LLM_MAX_TOKENS` from 512 to 768 in `App/docker-compose.local-sunflower.yml` (the `api` block), `configs/prototype.env`, `.env.example`.
+- Raise the live env `LLM_MAX_TOKENS` from 512 to 768 in `App/docker-compose.local-sunflower.yml` (the `api` block), `configs/prototype.env`, `App/.env.example`.
 
 ### E.4 Replace the punctuation heuristic as the decision maker
 - `service._looks_truncated` stays only as a fallback when `finish_reason` is unavailable (non-vLLM backends). In `_call_llm_with_deadline` (≈ line 1048–1190), decide on `finish_reason` first. Delete the "try cloud fallback because it looks truncated" branch when `SOVEREIGN_MODE` is on; replace it with the E.2 continuation.
@@ -528,7 +528,7 @@ Tests: `App/tests/agents/test_scenario_planner.py` — the §1 case end-to-end w
 - In `retriever.apply_preference_boost` (≈ line 462) and `query.extract_retrieval_preferences` (≈ line 1382):
   - add `prefer["demote_sector_guides"] = True` unless the query names a sector (agriculture/farming, hotel/accommodation/tourism, mining, petroleum, construction, NGO, transport …). Demote hits whose `source` matches the sector-guide filename patterns (`GUIDE-TO-TAXATION-OF-THE-.*-SECTOR`, `Hotel-and-Accomodation`, …) by **−0.06**. A soft demotion, never a filter. Put the pattern list in one constant.
   - add topic → preferred-section hints: employment/PAYE/BIK/residency → handbook sections containing "Employment Income", "Benefits in Kind", "Resident" and `ura_employment_income_faqs.csv` (+0.05); VAT → `vat` FAQ and VAT Act sections, and so on. Drive it from a small dict.
-- Measure with `App/scripts/eval_retrieval_multilingual.py` and the `Data/eval/rag_eval.jsonl` gate. **Any Hit@1 drop > 1 point fails the change; tune the numbers or drop the change.** (Memory: BM25 retuning made things worse before; measure, don't assume.)
+- Measure with `App/scripts/eval_retrieval_multilingual.py` and the `App/Data/eval/rag_eval.jsonl` gate. **Any Hit@1 drop > 1 point fails the change; tune the numbers or drop the change.** (Memory: BM25 retuning made things worse before; measure, don't assume.)
 
 ### G.4 Prompt for complex answers
 - In the system-prompt builder (`llm._build_messages` / `SYSTEM_PROMPT` in `app/rag/generator.py`), add a **complex-answer contract**, used only when the verified-facts block is present or the tier is T3:
@@ -599,7 +599,7 @@ If a bar fails: report it honestly with the per-scenario failures. Fixing it mea
 - New runbook `App/docs/runbooks/reasoning-tier-and-complex-eval.md`: bring-up/down of `vllm-reasoner`, GPU choice, health checks, how to run the bake-off and the complex-scenario eval, the held-out rule, rollback (`FLAG_MODEL_TIERING=false`).
 - `App/docs/GAPS_AND_AGENTIC_ROADMAP.md`: add G213+ entries (the last id is G212) for D1–D8, each linked to its PR, plus follow-ups: housing-rule interpretation review, the BoU discount rate source, single-model consolidation (contender C), heads still without tools, human review of the held-out expectations.
 - `App/governance/systems/ura-ai-chatbot/manifest.yaml` and the AIBOM / model inventory (search `grep -rln "Sunflower-Qwen3.5-9B" governance docs`): add the reasoner model with licence, sha and hosting = local.
-- `.env.example`, `configs/prototype.env`: new env vars (`REASONER_*`, `SOVEREIGN_MODE`, `EVAL_DEBUG` documented as dev-only, `LLM_MAX_TOKENS=768`).
+- `App/.env.example`, `configs/prototype.env`: new env vars (`REASONER_*`, `SOVEREIGN_MODE`, `EVAL_DEBUG` documented as dev-only, `LLM_MAX_TOKENS=768`).
 - `App/evals/AGENTS.md` and `App/evals/README.md`: add the complex-scenario set row.
 
 ### I.2 PR order (each: branch → PR to `dev` → CI → CodeRabbit → merge)
@@ -620,13 +620,13 @@ After each push, re-check CodeRabbit threads **and** review-body comments (they 
 
 ### 12.1 Legal facts to encode — quoted from the corpus (verify against the file before use)
 
-Note: `App/Data/*` (including `App/Data/pdf_jsonl/`) is **gitignored generated state**. The tracked sources are under `Data/` (`Data/pdfs`, `Data/dataset`, …). On a fresh checkout, seed `App/Data` from `Data/` (see `Data/README.md` and `App/docs/runbooks/corpus-coverage.md`) before quoting from it or measuring retrieval. In `basis` fields, cite the tracked source file name.
+Note: `App/Data/*` (including `App/Data/pdf_jsonl/`) is **gitignored generated state**. The tracked sources are under `App/Data/` (`App/Data/pdfs`, `App/Data/dataset`, …). On a fresh checkout, seed `App/Data` from `App/Data/` (see `App/Data/README.md` and `App/docs/runbooks/corpus-coverage.md`) before quoting from it or measuring retrieval. In `basis` fields, cite the tracked source file name.
 
 **(a) Residency** — `App/Data/pdf_jsonl/TAXATION-HANDBOOK-FY-2025-26-1.jsonl` (definitions):
 > "A resident individual is a person who has a permanent home in Uganda; or is present in Uganda: for a period of 183 days or more in any twelve (12) months period that commences or ends during the year of income; or during the year of income and in each of the two preceding years of income, for periods averaging 122 days in each such year of income; or is an employee or official of the government of Uganda posted abroad during the year of income."
 > "Year of Income — means the period of twelve months ending on June 30 …"
 
-Also `Data/dataset/ura_exchange_of_information_faqs.csv` (AEOI residency FAQ). Resident persons are taxed on worldwide income, non-residents on Uganda-source income (`doing_business_in_uganda_taxation.pdf`). Section numbering: the corpus cites the Income Tax Act as **Cap 338** (2023 revised edition) in FY2025-26 documents and **Cap 340** in older ones. Cite the Cap the source uses.
+Also `App/Data/dataset/ura_exchange_of_information_faqs.csv` (AEOI residency FAQ). Resident persons are taxed on worldwide income, non-residents on Uganda-source income (`doing_business_in_uganda_taxation.pdf`). Section numbering: the corpus cites the Income Tax Act as **Cap 338** (2023 revised edition) in FY2025-26 documents and **Cap 340** in older ones. Cite the Cap the source uses.
 
 **(b) Benefits in kind** — same handbook, §12.2.3 "Valuation of Benefits in Kind":
 > General rule: "the value of a benefit in kind is the fair market value of the benefit on the date it is taken into account for tax purposes less any amount paid by the employee for the benefit."

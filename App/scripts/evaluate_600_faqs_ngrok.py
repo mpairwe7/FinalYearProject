@@ -58,7 +58,7 @@ DEFAULT_BASE_URL = os.getenv(
     "https://struttingly-nongeological-briella.ngrok-free.dev/api",
 )
 DEFAULT_CHECKPOINT = "docs/Reports/data/eval_600_checkpoint.json"
-DEFAULT_OUTPUT_REPORT = "Results/metrics/600_faqs_ngrok_evaluation_report.json"
+DEFAULT_OUTPUT_REPORT = "App/Results/metrics/600_faqs_ngrok_evaluation_report.json"
 DEFAULT_DOCS_REPORT = "docs/Reports/data/eval_600_faqs_ngrok.json"
 
 
