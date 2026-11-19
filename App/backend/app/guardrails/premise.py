@@ -533,7 +533,7 @@ _ABOLISHED_CLAIMS = tuple(
 # A question about a hypothetical is not a claim: "if VAT were abolished, would prices fall?"
 _HYPOTHETICAL = re.compile(r"\b(?:if|suppose|supposing|imagine|hypothetically|were\s+to)\b", re.IGNORECASE)
 # One taxpayer's account is not the tax: "my PAYE was removed", "my corporate income tax".
-_PERSONAL = re.compile(r"\b(?:my|our|your|his|her|their)\s+(?:\S+\s+)?$", re.IGNORECASE)
+_POSSESSIVES = frozenset({"my", "our", "your", "his", "her", "their"})
 _YEAR = re.compile(r"\b(?:19|20)\d\d\b")
 _CLAUSE_MARKS = ".?!;\n"
 
@@ -565,7 +565,10 @@ def check_abolished_claim(query: str) -> FalsePremiseResult:
             ends = [i for i in (text.find(mark, match.end()) for mark in _CLAUSE_MARKS) if i != -1]
             clause = text[clause_start : min(ends, default=len(text)) + 1]
             before = text[clause_start : match.start()]
-            if _HYPOTHETICAL.search(before) or _PERSONAL.search(before):
+            # The possessive may sit one word back ("my corporate income tax"); a word
+            # check, not a regex anchored at the end of user text (CodeQL py/polynomial-redos).
+            last_words = before[-64:].lower().split()[-2:]
+            if _HYPOTHETICAL.search(before) or _POSSESSIVES.intersection(last_words):
                 continue
             if table is None:
                 try:
