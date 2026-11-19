@@ -31,7 +31,7 @@ openssl rand -hex 32
 
 ## 2. Docker Compose Production
 
-The full stack is `App/docker-compose.full.yml`. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` is a different stack, for local work and its overlays.) It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
+The full stack is two files: `App/docker-compose.yml`, which defines the services, and the overlay `App/docker-compose.full.yml`, which makes them image-based and hardened. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` alone is the source-built stack for local work and its overlays.) It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
 
 ### Build and start
 

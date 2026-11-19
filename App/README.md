@@ -1680,7 +1680,7 @@ the Next.js `/api` rewrite.
 
 ```bash
 # Put CADDY_DOMAIN / CADDY_ACME_EMAIL / POSTGRES_PASSWORD in .env
-docker compose -f App/docker-compose.full.yml --profile postgres --profile vllm --profile tls up -d
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile postgres --profile vllm --profile tls up -d
 ```
 
 Requires ports 80/443 free, a public domain pointing at the host,

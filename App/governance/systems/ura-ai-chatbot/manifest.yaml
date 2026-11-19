@@ -139,7 +139,7 @@ iso_42001:
     gap: "Team competency matrix"
   - clause: "8.1 Operational planning and control"
     status: "implemented"
-    evidence: ".github/workflows/ci-ml-pipeline.yml, App/Dockerfile, App/docker-compose.full.yml"
+    evidence: ".github/workflows/ci-ml-pipeline.yml, App/Dockerfile, App/docker-compose.yml, App/docker-compose.full.yml"
   - clause: "8.4 AI system impact assessment"
     status: "implemented"
     evidence: "App/governance/systems/ura-ai-chatbot/manifest.yaml"

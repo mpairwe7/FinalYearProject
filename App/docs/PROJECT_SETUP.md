@@ -210,10 +210,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 ```bash
 # Production mode
-docker compose -f App/docker-compose.full.yml up -d api
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml up -d api
 
 # Development mode (with hot reload)
-docker compose -f App/docker-compose.full.yml --profile dev up api-dev
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile dev up api-dev
 
 # View logs
 docker compose logs -f api
@@ -991,9 +991,9 @@ kill -9 <PID>
 ### Docker Issues
 ```bash
 # Reset Docker
-docker compose -f App/docker-compose.full.yml down -v
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml down -v
 docker system prune -f
-docker compose -f App/docker-compose.full.yml up --build
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml up --build
 ```
 
 ### Python Import Errors
@@ -1076,7 +1076,7 @@ python App/scripts/carbon_tracker.py --task training --duration 3600
 
 ```bash
 # Needs METRICS_TOKEN, GRAFANA_PASSWORD and ALERTMANAGER_WEBHOOK_URL in .env
-docker compose -f App/docker-compose.full.yml --profile monitoring up -d
+docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile monitoring up -d
 
 # Prometheus:    http://127.0.0.1:9090
 # Grafana:       http://127.0.0.1:3001  (admin / $GRAFANA_PASSWORD)

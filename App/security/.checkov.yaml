@@ -25,7 +25,7 @@ skip-path:
 
 # Specific checks to skip (with justification)
 skip-check:
-  # CKV_DOCKER_2: HEALTHCHECK — we define healthchecks in App/docker-compose.full.yml instead
+  # CKV_DOCKER_2: HEALTHCHECK — we define healthchecks in App/docker-compose.yml instead
   - CKV_DOCKER_2
   # CKV_DOCKER_7: Multiple RUN in App/Dockerfile — we optimise layers deliberately
   - CKV_DOCKER_7

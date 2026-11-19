@@ -455,6 +455,7 @@ jobs:
 
       - name: Build and start API for scanning
         env:
+          COMPOSE_FILE: App/docker-compose.yml:App/docker-compose.full.yml
           API_PORT: "8087"
           APP_ENV: "development"
           SPEECH_ENABLED: "false"
@@ -530,6 +531,7 @@ jobs:
       - name: Tear down services
         if: always()
         env:
+          COMPOSE_FILE: App/docker-compose.yml:App/docker-compose.full.yml
           API_PORT: "8087"
         run: |
           docker compose down -v || true
