@@ -20,6 +20,7 @@ in L1 memory + Redis.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
@@ -34,6 +35,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import egress
+from .redis_shared import shared_redis
 from .tax.tables import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,6 @@ FX_LOOKUP_BUDGET_SECONDS = float(os.getenv("FX_LOOKUP_BUDGET_SECONDS", "6.0"))
 FX_MAX_SOURCE_DIVERGENCE = float(os.getenv("FX_MAX_SOURCE_DIVERGENCE", "0.02"))
 #: A daily-updated mirror can be a long weekend old, and no older.
 FX_MAX_PROVIDER_AGE_SECONDS = int(os.getenv("FX_MAX_PROVIDER_AGE_SECONDS", str(96 * 3600)))
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 FX_REDIS_PREFIX = "ura:fx:live:"
 
 SUPPORTED_FX_CURRENCIES: frozenset[str] = frozenset(
@@ -116,8 +117,6 @@ class LiveFXQuote:
 
 _CACHE_LOCK = threading.Lock()
 _L1_FX_CACHE: dict[str, tuple[float, LiveFXQuote | None]] = {}
-_redis_client: Any = None
-_redis_init_attempted = False
 
 
 def _utc_now_iso() -> str:
@@ -125,29 +124,8 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _get_redis() -> Any:
-    """Lazy-initialize optional Redis client for cross-worker FX caching."""
-    global _redis_client, _redis_init_attempted
-    if _redis_init_attempted:
-        return _redis_client
-    with _CACHE_LOCK:
-        if _redis_init_attempted:
-            return _redis_client
-        _redis_init_attempted = True
-        try:
-            import redis  # type: ignore[import-untyped]
-
-            client = redis.from_url(
-                REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.5,
-                socket_timeout=0.5,
-            )
-            client.ping()
-            _redis_client = client
-        except Exception:
-            _redis_client = None
-        return _redis_client
+#: Optional Redis for cross-worker FX caching; None without REDIS_URL or while it is unreachable.
+_get_redis = functools.partial(shared_redis, decode_responses=True, timeout=0.5)
 
 
 def clear_fx_cache() -> None:

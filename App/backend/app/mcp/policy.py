@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Any
 
+from ..redis_shared import shared_redis
+
 logger = logging.getLogger(__name__)
 
 READ_ROLES = ("verified_taxpayer", "ura_staff", "ura_admin", "ura_auditor")
@@ -35,27 +37,7 @@ MCP_MAX_CRITICAL_ACTIONS_PER_HOUR = int(os.getenv("MCP_MAX_CRITICAL_ACTIONS_PER_
 # Thread-safe sliding-window velocity tracker for critical actions
 _velocity_lock = threading.Lock()
 _user_action_history: dict[str, list[float]] = {}
-_redis_client = None
-_redis_checked = False
-
-
-def _get_velocity_redis():
-    global _redis_client, _redis_checked
-    if _redis_checked:
-        return _redis_client
-    _redis_checked = True
-    url = os.getenv("REDIS_URL", "")
-    if not url:
-        return None
-    try:
-        import redis
-
-        r = redis.from_url(url, socket_timeout=1)
-        r.ping()
-        _redis_client = r
-        return _redis_client
-    except Exception:
-        return None
+_get_velocity_redis = shared_redis
 
 
 def reset_velocity_tracker() -> None:
