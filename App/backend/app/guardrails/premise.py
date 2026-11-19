@@ -587,6 +587,9 @@ def check_abolished_claim(query: str) -> FalsePremiseResult:
                 if head.rate_phrase and isinstance(value, (int, float))
                 else ""
             )
+            if rate and not table.confirmed:
+                # A provisional table's figure is never quoted as settled (tax/tables.py).
+                rate += f" (provisional: {table.verification_note or 'confirm the figure with URA'})"
             reply = (
                 f"{head.display} has not been abolished. It still applies in Uganda in {table.fiscal_year}{rate}. "
                 "Keep registering, filing and paying as before: stopping leads to penalties and interest. "

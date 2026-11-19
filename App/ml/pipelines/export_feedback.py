@@ -8,7 +8,7 @@ into structured JSONL files for:
 
 Usage, from the repository root:
     PYTHONPATH=App python -m ml.pipelines.export_feedback --output-dir App/Data/eval/feedback
-    PYTHONPATH=App python -m ml.pipelines.export_feedback --days 7 --min-reviews 5
+    PYTHONPATH=App python -m ml.pipelines.export_feedback --days 7
 """
 
 from __future__ import annotations

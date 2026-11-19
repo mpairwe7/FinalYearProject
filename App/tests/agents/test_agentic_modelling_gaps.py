@@ -390,6 +390,37 @@ class TestEpistemicFalsePremiseRejection:
         assert (turn["retrieval_mode"], stream["retrieval_mode"]) == (mode, mode)
         assert not turn.get("portal_copilot") and not stream.get("portal_copilot")
 
+    def test_a_running_workflow_keeps_its_free_text_answer_on_both_paths(self, fresh_registry, tmp_db):
+        """A legal name such as "Kenya Traders Ltd" names a country; the workflow still gets it first."""
+        import uuid
+
+        from app.config.flags import flags
+
+        model = ChatModel()
+        taken = {"reply": "Thank you. What is the business's TIN?", "retrieval_mode": "workflow", "sources": []}
+        flags.set("workflows", True)
+        try:
+            with mock.patch.object(model, "_maybe_handle_workflow", return_value=dict(taken)) as workflow:
+                turn = model.generate("Kenya Traders Ltd")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+                stream = model.generate_retrieval_only(message="Kenya Traders Ltd", conversation_id=str(uuid.uuid4()))
+        finally:
+            flags.clear("workflows")
+
+        assert workflow.call_count == 2
+        assert (turn["retrieval_mode"], stream["retrieval_mode"]) == ("workflow", "workflow")
+
+    def test_a_provisional_rate_is_not_quoted_as_settled(self):
+        import dataclasses
+
+        from app.tax import tables
+
+        provisional = dataclasses.replace(tables.get_table(), status="provisional", verification_note="awaiting the Gazette")
+        with mock.patch.object(tables, "get_table", return_value=provisional):
+            reply = check_abolished_claim("Since VAT was abolished, do I still file?").reply
+
+        assert "has not been abolished" in reply
+        assert "provisional: awaiting the Gazette" in reply
+
     def test_both_paths_leave_a_year_beyond_the_tables_uncorrected(self, fresh_registry, tmp_db):
         import uuid
 
