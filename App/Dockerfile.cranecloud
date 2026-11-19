@@ -45,10 +45,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install slim Crane Cloud profile (no torch / transformers / etc.)
-COPY App/backend/requirements-cranecloud.txt ./requirements-cranecloud.txt
+# Install slim Crane Cloud profile (no torch / transformers / etc.) from its hashed
+# lock: every build gets the same 92 packages, each file checked against a hash, and
+# no source distribution is built (ADR-0066). To change a dependency, edit
+# requirements-cranecloud.txt and re-run the command in the lock's header.
+COPY App/backend/requirements-cranecloud.lock.txt ./requirements-cranecloud.lock.txt
 RUN pip install --upgrade pip wheel setuptools && \
-    pip install -r requirements-cranecloud.txt && \
+    pip install --require-hashes --only-binary :all: -r requirements-cranecloud.lock.txt && \
     # Aggressive prune to keep image small.
     #
     # dist-info directories are deliberately KEPT. Deleting them saves a few MB

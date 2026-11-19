@@ -65,7 +65,7 @@ nist_ai_rmf:
       evidence: "App/tests/test_api.py, App/tests/test_ml_pipeline.py, App/Results/"
     - control: "MEASURE 2.5 – Acquired components assessed"
       status: "implemented"
-      evidence: "App/requirements.txt (pinned), .github/workflows/security-trivy.yml (Trivy), .github/workflows/ci-ml-pipeline.yml"
+      evidence: "App/backend/requirements-cranecloud.lock.txt (the production image's hashed lock, installed with --require-hashes; ADR-0066), App/requirements.txt, .github/workflows/security-trivy.yml (Trivy), .github/workflows/ci-ml-pipeline.yml"
     - control: "MEASURE 2.6 – Computational bias assessment"
       status: "partial"
       evidence: >

@@ -72,7 +72,9 @@ jobs:
           # Specification document (ADR-0033); test-only, jsonschema pinned as in
           # App/backend/requirements.lock.txt.
           uv pip install --system ruff pytest pytest-cov pyshacl==0.30.1 jsonschema==4.26.0
-          uv pip install --system -r App/requirements.txt
+          # The production image's lock constrains every package the two lists share,
+          # so this suite runs on the versions that ship (ADR-0066).
+          uv pip install --system -r App/requirements.txt -c App/backend/requirements-cranecloud.lock.txt
 
       - name: Run Ruff linter
         run: |
@@ -95,8 +97,9 @@ jobs:
           # torch/transformers/sentence-transformers stack, and together with the
           # root requirements they cover every backend import — so the backend
           # suite runs here in the same keyword-fallback shape it runs locally,
-          # without a multi-gigabyte torch download.
-          uv pip install --system -r App/backend/requirements-cranecloud.txt
+          # without a multi-gigabyte torch download. Installed from the image's own
+          # hashed lock: the backend suite runs on exactly what ships (ADR-0066).
+          uv pip install --system --require-hashes -r App/backend/requirements-cranecloud.lock.txt
 
       - name: Run backend unit tests
         # The repo-root suite above never touched App/backend/tests, so the
@@ -370,8 +373,8 @@ jobs:
       - name: Install the backend and the receptionist stack
         run: |
           uv pip install --system pytest
-          uv pip install --system -r App/requirements.txt
-          uv pip install --system -r App/backend/requirements-cranecloud.txt
+          uv pip install --system -r App/requirements.txt -c App/backend/requirements-cranecloud.lock.txt
+          uv pip install --system --require-hashes -r App/backend/requirements-cranecloud.lock.txt
           # As every image installs it: Pipecat's metadata caps Pillow below
           # the patched floor, so the resolver is told to keep Pillow >= 13.
           printf 'Pillow>=13.0.0\n' > /tmp/pillow-override.txt

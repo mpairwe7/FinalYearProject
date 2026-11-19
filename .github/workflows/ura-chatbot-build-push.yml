@@ -34,6 +34,7 @@ on:
       - "App/Dockerfile.cranecloud"
       - "App/Dockerfile.cranecloud.dockerignore"
       - "App/backend/requirements-cranecloud.txt"
+      - "App/backend/requirements-cranecloud.lock.txt"
       - "App/Model/bm25_state.json"
       - "App/Data/dataset/**"
       - "App/Data/teacher_qa/**"

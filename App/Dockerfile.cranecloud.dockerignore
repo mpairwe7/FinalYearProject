@@ -7,7 +7,7 @@
 
 # Allow paths the Dockerfile COPY directives reference.
 !App/backend/app/**
-!App/backend/requirements-cranecloud.txt
+!App/backend/requirements-cranecloud.lock.txt
 !App/backend/pyproject.toml
 !App/frontend/**
 !App/deploy/cranecloud/**
