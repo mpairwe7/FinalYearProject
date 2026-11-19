@@ -340,7 +340,7 @@ curl http://localhost:6333/collections/ura_knowledge_base | python -m json.tool
 **No re-index needed for:**
 - LLM changes (`LLM_MODEL`) — model is used for generation, not indexing
 - Reranker changes (`RERANKER_MODEL`) — reranker operates post-retrieval
-- Threshold changes (`GROUNDING_THRESHOLD`, `ABSTENTION_THRESHOLD`)
+- Threshold changes (`GROUNDING_THRESHOLD`, `ABSTENTION_THRESHOLD_NORM`)
 
 ---
 

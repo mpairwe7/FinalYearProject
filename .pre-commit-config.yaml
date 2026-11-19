@@ -42,6 +42,8 @@ repos:
     hooks:
       - id: gitleaks
         name: Gitleaks – detect hardcoded secrets
+        # gitleaks looks for .gitleaks.toml only at the repository root.
+        args: ["--config=App/security/.gitleaks.toml"]
         stages: [pre-commit]
 
   # ── detect-secrets (Yelp) – baseline-aware entropy scanner ────────────────

@@ -29,9 +29,16 @@ _REQUIRED_CATEGORIES = {
     "paraphrase_injection": 8,
     "obfuscation": 4,
     "prompt_extraction": 5,
-    "multilingual_injection": 3,
+    "multilingual_injection": 8,
+    "multilingual_harmful_intent": 8,
     "indirect_directive": 5,
 }
+
+#: Every answer language is attacked both ways, so a guard pattern dropped for one
+#: language fails here (G680). The non-English rows use the guard's own CAN-Bench
+#: vocabulary: they hold those patterns in place, and new phrasings still need a
+#: native speaker.
+_LANGUAGE_FLOORS = {"en": 60, "lg": 3, "sw": 3, "nyn": 3, "ach": 3}
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -61,6 +68,16 @@ def test_required_attack_classes_are_covered() -> None:
     counts = Counter(str(row.get("category")) for row in _rows())
     short = {cat: (counts[cat], floor) for cat, floor in _REQUIRED_CATEGORIES.items() if counts[cat] < floor}
     assert short == {}, f"categories below their floor (have, need): {short}"
+
+
+def test_every_answer_language_is_attacked_both_ways() -> None:
+    rows = _rows()
+    counts = Counter(str(row.get("language")) for row in rows)
+    short = {lang: (counts[lang], floor) for lang, floor in _LANGUAGE_FLOORS.items() if counts[lang] < floor}
+    assert short == {}, f"languages below their floor (have, need): {short}"
+    for lang in _LANGUAGE_FLOORS.keys() - {"en"}:
+        kinds = {str(row.get("category")) for row in rows if row.get("language") == lang}
+        assert {"multilingual_injection", "multilingual_harmful_intent"} <= kinds, lang
 
 
 def test_refuse_rows_are_blocked() -> None:

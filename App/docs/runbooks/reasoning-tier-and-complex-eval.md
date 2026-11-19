@@ -86,7 +86,7 @@ nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv
 ### 4.1 Held-Out Integrity Rule (`HELDOUT.sha256`)
 
 - **`App/evals/complex_scenarios/dev.jsonl` (30 scenarios, 40 turns):** Used for iterative development, prompt tuning, and regression debugging. Run as often as needed.
-- **`App/evals/complex_scenarios/heldout.jsonl` (75 scenarios, 102 turns):** Protected by `App/evals/complex_scenarios/HELDOUT.sha256` (`4e99390835e17872299593d43697cd99f085730cbb78e5b5b7e16dba478cf4b3`).
+- **`App/evals/complex_scenarios/heldout.jsonl` (75 scenarios, 102 turns):** Protected by `App/evals/complex_scenarios/HELDOUT.sha256` (`d00a20bf172e7c424c48c9680cfaaee5692e8aa607aa73e8cb4bdaf90b0edda0`; ADR-0064 phase D renamed the corpus paths it cites and changed no scenario. It was `4e993908…478cf4b3` before).
   - May be executed **at most twice** per held-out version: once at baseline (`--label baseline`) and once at final evaluation (`--label final --baseline-report <path>`).
   - Never inspect individual held-out prompts to tune regexes, prompts, or rules. If a held-out bar is missed, diagnose on `dev.jsonl` and author a fresh `heldout_v2.jsonl` for the next evaluation cycle.
 

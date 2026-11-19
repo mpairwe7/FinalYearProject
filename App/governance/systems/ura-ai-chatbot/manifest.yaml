@@ -917,7 +917,7 @@ owasp_mcp_top10_2026:
     - id: "MCP01"
       name: "Token Mismanagement & Secret Exposure"
       status: "mitigated"
-      controls: "AES-256-GCM TokenVault, audience-bound OAuth 2.1 RS256 / constant-time shared tokens, and screen_tool_result credential-leak quarantine"
+      controls: "connector credentials held only in deployment secrets, audience-bound OAuth 2.1 RS256 / constant-time shared tokens, and screen_tool_result credential-leak quarantine"
       verified_by:
         - "App/tests/agents/test_mcp_2026_october_audit.py"
     - id: "MCP02"

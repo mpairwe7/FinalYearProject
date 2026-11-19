@@ -7,8 +7,7 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
 
 | Prompt | Text | Sent by | Pinned by |
 | --- | --- | --- | --- |
-| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | Partly: `App/tests/agents/test_harness_prompt_contract.py` checks the refusal wording, the length limit and the fiscal-year rule, not the full text |
-| Governed cloud prompt | `answer.py` `CLOUD_SYSTEM_PROMPT` | `rag/pipeline._build_fallback_prompt`, which nothing in the app calls since ADR-0036 (G667) | Partly: the same contract test checks selected rules, not the full text |
+| Answer system prompt | `answer.py` `SYSTEM_PROMPT` | `rag/generator._build_messages`: every generated answer, local and cloud. On the HF Space that is Sunbird, then Workers AI | Partly: `App/tests/agents/test_harness_prompt_contract.py` checks each ADR-0030 guarding rule: grounding, citation, abstention, exact figures and their fiscal year, data-not-commands for passages and uploads, the refusal and its wording, the persona lock, confidentiality and simulated connectors. History is fenced where `_build_messages` adds it (G667). A draft the response judge sends back is revised by `pipeline._reflect_llm` under its own editor instruction |
 | FAQ judge | `answer.py` `FAQ_JUDGE_PROMPT` | `rag/pipeline`, ranking FAQ candidates (ADR-0037) | None |
 | Follow-up rewriter | `query.py` `REWRITE_SYSTEM`, `REWRITE_PROMPT` | `rag/query`, behind a default-off flag (ADR-0031) | `App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py` |
 | Call query extraction | `receptionist.py` `QUERY_EXTRACT_SYSTEM` | `receptionist/brain` | `App/backend/tests/test_call_carryover.py` |
@@ -33,17 +32,13 @@ module per area (ADR-0060). Checked against the code on 2026-11-18.
   receptionist's direct Luganda synthesis fences its passages and the caller's words
   the same way (G668, fixed).
 - **Leak protection.** The output guard checks each chat reply against signature
-  phrases and a word 8-gram fingerprint of `SYSTEM_PROMPT` and
-  `CLOUD_SYSTEM_PROMPT` (OWASP LLM07, ADR-0029). The fingerprint is rebuilt from
-  the live prompts, so it follows an edit rather than catching one. The direct
+  phrases and a word 8-gram fingerprint of `SYSTEM_PROMPT` (OWASP LLM07,
+  ADR-0029). The fingerprint is rebuilt from the live prompt, so it follows an edit rather than catching one. The direct
   Luganda call synthesis also goes through it: a flagged leak falls back to the
   guarded translation, and the rest is sanitised (G668, fixed).
 
 ## Known gaps
 
-- `CLOUD_SYSTEM_PROMPT` carries ADR-0030's governed rules, but production answers
-  use `SYSTEM_PROMPT`. Whether `SYSTEM_PROMPT` carries every one of those rules is
-  open (G667).
 - Eight prompts have no test that pins their text: the FAQ judge, the Luganda call
   answer, the three officer brief prompts, the chat title, the route tiebreak and
   document reading.

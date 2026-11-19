@@ -39,6 +39,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextvars
 import hashlib
+import importlib
 import logging
 import math
 import os
@@ -105,6 +106,24 @@ _CLOUD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=int(os.getenv("SPEECH_CLOUD_MAX_CONCURRENCY", "4")),
     thread_name_prefix="speech-cloud",
 )
+
+
+def _optional_ml_module(module: str, what: str) -> Any | None:
+    """Import an ``ml`` module this build may not ship, or ``None`` when it does not.
+
+    The image copies only ``ml/scripts/lang_id.py`` (``Dockerfile.cranecloud.dockerignore``),
+    so local ASR and MT are absent there by design and the cloud backends serve both.
+    That was logged as an ERROR with a traceback on every start (G678). A missing
+    dependency of a module that is present is a real failure, so it still raises.
+    """
+    try:
+        return importlib.import_module(module)
+    except ModuleNotFoundError as exc:
+        missing = exc.name or ""
+        if missing and (module == missing or module.startswith(f"{missing}.")):
+            logger.info("SpeechModel: %s is not in this build (%s); the cloud backends serve it", what, missing)
+            return None
+        raise
 
 
 def _translate_fallback_backend() -> str:
@@ -872,13 +891,13 @@ class SpeechModel:
 
     def _init_models(self) -> None:
         try:
-            from ml.scripts.asr.infer_asr import AsrTranscriber  # type: ignore
-
-            self._asr = AsrTranscriber(
-                sherpa_dir=SPEECH_ASR_SHERPA_DIR,
-                backend=SPEECH_ASR_BACKEND,
-            )
-            logger.info("SpeechModel: ASR transcriber ready (backend=%s)", SPEECH_ASR_BACKEND)
+            asr_module = _optional_ml_module("ml.scripts.asr.infer_asr", "local ASR")
+            if asr_module is not None:
+                self._asr = asr_module.AsrTranscriber(
+                    sherpa_dir=SPEECH_ASR_SHERPA_DIR,
+                    backend=SPEECH_ASR_BACKEND,
+                )
+                logger.info("SpeechModel: ASR transcriber ready (backend=%s)", SPEECH_ASR_BACKEND)
         except Exception:
             logger.exception("SpeechModel: ASR init failed — transcription disabled")
 
@@ -996,10 +1015,10 @@ class SpeechModel:
             logger.exception("SpeechModel: lang-ID init failed — fallback to 'en'")
 
         try:
-            from ml.scripts.mt.infer_mt import MtTranslator  # type: ignore
-
-            self._mt = MtTranslator(backend=SPEECH_MT_BACKEND)
-            logger.info("SpeechModel: MT translator ready (backend=%s)", SPEECH_MT_BACKEND)
+            mt_module = _optional_ml_module("ml.scripts.mt.infer_mt", "local MT")
+            if mt_module is not None:
+                self._mt = mt_module.MtTranslator(backend=SPEECH_MT_BACKEND)
+                logger.info("SpeechModel: MT translator ready (backend=%s)", SPEECH_MT_BACKEND)
         except Exception:
             logger.exception("SpeechModel: MT init failed — translation disabled")
 

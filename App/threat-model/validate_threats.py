@@ -305,8 +305,9 @@ THREAT_REGISTRY: list[dict] = [
         "owasp_llm": "LLM09",
         "mitre_atlas": None,
         "mitigation": (
-            "CLOUD_SYSTEM_PROMPT carries the sixteen guarding rules of the local prompt, held by a contract test; "
-            "history is replayed withheld-if-injected and fenced; the leak fingerprint covers both prompts"
+            "Every answer is generated under SYSTEM_PROMPT, which carries the guarding rules, held by a contract "
+            "test (G667); prior conversation reaches the model as fenced reference data; the leak fingerprint "
+            "covers that prompt"
         ),
         "evidence": [
             "App/backend/app/rag/generator.py",

@@ -74,7 +74,8 @@ Option 1, chosen by the service owner over the narrower option 2.
   again.
 - **Phases B and C.** Each gets its own pull request, so CI and a reverting commit
   cover one step at a time.
-- **Phase C.** `App/scripts/consolidate_root_into_app.py` moves `docs/`, `tests/`,
+- **Phase C.** `App/scripts/consolidate_root_into_app.py` (deleted once phase D was done; it is in
+  git at `5c619a04`) moves `docs/`, `tests/`,
   `scripts/`, `ml/`, `evals/`, `governance/`, `plugins/`, `monitoring/`, `infra/` and
   `threat-model/` under `App/` (231 entries; `docs/` and `scripts/` merge into the
   existing `App/docs/` and `App/scripts/`, with no name in common). It rewrites the

@@ -367,8 +367,7 @@ def _normalised(text: str) -> str:
 
 
 def test_every_leak_signature_names_text_a_live_prompt_contains() -> None:
-    fallback_system, _ = pipeline._build_fallback_prompt("What is VAT?", [], "en")
-    prompts = _normalised(SYSTEM_PROMPT) + " " + _normalised(fallback_system)
+    prompts = _normalised(SYSTEM_PROMPT)
 
     stale = [phrase for phrase in _PROMPT_SIGNATURE_PHRASES if _normalised(phrase) not in prompts]
     assert stale == []

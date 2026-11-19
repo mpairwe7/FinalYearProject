@@ -336,7 +336,7 @@ def test_added_new_public_notice_does_not_delete_existing_guides(
     outcome = cs.compare_and_sync_ura_document(
         notice_doc,
         retriever,
-        topic_key="efris_penalty_waiver_aug_2026",
+        topic_key="efris_penalty_waiver_aug_2026",  # gitleaks:allow - a topic name, not a key
         pdf_jsonl_dir=jsonl_dir,
         archive_dir=archive_dir,
     )
@@ -352,7 +352,7 @@ def test_added_new_public_notice_does_not_delete_existing_guides(
     assert skip_fam_only is False
     skip_with_topic, row = cs.should_skip_web_search_for_family(
         doc_family="public_notice",
-        topic_key="efris_penalty_waiver_aug_2026",
+        topic_key="efris_penalty_waiver_aug_2026",  # gitleaks:allow - a topic name, not a key
     )
     assert skip_with_topic is True
     assert row is not None

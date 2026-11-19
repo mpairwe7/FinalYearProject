@@ -222,6 +222,7 @@ jobs:
             NEXT_PUBLIC_OIDC_AUDIENCE=${{ vars.NEXT_PUBLIC_OIDC_AUDIENCE }}
             NEXT_PUBLIC_DEV_SIGNIN=${{ vars.NEXT_PUBLIC_DEV_SIGNIN }}
             GIT_SHA=${{ github.sha }}
+            AUTHORITY_BUILD_ID=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha,scope=ura-chatbot-cranecloud
           cache-to: type=gha,mode=max,scope=ura-chatbot-cranecloud
 

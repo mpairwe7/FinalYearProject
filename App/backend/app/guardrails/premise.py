@@ -480,6 +480,128 @@ def check_false_premise(
 
 
 # ---------------------------------------------------------------------------
+# A real tax said to be abolished (G675)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _TaxHead:
+    """A tax in force, as taxpayers name it, and the rate-table key that shows it is."""
+
+    names: str  # regex alternation, matched as whole words
+    display: str
+    key: str
+    rate_phrase: str = ""  # filled with the table's rate, e.g. "at a standard rate of {rate}"
+
+
+_TAX_HEADS_IN_FORCE = (
+    _TaxHead(r"vat|value[ -]added tax", "VAT", "vat_standard", " at a standard rate of {rate}"),
+    _TaxHead(r"paye|pay[ -]as[ -]you[ -]earn", "PAYE", "paye_bands_resident"),
+    _TaxHead(r"income tax|corporation tax|corporate (?:income )?tax", "Income tax", "corporation_tax"),
+    _TaxHead(r"withholding tax|wht", "Withholding tax", "withholding_services"),
+    _TaxHead(r"rental (?:income )?tax", "Rental tax", "rental_tax_individual"),
+    _TaxHead(r"capital gains tax", "Capital gains tax", "capital_gains_corporate"),
+    _TaxHead(r"excise duty|excise tax", "Excise duty", "excise_duty_telecom_data"),
+    _TaxHead(r"customs duty|import duty", "Customs duty", "customs_duty_common"),
+    _TaxHead(r"stamp duty", "Stamp duty", "stamp_duty_property_transfer"),
+    _TaxHead(r"presumptive tax", "Presumptive tax", "presumptive_tax_lower_threshold"),
+    _TaxHead(r"digital services? tax", "Digital services tax", "digital_services_tax_non_resident"),
+)
+
+_TAX_NAME = "|".join(f"(?:{head.names})" for head in _TAX_HEADS_IN_FORCE)
+_ENDED = r"(?:abolished|scrapped|repealed|removed|eliminated|cancell?ed|withdrawn|phased out|done away with)"
+# One relief or item ("the VAT exemption", "VAT on sugar") is not the tax either.
+_THE_TAX_ITSELF = (
+    r"(?!\s+(?:exemptions?|refunds?|registration|returns?|deductions?|deferments?|waivers?|relief|"
+    r"penalt(?:y|ies)|rates?|thresholds?|credits?|arrears|on|for|from|in|to)\b)"
+)
+_NOT_AN_ITEM = r"(?!\s+(?:from|on|for)\b)"  # "repealed in 2025" is still the tax
+_ABOLISHED_CLAIMS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # "VAT was abolished", "has PAYE been scrapped?", "VAT abolished"
+        rf"\b(?P<tax>{_TAX_NAME})\b(?:\s+(?:has|have|had)\s+been|\s+(?:was|were|is|are|got|been|being))?"
+        rf"\s+(?:now\s+|officially\s+|finally\s+)?{_ENDED}\b{_NOT_AN_ITEM}",
+        # "the abolition of VAT"
+        rf"\b(?:abolition|scrapping|repeal|removal|elimination|cancell?ation)\s+of\s+(?:the\s+)?"
+        rf"(?P<tax>{_TAX_NAME})\b{_THE_TAX_ITSELF}",
+        # "the government scrapped withholding tax"
+        rf"\b{_ENDED}\s+(?:the\s+)?(?P<tax>{_TAX_NAME})\b{_THE_TAX_ITSELF}",
+        # "VAT no longer exists"
+        rf"\b(?P<tax>{_TAX_NAME})\b\s+(?:no\s+longer\s+(?:exists?|applies|apply)(?!\s+(?:to|on|for)\b)"
+        rf"|(?:does\s+not|doesn't)\s+exist\s+any\s?more)",
+    )
+)
+# A question about a hypothetical is not a claim: "if VAT were abolished, would prices fall?"
+_HYPOTHETICAL = re.compile(r"\b(?:if|suppose|supposing|imagine|hypothetically|were\s+to)\b", re.IGNORECASE)
+# One taxpayer's account is not the tax: "my PAYE was removed", "my corporate income tax".
+_POSSESSIVES = frozenset({"my", "our", "your", "his", "her", "their"})
+_YEAR = re.compile(r"\b(?:19|20)\d\d\b")
+_CLAUSE_MARKS = ".?!;\n"
+
+
+def _head_for(name: str) -> _TaxHead:
+    return next(h for h in _TAX_HEADS_IN_FORCE if re.fullmatch(h.names, name, re.IGNORECASE))
+
+
+def check_abolished_claim(query: str) -> FalsePremiseResult:
+    """Correct a claim that a tax in force was abolished, before anything answers on it.
+
+    "Since VAT was abolished, do I still need to file VAT returns?" once reached
+    the portal co-pilot, which answered with a sign-in card and never said VAT
+    still applies. A tax counts as in force when the current rate table holds
+    its key; a tax that really ended, such as the social media (OTT) tax, has
+    none, so a claim about it passes. Another country's tax, a hypothetical, one
+    taxpayer's own account and a year the tables do not reach pass too.
+    """
+    from ..tax import tables
+    from ..text_signals import detect_foreign_jurisdiction
+
+    text = query or ""
+    if detect_foreign_jurisdiction(text):
+        return FalsePremiseResult(is_false_premise=False)  # the jurisdiction guard answers it
+    table = None
+    for claim in _ABOLISHED_CLAIMS:
+        for match in claim.finditer(text):
+            clause_start = max(text.rfind(mark, 0, match.start()) for mark in _CLAUSE_MARKS) + 1
+            before = text[clause_start : match.start()]
+            # The possessive may sit one word back ("my corporate income tax"); a word
+            # check, not a regex anchored at the end of user text (CodeQL py/polynomial-redos).
+            last_words = before[-64:].lower().split()[-2:]
+            if _HYPOTHETICAL.search(before) or _POSSESSIVES.intersection(last_words):
+                continue
+            if table is None:
+                try:
+                    table = tables.get_table()
+                except tables.RateTableError:
+                    return FalsePremiseResult(is_false_premise=False)
+            last_year = int(table.fiscal_year[2:6]) + 1  # FY2026-27 ends in 2027
+            if any(int(year) > last_year for year in _YEAR.findall(text)):
+                # A year no loaded table covers, in the claim or in the question
+                # ("VAT was abolished. What is the VAT rate in 2032?"): not ours to answer.
+                return FalsePremiseResult(is_false_premise=False)
+            head = _head_for(match.group("tax"))
+            if head.key not in table.rates:
+                continue
+            value = table.rates[head.key]
+            rate = (
+                head.rate_phrase.format(rate=f"{value * 100:g}%")
+                if head.rate_phrase and isinstance(value, (int, float))
+                else ""
+            )
+            if rate and not table.confirmed:
+                # A provisional table's figure is never quoted as settled (tax/tables.py).
+                rate += f" (provisional: {table.verification_note or 'confirm the figure with URA'})"
+            reply = (
+                f"{head.display} has not been abolished. It still applies in Uganda in {table.fiscal_year}{rate}. "
+                "Keep registering, filing and paying as before: stopping leads to penalties and interest. "
+                "If you read about a change, it may be an exemption for particular goods or services. "
+                "Ask me about that change and I will check it."
+            )
+            logger.warning("abolished-tax premise corrected (tax: %s)", head.display)
+            return FalsePremiseResult(is_false_premise=True, concept=head.display, reply=reply)
+    return FalsePremiseResult(is_false_premise=False)
+
+
+# ---------------------------------------------------------------------------
 # Phase F.5: Data-driven premise and fact contradiction checks
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)

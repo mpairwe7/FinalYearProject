@@ -254,13 +254,17 @@ def test_the_lifespan_runs_the_sync_in_every_process() -> None:
     from app import receptionist
 
     revocation = _revocation()
-    synced = threading.Event()
+    periodic_sync = threading.Event()  # the strict read at startup does not count
     with (
-        mock.patch.object(revocation, "sync", side_effect=synced.set),
+        mock.patch.object(
+            revocation,
+            "sync",
+            side_effect=lambda *_args, strict=False, **_kwargs: None if strict else periodic_sync.set(),
+        ),
         mock.patch.object(receptionist, "start"),
         TestClient(main_mod.app),
     ):
-        ran = synced.wait(timeout=5)
+        ran = periodic_sync.wait(timeout=5)
     assert ran
     assert main_mod._SESSION_REVOCATION_SYNC_INTERVAL_SECONDS <= 5
 
@@ -311,9 +315,12 @@ def test_in_production_unreadable_revocations_at_start_refuse_to_start(monkeypat
         _initialise_with_unreadable_revocations(monkeypatch, "production")
 
 
-def test_elsewhere_unreadable_revocations_at_start_are_logged_and_start_goes_on(
+def test_without_stored_controls_unreadable_revocations_at_start_are_logged_and_start_goes_on(
     monkeypatch, clean_map, caplog
 ) -> None:
+    """With a storage-backed control on, development refuses too (G681, test_storage_failure_stops_startup)."""
+    for name in ("AUDIT_LEDGER", "MULTI_TENANT", "TICKET_QUEUE", "VOICE_CONSENT"):
+        monkeypatch.setenv(f"FLAG_{name}", "false")
     failures = _counter("session_revocation_sync_failures_total")
     caplog.set_level(logging.ERROR)
 

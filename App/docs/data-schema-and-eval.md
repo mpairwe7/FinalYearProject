@@ -151,7 +151,7 @@ User Query
   → Corrective RAG [FLAG_CORRECTIVE_RAG] — re-retrieve if avg score < threshold
   → Language Boosting — boost hits matching detected locale
   → FAQ Blending — merge top keyword hits for coverage
-  → Calibrated Abstention (refuse if best_score < ABSTENTION_THRESHOLD)
+  → Calibrated Abstention (refuse if the best normalized score < ABSTENTION_THRESHOLD_NORM)
   → LLM Generation (standard | agentic tool-calling | vLLM)
   → OutputGuard
       ├─ redact_pii() — 7 Uganda-specific PII patterns (LLM02)

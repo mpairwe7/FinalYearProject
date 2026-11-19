@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from app.workflows.graph import AgentGraphState, GraphOutcome
 from app.workflows.graph.main_graph import bind_arguments, build_main_graph
-from app.guardrails.premise import check_false_premise
+from app.guardrails.premise import check_abolished_claim, check_false_premise
 from app.rag.pipeline import ChatModel, _call_llm_agentic, run_chat_turn
 
 
@@ -310,6 +310,127 @@ class TestEpistemicFalsePremiseRejection:
         ]
         res = check_false_premise("What is the URA Digital Nomad Levy?", hits=valid_hits)
         assert res.is_false_premise is False
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "Since VAT was abolished, do I still need to file VAT returns?",
+            "Has PAYE been scrapped?",
+            "I heard the government scrapped withholding tax",
+            "After the abolition of VAT, what replaced it?",
+            "Corporate income tax was repealed in 2025",
+            "Since my employer said VAT was abolished, do I stop?",
+            # A hypothetical first does not hide the claim after it.
+            "If VAT were abolished, prices would fall. PAYE was abolished.",
+            # Uganda named alongside another country is still a Uganda question.
+            "VAT was abolished in Kenya and Uganda, right?",
+        ],
+    )
+    def test_a_tax_in_force_said_to_be_abolished_is_corrected(self, query):
+        res = check_abolished_claim(query)
+        assert res.is_false_premise is True, query
+        assert "has not been abolished" in res.reply
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "VAT was removed from sanitary pads",
+            "The government removed the VAT exemption on sugar",
+            "If VAT was abolished, would prices fall?",
+            "My PAYE was removed by my employer",
+            "VAT no longer applies to exports?",
+            "Was the OTT social media tax abolished?",
+            "What is the VAT rate?",
+            # One taxpayer's account, however long the tax's name.
+            "My corporate income tax was removed by my employer",
+            "My rental income tax was removed",
+            # Another country's tax is the jurisdiction guard's to answer.
+            "Since VAT was abolished in Kenya, do I still need to file VAT returns there?",
+            # A year no loaded rate table covers, in the claim or the question.
+            "Since VAT was abolished in 2031, what VAT rate applies in 2032?",
+            "VAT was abolished. What is the VAT rate in 2032?",
+        ],
+    )
+    def test_an_item_a_hypothetical_or_an_ended_tax_is_not_corrected(self, query):
+        assert check_abolished_claim(query).is_false_premise is False, query
+
+    def test_every_tax_head_it_defends_is_in_the_current_table(self):
+        from app.guardrails.premise import _TAX_HEADS_IN_FORCE
+        from app.tax import tables
+
+        table = tables.get_table()
+        assert [h.key for h in _TAX_HEADS_IN_FORCE if h.key not in table.rates] == []
+
+    def test_generate_corrects_an_abolished_tax_before_any_fast_route(self, fresh_registry, tmp_db):
+        """The portal co-pilot used to answer this with a sign-in card, never saying VAT applies."""
+        model = ChatModel()
+        result = model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
+            "Since VAT was abolished, do I still need to file VAT returns?"
+        )
+        assert result["retrieval_mode"] == "false_premise_rejected"
+        assert "VAT" in result["reply"] and "has not been abolished" in result["reply"]
+        assert "18%" in result["reply"]
+        assert not result.get("portal_copilot")
+
+    @pytest.mark.parametrize(
+        ("query", "mode"),
+        [
+            ("Since VAT was abolished, do I still need to file VAT returns?", "false_premise_rejected"),
+            # Another country's tax is declined before the portal co-pilot (G684).
+            ("Since VAT was abolished in Kenya, do I still need to file VAT returns there?", "out_of_jurisdiction"),
+        ],
+    )
+    def test_both_paths_answer_an_abolished_claim_before_the_portal_co_pilot(self, query, mode, fresh_registry, tmp_db):
+        import uuid
+
+        model = ChatModel()
+        turn = model.generate(query)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        stream = model.generate_retrieval_only(message=query, conversation_id=str(uuid.uuid4()))
+
+        assert (turn["retrieval_mode"], stream["retrieval_mode"]) == (mode, mode)
+        assert not turn.get("portal_copilot") and not stream.get("portal_copilot")
+
+    def test_a_running_workflow_keeps_its_free_text_answer_on_both_paths(self, fresh_registry, tmp_db):
+        """A legal name such as "Kenya Traders Ltd" names a country; the workflow still gets it first."""
+        import uuid
+
+        from app.config.flags import flags
+
+        model = ChatModel()
+        taken = {"reply": "Thank you. What is the business's TIN?", "retrieval_mode": "workflow", "sources": []}
+        flags.set("workflows", True)
+        try:
+            with mock.patch.object(model, "_maybe_handle_workflow", return_value=dict(taken)) as workflow:
+                turn = model.generate("Kenya Traders Ltd")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+                stream = model.generate_retrieval_only(message="Kenya Traders Ltd", conversation_id=str(uuid.uuid4()))
+        finally:
+            flags.clear("workflows")
+
+        assert workflow.call_count == 2
+        assert (turn["retrieval_mode"], stream["retrieval_mode"]) == ("workflow", "workflow")
+
+    def test_a_provisional_rate_is_not_quoted_as_settled(self):
+        import dataclasses
+
+        from app.tax import tables
+
+        provisional = dataclasses.replace(tables.get_table(), status="provisional", verification_note="awaiting the Gazette")
+        with mock.patch.object(tables, "get_table", return_value=provisional):
+            reply = check_abolished_claim("Since VAT was abolished, do I still file?").reply
+
+        assert "has not been abolished" in reply
+        assert "provisional: awaiting the Gazette" in reply
+
+    def test_both_paths_leave_a_year_beyond_the_tables_uncorrected(self, fresh_registry, tmp_db):
+        import uuid
+
+        model = ChatModel()
+        query = "VAT was abolished. What is the VAT rate in 2032?"
+        turn = model.generate(query)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        stream = model.generate_retrieval_only(message=query, conversation_id=str(uuid.uuid4()))
+
+        assert "false_premise_rejected" not in (turn["retrieval_mode"], stream["retrieval_mode"])
+        assert "18%" not in turn["reply"]
 
     def test_generate_rejects_false_premise_without_hallucination(self, fresh_registry, tmp_db):
         model = ChatModel()

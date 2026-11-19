@@ -15,8 +15,9 @@
 # Retrieval uses an embedded sparse-only Qdrant sidecar. Its BM25 query vector
 # is computed in pure Python, so it needs neither torch nor an embedding model.
 #
-# Build:
-#   docker build -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
+# Build (a changing AUTHORITY_BUILD_ID renews the authority manifest, ADR-0065):
+#   docker build --build-arg AUTHORITY_BUILD_ID=$(date +%s) \
+#     -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
 #
 # Run locally:
 #   docker run --rm -p 8080:8080 \
@@ -338,6 +339,20 @@ RUN /usr/local/bin/verify-embedded-stores.sh
 # not invalidate any cached layer above.
 ARG GIT_SHA=""
 ENV APP_BUILD_SHA=${GIT_SHA}
+
+# The authority manifest production startup and the rate tools check: the rate
+# tables, their evidence and the kernel release record, hashed as built. Nothing
+# wrote one, so APP_ENV=production could not start (G681). It stays fresh for
+# AUTHORITY_MAX_AGE_DAYS (30) after the build; named here because this image does
+# not set PROJECT_ROOT, which the default location hangs off. AUTHORITY_BUILD_ID
+# changes with every workflow run, so a rebuild of the same commit renews the
+# manifest instead of reusing this layer from the cache.
+ARG AUTHORITY_BUILD_ID=""
+ENV URA_AUTHORITY_MANIFEST=/app/artifacts/authority/manifest.json
+RUN PYTHONPATH=/app/backend python -m app.authority write \
+        --out /app/artifacts/authority/manifest.json --version "${GIT_SHA:-unknown}" \
+        /app/backend/app/tax/data/*.json /app/backend/app/tax/evidence/rate_evidence.json \
+        /app/backend/app/kernel/releases.json
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
