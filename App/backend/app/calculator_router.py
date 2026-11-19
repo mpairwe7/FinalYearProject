@@ -81,6 +81,29 @@ _MULTIPLIERS = {
 _PERCENT_RE = re.compile(r"\b(\d{1,6}(?:\.\d{1,4})?)\s*(?:%|percent\b)", re.IGNORECASE)
 _YEAR_RE = re.compile(r"^(19|20)\d{2}$")
 
+# A TIN is ten digits starting with 1, and so is a turnover of UGX 1.5 billion. Only a
+# label beside the number tells them apart (G670): "TIN (1000…)", "taxpayer 1000…",
+# "1000… is my TIN". The redactor's own pattern cannot be used here, because it
+# treats every bare ten-digit number starting with 1 as a TIN.
+_TIN_SHAPE = r"1\d{9}|1\d{2}[ \t-]\d{3}[ \t-]\d{4}|1\d{3}[ \t-]\d{3}[ \t-]\d{3}"
+# Every run of spaces is bounded, so no input makes these patterns backtrack at length.
+_TIN_LABEL = (
+    r"(?:tin|taxpayer(?:[ \t]{1,3}identification)?(?:[ \t]{1,3}(?:number|no\.?|id))?"
+    r"|tax[ \t]{1,3}identification(?:[ \t]{1,3}(?:number|no\.?))?)"
+)
+_LABELLED_TIN_RES = (
+    # the label, at most three linking words or marks, then the number
+    re.compile(
+        rf"\b{_TIN_LABEL}(?![a-z])[ \t]{{0,3}}(?:(?:is|was|number|no\.?|#|:|=|-|\()[ \t]{{0,3}}){{0,3}}(?P<tin>{_TIN_SHAPE})\b",
+        re.IGNORECASE,
+    ),
+    # the number, then "is my TIN"
+    re.compile(
+        rf"\b(?P<tin>{_TIN_SHAPE})\b[ \t)\-:]{{0,4}}(?:(?:is|as)[ \t]{{1,3}})?(?:(?:my|our|the|his|her|their)[ \t]{{1,3}})?{_TIN_LABEL}\b",
+        re.IGNORECASE,
+    ),
+)
+
 
 def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     """All plausible UGX amounts in *text* as ``(value, start, end)``.
@@ -103,6 +126,7 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
             re.IGNORECASE,
         )
     ]
+    section_spans += [m.span("tin") for pattern in _LABELLED_TIN_RES for m in pattern.finditer(text or "")]
 
     # 1. Vernacular scale-prefixed amounts (including multi-scale compounds like "milioni 3 na elfu 500", "obukadde busatu n'emitwalo ataano")
     from .number_words import _SCALE_NOUN_RE, parse_vernacular_scale_amount_at

@@ -296,7 +296,8 @@ _FAQ_SUBJECT_FOCUS_MIN = float(os.getenv("FAQ_SUBJECT_FOCUS_MIN", "0.34"))
 _FAQ_DOC_TYPES = {"csv", "faq_jsonl"}
 
 
-def faq_terms(text: str) -> set[str]:
+@functools.lru_cache(maxsize=8192)
+def faq_terms(text: str) -> frozenset[str]:
     """Return normalized, query-bearing terms for FAQ binding.
 
     This is intentionally smaller and stricter than BM25's vocabulary.  BM25
@@ -306,6 +307,13 @@ def faq_terms(text: str) -> set[str]:
 
     Acronyms are *not* folded here — see :func:`faq_subject_terms`, which is
     the narrower view used to decide what a question is about.
+
+    Cached because ``faq_match_score`` calls this four times per FAQ row per
+    query, and three of the four texts never change: the row's question, its
+    answer, and the query within one search. Uncached it was 85% of
+    ``_simple_search`` (measured: 76 searches in 33 s). It reads only module
+    constants, so there is nothing to invalidate. Returns a ``frozenset`` so a
+    caller cannot mutate the cached value.
     """
     terms: set[str] = set()
     lowered = (text or "").lower()
@@ -319,7 +327,7 @@ def faq_terms(text: str) -> set[str]:
         terms.update(
             word for word in _FAQ_TERM_ALIASES.get(raw, raw).split() if word not in _FAQ_QUERY_STOP_WORDS
         )
-    return terms
+    return frozenset(terms)
 
 
 @functools.lru_cache(maxsize=4096)

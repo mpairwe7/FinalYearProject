@@ -57,10 +57,13 @@ try:
     else:
         for _tool in _orchestrator.get_all_tools():
             ToolRegistry.register(_tool)
-except Exception:
+except Exception as exc:
     # Outside production the simulators are expected, and a connector server
     # with nothing to serve looks healthy from the outside: say so loudly.
     if os.getenv("APP_ENV", "development").lower() == "production":
         logger.debug("plugins orchestrator not available or optional", exc_info=True)
     else:
-        logger.warning("connector simulators not registered: plugins could not be loaded", exc_info=True)
+        # The Space image does not ship the package, so each start logged the same
+        # traceback. A package that is simply absent needs the warning, not the stack.
+        absent = isinstance(exc, ModuleNotFoundError) and exc.name == "plugins"
+        logger.warning("connector simulators not registered: plugins could not be loaded", exc_info=not absent)
