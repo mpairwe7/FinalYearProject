@@ -406,9 +406,11 @@ def test_the_api_image_installs_only_its_hashed_lock():
 
     lock = (ROOT / "App" / "backend" / "requirements.lock.txt").read_text(encoding="utf-8")
     header = lock.split("\n", 2)[1]
-    # The install fetches from the index the lock was compiled against, or the hashes and torch build differ.
-    for flag in re.findall(r"--(?:extra-index-url \S+|index-strategy \S+)", install.group(1)):
-        assert flag in header, f"the lock was not compiled with {flag}"
+    # The install fetches from the indexes the lock was compiled against, or the hashes and torch build differ.
+    index_options = re.compile(r"--(index-url|extra-index-url|default-index|index|find-links|index-strategy)[ =](\S+)")
+    installed_from = set(index_options.findall(install.group(1)))
+    assert installed_from == set(index_options.findall(header)), "the install and the lock name different indexes"
+    assert ("index-strategy", "unsafe-best-match") in installed_from
     for source in ("requirements.txt", "requirements-receptionist.txt", "--override App/backend/requirements-overrides.txt"):
         assert source in header, f"the lock header does not compile {source}"
     index = re.search(r"/whl/(\w+)", install.group(1)).group(1)
