@@ -620,6 +620,25 @@ def test_dependabot_watches_folders_that_hold_a_manifest():
     assert empty == []
 
 
+def test_packages_the_root_list_pins_exactly_move_only_with_it():
+    """CI installs App/requirements.txt with the production lock as constraints. The /App/backend
+    job moved fastapi, uvicorn and pydantic in the backend files alone (#785), and the root's
+    exact pins made the install unresolvable. The /App job edits both, so it owns them."""
+    from fnmatch import fnmatch
+
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    updates = _load(ROOT / ".github" / "dependabot.yml")["updates"]
+    backend = next(u for u in updates if u["package-ecosystem"] == "pip" and u.get("directory") == "/App/backend")
+    ignored = [i["dependency-name"] for i in backend.get("ignore", []) if not ({"versions", "update-types"} & i.keys())]
+    shipped = _image_lock()
+    pinned = [Requirement(line) for line in _requirement_lines(ROOT / "App" / "requirements.txt")]
+    shared = [canonicalize_name(r.name) for r in pinned if any(s.operator == "==" for s in r.specifier) and canonicalize_name(r.name) in shipped]
+    assert shared, "the root list shares exact pins with the production lock"
+    assert [name for name in shared if not any(fnmatch(name, pattern) for pattern in ignored)] == []
+
+
 def test_the_freshness_check_can_fail():
     """It compared files no checkout holds, took "missing" as a pass, and was always green."""
     text = (ROOT / ".github" / "workflows" / "index-freshness.yml").read_text(encoding="utf-8")
