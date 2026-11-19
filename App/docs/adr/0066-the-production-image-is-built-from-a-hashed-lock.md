@@ -32,7 +32,7 @@ Option 1. It is pip's own hash-checking mode, and the repository already uses it
 - **Vulnerability audit.** The pip-audit job audits the lock as pinned. It had never audited the image's list at all, and re-resolving the ranges could pass while a pinned version was vulnerable.
 - **Dependabot.** It watches `/App/ml` and `/App` for pip, and no longer `/` for Docker.
 
-Not covered: `App/Dockerfile`, the API image the Compose stacks build, still installs ranges with a CUDA index. It is not what production runs. Its lock stays checked by `test_backend_lockfile_satisfies_its_requirements` and is tracked as G690.
+- **The API image (G690, added 2026-11-19).** `App/Dockerfile`, which the Compose stacks, the ZAP job and the Trivy scan build, installed two range lists with a CUDA 12.6 index and a Pillow override. Its lock, `App/backend/requirements.lock.txt`, was compiled from one of the lists against PyPI, so it held PyPI's CUDA 13 torch where the image installs the CUDA 12.6 build, and nothing installed it. The lock is now compiled from both lists, `App/backend/requirements-overrides.txt`, the CUDA 12.6 index and the image's Python (3.14.8) and platform, with the command in its header: 177 packages. The image runs `uv pip install --require-hashes -r requirements.lock.txt` against the same index. It cannot be binary-only: `docopt`, which `pipecat-ai` needs through `num2words`, publishes no wheel.
 
 ## Consequences
 
@@ -41,11 +41,13 @@ Not covered: `App/Dockerfile`, the API image the Compose stacks build, still ins
 - A package that publishes no wheel for Python 3.11 on Linux x86-64 fails the image build, by design. The fix is to pick a version with a wheel, not to drop `--only-binary`.
 - New releases no longer arrive by themselves. Dependabot's weekly pip run for `/App/backend` proposes them, and a person merges.
 - The bootstrap line `pip install --upgrade pip wheel setuptools` is still unpinned.
+- The API image's lock is compiled against two indexes with `--index-strategy unsafe-best-match`, so its install must name the same index and strategy. A test fails if they differ, or if torch in the lock is not that index's build.
 
 ## Confirmation
 
 - `App/tests/test_ci_supply_chain_policy.py`:
   - the image installs only the lock, hash-checked and binary-only
+  - the API image installs only its lock, hash-checked, from the index the lock was compiled against, and that lock satisfies all three of its input lists
   - the lock satisfies every range and hashes every package
   - every CI install of the root list is constrained by the lock, and no root pin excludes a shipped version
   - every folder Dependabot watches holds a manifest

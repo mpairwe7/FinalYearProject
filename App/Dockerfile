@@ -38,19 +38,14 @@ RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     VIRTUAL_ENV="/opt/venv"
 
-# Install Python dependencies
-COPY App/backend/requirements.txt ./requirements.txt
+# Install Python dependencies from the hashed lock (ADR-0066, G690). It pins
+# requirements.txt and requirements-receptionist.txt together, with the Pillow
+# override in requirements-overrides.txt; its header has the compile command.
+# torch comes from the CUDA 12.6 index, so the install names the index the lock
+# was compiled against. docopt has no wheel, so builds stay allowed here.
+COPY App/backend/requirements.lock.txt ./requirements.lock.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
-
-# Voice receptionist (Pipecat + jellyfish phonetic keys). Override pipecat-ai's
-# conservative Pillow<13 metadata cap via uv --override so the resolver keeps
-# Pillow>=13.0.0 (remediating CVE-2026-112393 et al.) in a single atomic pass.
-COPY App/backend/requirements-receptionist.txt ./requirements-receptionist.txt
-RUN --mount=type=cache,target=/root/.cache/uv \
-    printf "Pillow>=13.0.0\n" > /tmp/pillow-override.txt && \
-    uv pip install -r requirements-receptionist.txt --override /tmp/pillow-override.txt && \
-    rm -f /tmp/pillow-override.txt
+    uv pip install --require-hashes -r requirements.lock.txt --extra-index-url https://download.pytorch.org/whl/cu126 --index-strategy unsafe-best-match
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
