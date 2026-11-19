@@ -273,6 +273,11 @@ class BridgeRevalidationTests(DeskTestCase):
 class LapsedOfficerMediaTests(DeskTestCase):
     """After the reconnect grace, the next officer must be able to take the call."""
 
+    async def grace_expired(self) -> None:
+        # The expiry also writes presence and the claim row; a fixed 0.2 s sleep lost that race on a slow runner.
+        async with asyncio.timeout(5):
+            await self.room.state.reconnect_timer
+
     async def test_grace_expiry_frees_the_media_seat_and_revokes_the_old_officer(self):
         await desk.claim(self.call_id, "okello")
         self.room.state.livekit_room = f"ura-{self.call_id}"
@@ -284,7 +289,7 @@ class LapsedOfficerMediaTests(DeskTestCase):
         ):
             await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
             self.assertEqual(self.room.state.livekit_officer_identity, "officer-okello-opaque")  # may reconnect
-            await asyncio.sleep(0.2)
+            await self.grace_expired()
         self.assertEqual(self.room.state.livekit_officer_identity, "")
         self.assertFalse(self.room.state.livekit_officer_route_active)
         revoke.assert_awaited_once_with(f"ura-{self.call_id}", "officer-okello-opaque")
@@ -301,7 +306,7 @@ class LapsedOfficerMediaTests(DeskTestCase):
             patch.object(desk.livekit, "close_room", new=AsyncMock()) as close_room,
         ):
             await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
-            await asyncio.sleep(0.2)
+            await self.grace_expired()
         self.assertEqual(self.room.state.livekit_officer_identity, "")
         self.assertEqual(self.room.state.mode, "ended")
         self.assertEqual(self.room.state.end_reason, "media_revocation_failed")

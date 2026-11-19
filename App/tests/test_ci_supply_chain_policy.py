@@ -637,3 +637,23 @@ def test_blog_nextjs_stays_in_step_with_frontend():
     assert blog_pkg["dependencies"]["next"] == frontend_next
     assert f"next@{frontend_next}" in blog_lock
 
+
+
+def test_the_declared_python_floor_is_the_oldest_python_a_lock_targets():
+    """Dependabot resolves with the lowest Python that ``requires-python`` admits. At >=3.10 its
+    /App job ran on 3.10, could not find soupsieve 4 (which needs 3.11.5) for the crawl lock,
+    and failed."""
+    import tomllib
+
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    declared = SpecifierSet(tomllib.loads((ROOT / "App" / "pyproject.toml").read_text(encoding="utf-8"))["project"]["requires-python"])
+    locks = ("App/ml/requirements-crawl.txt", "App/backend/requirements-cranecloud.lock.txt", "App/backend/requirements.lock.txt")
+    targets = {
+        lock: Version(re.search(r"--python-version (\S+)", (ROOT / lock).read_text(encoding="utf-8")).group(1)) for lock in locks
+    }
+    for lock, target in targets.items():
+        assert declared.contains(target), f"{lock} targets Python {target}, which requires-python excludes"
+    floor = next(Version(spec.version) for spec in declared if spec.operator == ">=")
+    assert floor == min(targets.values()), f"requires-python starts at {floor}, the oldest lock targets {min(targets.values())}"
