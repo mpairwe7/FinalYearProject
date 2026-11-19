@@ -33,7 +33,7 @@ services:
     # GPU-only host builds it here, once.
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: App/Dockerfile
       target: runtime
     image: ${DOCKER_IMAGE_API:-app-api}:latest
     container_name: ura-app-connectors

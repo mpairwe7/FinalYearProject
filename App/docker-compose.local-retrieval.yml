@@ -61,7 +61,7 @@ services:
   qdrant-indexer:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: App/Dockerfile
       target: runtime
     entrypoint: ["python", "-m", "app.vectorstore.index_lifecycle"]
     command: ["--rebuild"]
@@ -113,7 +113,7 @@ services:
   qdrant-backup:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: App/Dockerfile
       target: runtime
     entrypoint: ["python", "-m", "app.vectorstore.qdrant_backup"]
     command: ["--loop", "--interval-seconds", "86400", "--retry-seconds", "300", "--keep", "7"]

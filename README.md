@@ -386,7 +386,7 @@ gh run list --workflow=ci-ml-pipeline.yml
 Start the full observability stack:
 
 ```bash
-docker compose --profile monitoring up -d
+docker compose -f App/docker-compose.full.yml --profile monitoring up -d
 ```
 
 | Service | URL | Purpose |

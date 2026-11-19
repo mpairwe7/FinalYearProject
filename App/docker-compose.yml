@@ -55,7 +55,7 @@ services:
   api:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: App/Dockerfile
       target: runtime
     container_name: ura-app-api
     ports:
