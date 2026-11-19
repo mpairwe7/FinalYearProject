@@ -4134,6 +4134,13 @@ def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float
     k1, b = encoder._k1, encoder._b
     avg_dl = max(encoder._avg_dl, 1.0)
     norm = 1 - b + b * dl / avg_dl
+    # A word the state has never seen is rarer than any it has. The state can be
+    # older than a row (the committed one predates the Kiswahili FAQs), and skipping
+    # the word made every such row unfindable: all eight words of one question
+    # were unknown, so nothing scored and the search returned nothing (G673).
+    unseen_idf = getattr(encoder, "_unseen_idf", None)
+    if unseen_idf is None:
+        unseen_idf = encoder._unseen_idf = max(encoder._idf.values(), default=1.0)
     score = 0.0
     seen: set[str] = set()
     for q_term in query_tokens:
@@ -4141,9 +4148,7 @@ def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float
             continue
         seen.add(q_term)
         tid = encoder._vocab.get(q_term)
-        if tid is None:
-            continue
-        idf = encoder._idf.get(tid, 0.0)
+        idf = unseen_idf if tid is None else encoder._idf.get(tid, 0.0)
         if idf <= 0.0:
             continue
         f_t = tf.get(q_term, 0)
