@@ -71,6 +71,9 @@ KNOWN_SKIPS: dict[str, int] = {
     # speech and an officer's takeover); the receptionist-stack CI job runs it
     # (ADR-0055, G657). Every other test in the file runs everywhere.
     "App/backend/tests/test_receptionist_takeover_silence.py": 1,
+    # Merging the Compose base and its full overlay needs Docker Compose. In CI
+    # (`CI` set) the test runs or fails, so only a laptop without Docker skips it.
+    "App/tests/test_compose_build_paths.py": 1,
 }
 
 
