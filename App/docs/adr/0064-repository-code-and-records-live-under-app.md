@@ -165,9 +165,10 @@ Option 1, chosen by the service owner over the narrower option 2.
   the stack (`COMPOSE_FILE=App/docker-compose.full.yml`), and the build-path test
   below cover the risk that the two are mistaken for one.
 - A checkout now has `App/Model/bm25_state.json`, as the image does, so
-  `_simple_search` scores with BM25 locally too. With it, one Kiswahili FAQ row
-  does not retrieve itself (G673). The acronym test runs without the state, as it
-  always had.
+  `_simple_search` scores with BM25 locally too. The committed state dates from
+  May, and with it one Kiswahili FAQ row did not retrieve itself (G673). That is
+  fixed in the scoring, and the acronym test runs with the state again. The image
+  rebuilds its state from the corpus, so production was not affected.
 
 ## Confirmation
 
