@@ -54,7 +54,7 @@ Option 1, one part at a time, each in its own pull request.
 | --- | --- | --- | --- |
 | 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `RERANK_ENABLED` and `SPARSE_CPU_RERANKER` are both true. `_rerank` scores it like any reranker, and it reads the retriever's current BM25 encoder on every call | yes |
 | 2 | Attachment turns skip the calculator fast paths | the pipeline, on both the REST and the streaming path, with the foreign-jurisdiction decline kept | no |
-| 3 | The Gemini speech fallback | `speech/speech_service.py`, behind `STT_FALLBACK_BACKEND=gemini` | no |
+| 3 | The Gemini speech fallback | `_gemini_audio_transcribe` in `speech/speech_service.py`, the chain's last tier, on when `STT_FALLBACK_BACKEND=gemini`. Traced, under the cloud deadline, and a response with no content is not silence | yes |
 
 `SPARSE_CPU_RERANKER` is off unless set, so an image that cannot load a
 cross-encoder reranks only where a deployment asks for it. The Space's
@@ -77,9 +77,27 @@ lost a section of the script on an image that lacks the code replacing it.
   to an image from before this change, that image has no CPU reranker and
   serves fused order without reranking, as any torch-free image did before the
   layer existed.
-- The script still patches five files. Parts 2 and 3 remove two more sections;
-  the offline index, the PDF export and the gateway sections stay until someone
-  moves them too.
+- The script still patches four files: the pipeline, the offline index, the PDF
+  export and the gateway. Part 2 removes one more section; the rest stay until
+  someone moves them too.
+- **Part 3 changes three things in the speech fallback** (G698).
+  - Each call is traced with `tracing.llm_call` and reports the provider's own
+    token counts, as every model client must.
+  - The call runs under `SPEECH_CLOUD_DEADLINE_S`. The cloud pool does not
+    carry a turn's context, and the helper reads "may this turn use a cloud
+    model" from it. Run in the pool bare, it would read "yes" on a call turn
+    and send the recording. So the call runs inside a copy of the caller's
+    context, and a test holds that.
+  - A response with no candidate (a blocked prompt) or a candidate with no
+    part is no answer. It was returned as an empty transcript, which the chain
+    reports as "no speech detected" even with every other tier down.
+  - A transcript cut off at the output limit (`finishReason` `MAX_TOKENS`) is
+    no answer either. The request caps output at 1,024 tokens and a clip can
+    run for minutes, so the end of what was said, where the question usually
+    is, would be missing from text the caller read as complete.
+- **One finding is not taken.** A candidate whose text is empty still means the
+  model heard no words. That is the tested rule that keeps a mis-tap from being
+  reported as a failure, and the review's suggestion would have reversed it.
 
 ## Confirmation
 
@@ -94,5 +112,10 @@ lost a section of the script on an image that lacks the code replacing it.
 - `test_hf_space_layer.py` checks that the script no longer edits the
   retriever, that the class is in the repository, and that the Space's
   Dockerfile sets `SPARSE_CPU_RERANKER=true`.
+- `App/backend/tests/test_gemini_audio_fallback.py` holds the speech fallback:
+  the 18 tests that ran against the source as the script rewrote it now run on
+  the module, with five more for part 3. Each of three breaks fails one: the
+  pool without the turn's context, the call outside the deadline, and no
+  content returned as silence.
 - After the merge the Space is checked on the new image: `/ready` reports the
   reranker, the build log shows the script applied, and a live answer is read.
