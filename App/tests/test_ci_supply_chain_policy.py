@@ -678,8 +678,8 @@ def test_a_next_bump_does_not_hold_the_other_frontend_updates():
 
 
 def test_the_blog_lock_holds_every_override_the_manifest_declares():
-    """pnpm 11.20 regenerated the lock without the `overrides` block: it did not read
-    `pnpm.overrides` from package.json, said nothing, and nanoid resolved from 6.0.1 to 3.3.20."""
+    """pnpm 11.20 regenerated the lock without the `overrides` block: it no longer reads
+    `pnpm.overrides` from package.json, printed one warning, and nanoid resolved from 6.0.1 to 3.3.20."""
     declared = json.loads((ROOT / "App" / "blog" / "package.json").read_text(encoding="utf-8"))["pnpm"]["overrides"]
     lock = _load(ROOT / "App" / "blog" / "pnpm-lock.yaml")
     assert declared and lock["overrides"] == declared
