@@ -193,7 +193,9 @@ Option 1, chosen by the service owner over the narrower option 2.
   in phase D and the file itself had not, so eight callers named the repository root:
   the base stack's `env_file`, the backend's cloud settings (which read `.env` from
   the working directory, so only when started at the root), `validate_env.py`, three
-  Space secret scripts and the ZAP job. Each now names `App/.env`. The root
+  Space secret scripts and the ZAP job. Each now names `App/.env`. A ninth, the
+  monitoring check's `touch .env`, was found by CI and not by the search, so a test
+  now fails on any workflow that creates the file at the root. The root
   `.dockerignore` excludes `**/.env`: a pattern there is anchored at the context root,
   so `.env` alone would have left `App/.env` inside every build that starts at the root.
   A checkout made before this phase must move its own file: `mv .env App/.env`.

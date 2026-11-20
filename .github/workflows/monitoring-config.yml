@@ -72,6 +72,6 @@ jobs:
 
       - name: Compose monitoring profile resolves
         run: |
-          touch .env
+          touch App/.env
           METRICS_TOKEN=ci ALERTMANAGER_WEBHOOK_URL=http://example.invalid \
             docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml --profile monitoring --profile monitoring-gpu config --quiet

@@ -149,6 +149,19 @@ def test_every_compose_file_reads_the_settings_file_inside_app() -> None:
     assert climbing == []
 
 
+def test_no_workflow_creates_a_settings_file_at_the_repository_root() -> None:
+    """A job that starts Compose makes its own settings file. `touch .env` at the root left the
+    stack without one, and the monitoring check failed on it (seen on PR #804)."""
+    at_root = re.compile(r"(?:touch|>>?|tee)\s+(?:\./)?\.env(?:\s|$)")
+    found = [
+        f"{path.name}: {line.strip()}"
+        for path in sorted((APP.parent / ".github" / "workflows").glob("*.yml"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if at_root.search(line)
+    ]
+    assert found == []
+
+
 def test_a_build_from_the_repository_root_cannot_take_the_settings_file() -> None:
     """A `.dockerignore` pattern is anchored at the context root. `.env` alone excluded only a
     root-level file, which would have left `App/.env` inside the context of the API image."""
