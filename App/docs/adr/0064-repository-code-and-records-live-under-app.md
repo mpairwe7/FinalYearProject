@@ -218,8 +218,16 @@ Option 1, chosen by the service owner over the narrower option 2.
   one of them. A root `AGENTS.md` or `CLAUDE.md` on a developer's machine is a local
   pointer to `App/AGENTS.md`.
   Git removes a file from the working tree when a checkout moves to a commit that no
-  longer tracks it, so a checkout that wants its copies back restores them once:
-  `git archive 06ecc9a3 CLAUDE.md .claude .vscode | tar -x`.
+  longer tracks it, so a checkout that wants its copies back restores them once, from
+  the repository root: `git archive 06ecc9a3 CLAUDE.md .claude .vscode | tar -x`. The
+  restored `CLAUDE.md` names a root `AGENTS.md` that no longer exists, so change its
+  link to `App/AGENTS.md`.
+- An ignored file is not protected the way an untracked one is. Checking out a branch
+  that still tracks these paths overwrites the local copies without a warning, and
+  checking out a newer branch again deletes them. An independent check measured both.
+  So merge `dev` into an open branch before checking it out, or keep copies of local
+  agent files outside the repository. A `CLAUDE.md` with uncommitted edits stops the
+  first move with git's own error, and nothing is lost in that case.
 - `App/` holds one Compose file (phase F). The eleven overlays are in
   `App/infra/compose/`, and a command lists them after the base:
   `-f docker-compose.yml -f infra/compose/docker-compose.full.yml`. Compose reads the
@@ -273,5 +281,11 @@ Option 1, chosen by the service owner over the narrower option 2.
   connector and MCP overlays resolve the same with or without it. The full overlay
   differs in three values an operator is meant to set: the frontend's
   `NEXT_PUBLIC_API_URL` build argument and the Hugging Face token passed to vLLM under
-  two names. `test_compose_build_paths.py` fails if one of the five is read from the
+  two names. Both need the operator's own value: the template's API URL is the
+  development port, which the full stack does not publish, and its token is a
+  placeholder. The production overlay's required `CORS_ORIGINS` is met by the
+  template's localhost value, and the API then refuses to start with a localhost
+  origin in production, so that stack still fails closed, later. A name the template
+  only carries as a comment (`REDIS_URL`, the connector and web-research flags) now
+  reaches the stacks too if someone sets it. `test_compose_build_paths.py` fails if one of the five is read from the
   file again, or if an agent or editor file is tracked at the root.
