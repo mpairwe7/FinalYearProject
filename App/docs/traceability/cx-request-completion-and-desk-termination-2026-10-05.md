@@ -32,7 +32,7 @@ This release closes critical customer experience (CX) and operational gaps ident
 
 ### 2.2 Closed-Loop Conversational Bug & Knowledge Discrepancy Reporting
 * **Problem**:
-  - `_DISPUTE_PATTERNS` in `quality/discrepancy_detector.py` only matched `"that is..."` structures, missing `"this is wrong"`, `"your answer has an error"`, and explicit `"Report bug: ..."` phrases.
+  - `_DISPUTE_PATTERNS` in `discrepancy_detector.py` only matched `"that is..."` structures, missing `"this is wrong"`, `"your answer has an error"`, and explicit `"Report bug: ..."` phrases.
   - Standalone bug reports on turn 1 were dropped because `previous_bot_reply` was empty.
   - `_RATE_CLUES` failed on percentages like `6%` due to a trailing `\b` word boundary on non-word `%`.
   - In `service.py`, early exits (abstentions, workflows, calculators) returned directly without calling `_with_discrepancy(...)`, causing discrepancy badges to be lost.
