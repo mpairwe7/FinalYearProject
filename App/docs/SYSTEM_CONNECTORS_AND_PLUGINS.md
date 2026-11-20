@@ -349,8 +349,8 @@ message ──► connector_intent        names a service + asks for a record?  
                                           + "Demo data: …" attached by code for a practice system
 ```
 
-Modules: `app/connector_intent.py` (routing and argument guard), `app/connector_outcome.py`
-(wording), `app/tool_budget.py` (schema fitting), `app/rag/generator.py` (`generate_with_tools`,
+Modules: `app/connectors/connector_intent.py` (routing and argument guard), `app/connectors/connector_outcome.py`
+(wording), `app/rag/tool_budget.py` (schema fitting), `app/rag/generator.py` (`generate_with_tools`,
 `forced_operations`, `summarise_records`), `app/rag/pipeline.py` (`_with_connector_outcomes`).
 The runbook's §7.3 lists the knobs and §4.5a the failure signatures.
 

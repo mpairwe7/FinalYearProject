@@ -301,7 +301,7 @@ class TestAdminEndpointsE2E(unittest.TestCase):
     def test_a_hotfix_that_replaces_a_live_override_says_so(self):
         """CodeRabbit on PR 730: the hotfix also upserts an override, but its
         ledger entry lacked the replacement record the override route writes."""
-        from app import cms
+        from app.db import cms
 
         run = uuid.uuid4().hex[:8]
         query = f"wht on rent {run}"

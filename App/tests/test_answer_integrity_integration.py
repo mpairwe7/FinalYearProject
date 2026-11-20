@@ -604,7 +604,7 @@ class TestOctober2026GapClosuresIntegration:
     """End-to-end integration tests for G288, G290, G293, G294 across REST and SSE."""
 
     def test_g290_staff_answer_override_serves_on_both_rest_and_sse_with_punctuation_variance(self, client):
-        from app import cms
+        from app.db import cms
 
         cms.upsert(
             "What is the special URA test override question",

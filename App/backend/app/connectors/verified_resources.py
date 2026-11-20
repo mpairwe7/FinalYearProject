@@ -5,7 +5,7 @@ Every entry below is a real page on an official URA host, confirmed live
 at the official *page* for a task — the place URA publishes the current form —
 rather than at a guessed file path: URA re-uploads forms under dated
 ``/storage/YYYY/MM/`` paths, so a page link stays right when a form is revised
-and a file link silently breaks. Run ``python -m app.verified_resources --check``
+and a file link silently breaks. Run ``python -m app.connectors.verified_resources --check``
 before moving :data:`VERIFIED_ON` forward.
 
 Three rules hold for every link this module emits:
@@ -32,7 +32,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .topics import classify_topic
+from ..memory.topics import classify_topic
 
 logger = logging.getLogger(__name__)
 
@@ -581,7 +581,7 @@ _RESOURCES: tuple[OfficialResource, ...] = (
 _BY_ID: dict[str, OfficialResource] = {r.id: r for r in _RESOURCES}
 _ORDER: dict[str, int] = {r.id: i for i, r in enumerate(_RESOURCES)}
 
-#: Conversation topics (``app.topics``) and workflow ids, each mapped to the
+#: Conversation topics (``app.memory.topics``) and workflow ids, each mapped to the
 #: pages that serve it, best first.
 _TOPIC_RESOURCES: dict[str, tuple[str, ...]] = {
     "tin_registration": ("tin_individual", "tin_non_individual", "tin_instant", "tin_forms"),

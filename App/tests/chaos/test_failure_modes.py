@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.tools.ura_account import account_api_status
-from app.ura_account_mock import account_mode
+from app.connectors.ura_account_mock import account_mode
 from app.malware_scan import MalwareRejected, scan_required
 from app.tenancy import qdrant_payload_filter, rls_set_local_sql
 

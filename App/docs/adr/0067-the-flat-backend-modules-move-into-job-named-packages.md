@@ -59,7 +59,7 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | 5 | `quality/` | `quality_audit`, `service_ratings`, `audit_reviews`, `evaluation`, `discrepancy_detector`, `journey_analytics` | yes |
 | 6 | `tax/` (it existed) | `calculator_router`, `scenario_planner` | yes |
 | 7 | `processing/`, `chat/`, `quality/` | `documents`, `document_worker`, `ocr_service`; `chat_ws_v2`, `chat_title`, `conversational`, `model_welfare`, `turn_guidance`, `turn_pipeline`; `artifact_export` | yes |
-| 8 | `connectors/`, `memory/`, `rag/`, `tax/`, `db/` | `connector_intent`, `connector_outcome`, `portal_copilot`, `ura_account_mock`, `verified_resources`; `topics`; `tool_budget`; `glossary`; `cms` | no |
+| 8 | `connectors/`, `memory/`, `rag/`, `tax/`, `db/` | `connector_intent`, `connector_outcome`, `portal_copilot`, `ura_account_mock`, `verified_resources`; `topics`; `tool_budget`; `glossary`; `cms` | yes |
 | 9 | `security/`, `notifications/`, `offline/`, `ingestion/`, `db/` | `authority`, `production_readiness`, `retention`, `ai_disclosure`, `confirm_tokens`; `notify`, `reminders`; `offline_bundle`, `offline_sync`; `crawl_gate`, `publications`; `storage_protocol`, `seed_prototype` | no |
 | 10 | `providers/`, `processing/` | `sunbird`; `pdf_export` | no |
 
@@ -107,7 +107,9 @@ so merging them would change how a reported number is reproduced.
   `app/quality/`, and the calculators beside the rate tables in `app/tax/`.
   Forty-seven modules stayed flat after phase 6, down from 79. Phase 7 moves
   ten more: document handling is in `app/processing/`, and the chat turn outside
-  retrieval is in `app/chat/`. Imports read `from .speech import speech_service`; a
+  retrieval is in `app/chat/`. Phase 8 moves nine: the portal and connector
+  modules are in `app/connectors/`, and four join `memory/`, `rag/`, `tax/`
+  and `db/`. Imports read `from .speech import speech_service`; a
   caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new

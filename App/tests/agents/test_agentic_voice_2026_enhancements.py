@@ -1417,7 +1417,8 @@ def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_c
 
 
 def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
-    from app import glossary, mt, sunbird
+    from app.tax import glossary
+    from app import mt, sunbird
     from app.speech import orpheus_tts, spark_tts_salt
     from app.speech import speech_service as ss
     from app.memory.language_state import normalize_locale_tag, resolve_turn_locale
@@ -1776,7 +1777,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
     from app.tax.calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
     from app.quality.discrepancy_detector import format_discrepancy_acknowledgement
     from app.memory.resolution_ledger import ResolutionCase, build_resumption_prompt
-    from app.ura_account_mock import format_prn_voucher_reply
+    from app.connectors.ura_account_mock import format_prn_voucher_reply
     from app.workflows.registry import is_side_question
     from app.workflows.slots import validate_slot
 

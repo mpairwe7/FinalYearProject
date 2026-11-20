@@ -86,7 +86,7 @@ steps:
       clearance process with the supporting documentation ready for review.
     slot: ""
     validator: text
-    # Ids in app/verified_resources.py — every link there was checked live.
+    # Ids in app/connectors/verified_resources.py — every link there was checked live.
     portal_action: single_window
     resources:
       - customs_systems

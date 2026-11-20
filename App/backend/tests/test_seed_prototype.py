@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from app.db import database as db
-from app.cms import lookup
+from app.db.cms import lookup
 from app.seed_prototype import seed, should_seed
 
 

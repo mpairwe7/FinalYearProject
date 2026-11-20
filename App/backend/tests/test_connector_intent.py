@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.connector_intent import (
+from app.connectors.connector_intent import (
     MAX_FORCED_OPERATIONS,
     detect_connector_intent,
     missing_arguments,

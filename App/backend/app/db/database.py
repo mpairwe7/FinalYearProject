@@ -3268,7 +3268,7 @@ def delete_answer_override(override_id: str) -> bool:
 # Knowledge Discrepancies & Reporting
 # ---------------------------------------------------------------------------
 def _compute_discrepancy_dedup_key(bot_statement: str, user_correction: str) -> str:
-    from ..cms import normalize_query
+    from .cms import normalize_query
     b = normalize_query(bot_statement)[:80]
     u = normalize_query(user_correction)[:80]
     return hashlib.sha256(f"{b}|{u}".encode("utf-8")).hexdigest()[:16]

@@ -1,4 +1,4 @@
-"""The words a taxpayer gets after a service was asked — see ``app.connector_outcome``.
+"""The words a taxpayer gets after a service was asked — see ``app.connectors.connector_outcome``.
 
 Every case here is a sentence the real model wrote, live, about a result that
 did not say it: "likely counterfeit" for a stamp the fixtures simply did not
@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from app.connector_outcome import (
+from app.connectors.connector_outcome import (
     DEMO_NOTICE,
     FOUND,
     NEEDS_INPUT,

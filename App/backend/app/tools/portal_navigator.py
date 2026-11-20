@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..verified_resources import get_resource
+from ..connectors.verified_resources import get_resource
 from . import Tool, ToolRegistry, ToolSchema
 from .portal_navigator_data import (
     EXTERNAL_URA_PORTALS,

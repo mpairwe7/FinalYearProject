@@ -1,4 +1,4 @@
-"""Phase A unit tests for URA Portal Task Execution & Inbuilt DOM Co-Pilot (`portal_copilot.py`)."""
+"""Phase A unit tests for URA Portal Task Execution & Inbuilt DOM Co-Pilot (`connectors/portal_copilot.py`)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from app.db import database as db
 from app.config.flags import _REGISTRY, flags
-from app.portal_copilot import (
+from app.connectors.portal_copilot import (
     PORTAL_TASK_CATALOG,
     PortalTaskOwnershipError,
     PortalTaskTier,

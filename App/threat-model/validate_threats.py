@@ -625,7 +625,7 @@ THREAT_REGISTRY: list[dict] = [
             "the portal call and the receipt write leaves the lease held until it lapses, and the outcome is "
             "read from the connector, not from this service"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/db/database.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/db/database.py",
                      "App/backend/app/db/postgres.py", "App/backend/app/main.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
         "status": "mitigated",
@@ -649,7 +649,7 @@ THREAT_REGISTRY: list[dict] = [
             "shows. 27 hostile pages run as a gate. Residual: the instruction-phrase screen misses sentences it "
             "does not know; the structural rules do not depend on it"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
                      "App/backend/app/api/models.py", "App/evals/portal_copilot_scenarios/adversarial.jsonl",
                      "App/tests/agents/test_portal_copilot_adversarial_eval.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
@@ -703,7 +703,7 @@ THREAT_REGISTRY: list[dict] = [
             "refused for those sign-ins until it issues one (G565); an unsigned state is accepted outside "
             "production when no secret is set (G564)"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/main.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/main.py",
                      "App/plugins/tin_registration/connector.py",
                      "App/backend/app/tools/portal_navigator_data.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
@@ -1271,9 +1271,9 @@ THREAT_REGISTRY: list[dict] = [
         "description": "Agentic portal task confirmation tampering, cross-session replay, step-up OAuth open-redirect (returnTo), or DOM co-pilot secret harvesting (ADR-0013, ADR-0014, OWASP ASI02/ASI03/ASI09, TPCA Cap. 343 s. 75)",
         "owasp_llm": "LLM06",
         "mitre_atlas": "AML.T0051",
-        "mitigation": "4-tier portal task policy engine (portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing",
+        "mitigation": "4-tier portal task policy engine (connectors/portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing",
         "evidence": [
-            "App/backend/app/portal_copilot.py",
+            "App/backend/app/connectors/portal_copilot.py",
             "App/frontend/src/lib/oidcFlow.ts",
             "App/tests/agents/test_portal_copilot.py",
         ],

@@ -52,10 +52,10 @@ from ..tickets import officer_hours
 from ..agents import AgentRoute, supervisor
 from ..agents.critic import RevisionBudget, evaluate
 from ..observability.analytics import metrics
-from ..connector_intent import ConnectorIntent, detect_connector_intent
-from ..connector_outcome import classify_all as classify_connector_outcomes
-from ..connector_outcome import compose as compose_connector_reply
-from ..connector_outcome import connectors_used as _outcome_connectors_used
+from ..connectors.connector_intent import ConnectorIntent, detect_connector_intent
+from ..connectors.connector_outcome import classify_all as classify_connector_outcomes
+from ..connectors.connector_outcome import compose as compose_connector_reply
+from ..connectors.connector_outcome import connectors_used as _outcome_connectors_used
 from ..tickets.escalation_notify import notify_ticket_created, team_for_topic
 from ..agents.patterns.ach import (
     _FAREWELL_PHRASES as _ACH_FAREWELL_PHRASES,
@@ -233,7 +233,7 @@ from ..text_signals import (
     split_sentences,
     tone_hint_for,
 )
-from ..topics import classify_topic, resolve_topic, topic_retrieval_query
+from ..memory.topics import classify_topic, resolve_topic, topic_retrieval_query
 from ..observability.tracing import (
     record_evaluation,
     record_retrieval_metrics,
@@ -245,7 +245,7 @@ from ..observability.tracing import (
     usage_summary,
 )
 from ..chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
-from ..verified_resources import resources_for_turn
+from ..connectors.verified_resources import resources_for_turn
 from ..workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from ..workflows.slots import validate_slot
 
@@ -1889,7 +1889,7 @@ def _with_connector_outcomes(result: dict[str, Any] | None) -> dict[str, Any] | 
     A record is summarised by the model; "no record", "I need the TIN" and
     "the service could not be asked" are the services' own words, and the
     practice-data notice is attached here rather than hoped for
-    (:mod:`app.connector_outcome`). A turn that made no connector call is
+    (:mod:`app.connectors.connector_outcome`). A turn that made no connector call is
     returned untouched.
     """
     if not result or not result.get("tool_calls"):
@@ -7047,7 +7047,7 @@ class ChatModel:
         if not portal_context and not portal_task_submission and detect_foreign_jurisdiction(router_message or message):
             return None, None
 
-        from .. import portal_copilot as pc_mod
+        from ..connectors import portal_copilot as pc_mod
 
         eff_tenant = tenant_id or "default"
         if (
@@ -9705,7 +9705,7 @@ class ChatModel:
             any(k in text for k in ("generate a prn", "generate prn", "create a prn", "create prn", "issue a prn", "issue prn", "generate my prn", "prn slip for my"))
             and not any(k in text for k in ("guide me to", "workflow", "how to generate", "how do i generate", "steps to generate"))
         ):
-            from ..ura_account_mock import generate_mock_prn, format_prn_voucher_reply
+            from ..connectors.ura_account_mock import generate_mock_prn, format_prn_voucher_reply
             from ..tax.calculator_router import extract_amounts
 
             amts = extract_amounts(message) or extract_amounts(rewritten)
@@ -11787,7 +11787,7 @@ class ChatModel:
                 return crisis
 
             if flags.is_enabled("answer_overrides"):
-                from .. import cms as _cms
+                from ..db import cms as _cms
 
                 override = (
                     _cms.lookup(message)
@@ -13981,7 +13981,7 @@ class ChatModel:
             }
 
         if flags.is_enabled("answer_overrides"):
-            from .. import cms as _cms
+            from ..db import cms as _cms
 
             override_s = (
                 _cms.lookup(message)

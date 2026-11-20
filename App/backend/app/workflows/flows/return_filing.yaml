@@ -88,7 +88,7 @@ steps:
       password, one-time code, or payment credentials in chat.
     slot: ""
     validator: text
-    # Ids in app/verified_resources.py — every link there was checked live.
+    # Ids in app/connectors/verified_resources.py — every link there was checked live.
     portal_action: etax_login
     resources:
       - file_return

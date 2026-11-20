@@ -7,7 +7,7 @@ On by default (`workflows` flag).
 
 | File | Role |
 | --- | --- |
-| `loader.py` | YAML → `WorkflowDefinition`; resolves `portal_action` and `resources` ids against `app/verified_resources.py` |
+| `loader.py` | YAML → `WorkflowDefinition`; resolves `portal_action` and `resources` ids against `app/connectors/verified_resources.py` |
 | `registry.py` | `WorkflowRegistry` (load, `match_trigger`, `advance`, `pending_step`) and `compute_workflow_progress` for the stepper |
 | `slots.py` | Validators: `text`, `boolean`, `number[min=…]`, `enum[a,b]`, `regex[…]` |
 | `flows/*.yaml` | One file per journey |
@@ -111,9 +111,9 @@ they meet it.
    links). Put **every question before every information-only step**:
    `advance` shows an information step once and moves on, so a question after
    one receives the reply meant for the information step. `FlowShapeTests`
-   fails the build otherwise. Links are ids from `app/verified_resources.py`;
+   fails the build otherwise. Links are ids from `app/connectors/verified_resources.py`;
    add a new page there only after it has passed
-   `python -m app.verified_resources --check`.
+   `python -m app.connectors.verified_resources --check`.
 2. Pick trigger phrases a taxpayer would type as a task, not as a question.
 3. Add cases to `App/backend/tests/test_guided_journeys_and_ei.py` and a live
    case to `App/scripts/probe_guided_journeys.py`, then follow

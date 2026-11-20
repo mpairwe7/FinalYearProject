@@ -141,7 +141,7 @@ class Citation(BaseModel):
 
 
 class ResourceLink(BaseModel):
-    """An official URA page offered beside an answer (see ``app.verified_resources``)."""
+    """An official URA page offered beside an answer (see ``app.connectors.verified_resources``)."""
 
     id: str = Field(..., description="Registry id, stable across releases")
     title: str

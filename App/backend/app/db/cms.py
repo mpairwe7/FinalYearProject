@@ -19,7 +19,7 @@ def normalize_query(text: str) -> str:
 
 
 def lookup(query: str) -> dict[str, Any] | None:
-    from .db import database as db
+    from . import database as db
 
     key = normalize_query(query)
     if not key:
@@ -41,7 +41,7 @@ def upsert(
     created_by: str = "",
     enabled: bool = True,
 ) -> dict[str, Any]:
-    from .db import database as db
+    from . import database as db
 
     key = normalize_query(query)
     if not key:

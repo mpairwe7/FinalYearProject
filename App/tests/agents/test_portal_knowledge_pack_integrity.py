@@ -25,7 +25,7 @@ sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 
 from app.tools import ToolRegistry  # noqa: E402
 from app.tools import portal_navigator_data as pnd  # noqa: E402
-from app.verified_resources import is_authoritative_ura_url  # noqa: E402
+from app.connectors.verified_resources import is_authoritative_ura_url  # noqa: E402
 
 PACK = REPO_ROOT / "App" / "backend" / "app" / "tools" / "data" / "portal_navigation_overrides.json"
 
