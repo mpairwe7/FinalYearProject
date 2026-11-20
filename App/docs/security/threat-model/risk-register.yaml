@@ -406,7 +406,7 @@ risks:
     threat: Live web research SSRF, DNS rebinding to internal/metadata IPs, or malicious statutory/MDA PDF extraction outside the ephemeral sandbox (ADR-0008, ADR-0009, OWASP ASI04/ASI05)
     severity: High
     cvss: "8.5"
-    existing_controls: Domain allowlisting with pre-connect DNS IP resolution blocking private/loopback/link-local ranges, follow_redirects=False, and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural guardrails/pdf.py checks
+    existing_controls: Domain allowlisting with pre-connect DNS IP resolution blocking private/loopback/link-local ranges, follow_redirects=False, and isolated subprocess extraction in research/ephemeral_pdf_sandbox.py with structural guardrails/pdf.py checks
     status: Mitigated
     mitigation_target: Shipped
     owner: backend-team

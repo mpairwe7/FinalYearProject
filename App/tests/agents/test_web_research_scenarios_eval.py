@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 
 from app.db import database as db
-from app import ephemeral_pdf_sandbox as sbx
+from app.research import ephemeral_pdf_sandbox as sbx
 from app import scenario_planner as sp
-from app import web_fx
-from app import web_research as wr
+from app.research import web_fx
+from app.research import web_research as wr
 from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
 
 SCENARIOS_PATH = Path(__file__).resolve().parents[3] / "App" / "evals" / "web_research_scenarios" / "scenarios.jsonl"

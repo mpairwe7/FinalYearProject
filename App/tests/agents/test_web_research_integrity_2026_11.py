@@ -12,9 +12,9 @@ import time
 
 import httpx
 import pytest
-from app import egress
-from app import ephemeral_pdf_sandbox as sbx
-from app import web_research as wr
+from app.research import egress
+from app.research import ephemeral_pdf_sandbox as sbx
+from app.research import web_research as wr
 from app.guardrails.input_checks import injection_present, scan_retrieved_text
 from app.guardrails.pii import contains_pii, pii_values
 
@@ -261,7 +261,7 @@ def test_a_failed_sandbox_import_gives_its_slot_back(monkeypatch):
     """CodeRabbit on #704: the import sat outside the guard that releases the slot."""
     import sys
 
-    monkeypatch.setitem(sys.modules, "app.ephemeral_pdf_sandbox", None)
+    monkeypatch.setitem(sys.modules, "app.research.ephemeral_pdf_sandbox", None)
     for _ in range(wr.WEB_RESEARCH_DOCUMENT_WORKERS + 1):
         wr.clear_web_search_cache()
         outcome = _research(PDF_RESULT + OFFICIAL, pdf=None)

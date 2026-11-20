@@ -39,13 +39,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from . import egress
-from .document_worker import try_isolated
-from .redis_shared import shared_redis
-from .guardrails.input_checks import _record_guardrail_security_event, injection_present
-from .malware_scan import MalwareRejected, scan_bytes
-from .mcp.validation import screen_tool_result
-from .ingestion.pdf_corpus import CORPUS_FETCH_USER_AGENT
-from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+from ..document_worker import try_isolated
+from ..redis_shared import shared_redis
+from ..guardrails.input_checks import _record_guardrail_security_event, injection_present
+from ..malware_scan import MalwareRejected, scan_bytes
+from ..mcp.validation import screen_tool_result
+from ..ingestion.pdf_corpus import CORPUS_FETCH_USER_AGENT
+from ..guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
     TAINTED_DOCUMENT_MARKER,
     classify_source_authority,
@@ -278,8 +278,8 @@ def _finalize_extracted_pdf_pages(raw_bytes: bytes, raw_pages: list[tuple[int, s
     """Strip ContentLayer.FURNITURE and enrich pages with structured Markdown tables (G443, G447)."""
     if not raw_pages:
         return []
-    from .ingestion.docling_intelligence import strip_document_furniture
-    from .vision.table_structuring import structure_document_tables
+    from ..ingestion.docling_intelligence import strip_document_furniture
+    from ..vision.table_structuring import structure_document_tables
 
     page_nums = [p_num for p_num, _ in raw_pages]
     cleaned_texts, _ = strip_document_furniture([txt for _, txt in raw_pages])
@@ -428,7 +428,7 @@ def _split_page_text_structure_aware(page_text: str, *, target_chars: int = _CHU
     if len(page_text) <= target_chars:
         return [page_text] if page_text.strip() else []
 
-    from .ingestion.docling_intelligence import split_markdown_table_preserving_headers
+    from ..ingestion.docling_intelligence import split_markdown_table_preserving_headers
 
     # Separate paragraphs and Markdown table blocks
     blocks: list[tuple[str, bool]] = []

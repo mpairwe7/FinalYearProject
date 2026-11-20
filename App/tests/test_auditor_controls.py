@@ -383,7 +383,7 @@ _WRITE_PARAMS = {"/v1/admin/flags/{name}": {"enabled": "true"}}
 
 def _receptionist_call(tenant: str) -> str:
     from App.backend.app.receptionist.store import create_call, init_receptionist_schema
-    from App.backend.app.voice_consent import init_voice_consent_schema
+    from App.backend.app.speech.voice_consent import init_voice_consent_schema
 
     init_receptionist_schema()
     init_voice_consent_schema()
@@ -473,7 +473,7 @@ def test_every_voice_event_the_code_writes_is_a_known_type():
     """An unknown type still writes, but logs a warning on every call-desk action."""
     import ast
 
-    from App.backend.app.voice_consent import VOICE_EVENT_TYPES
+    from App.backend.app.speech.voice_consent import VOICE_EVENT_TYPES
 
     def constants(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):

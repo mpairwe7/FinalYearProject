@@ -10,10 +10,10 @@ import pytest
 
 from app.vectorstore import corpus_sync as cs
 from app.db import database as db
-from app import ephemeral_pdf_sandbox as sbx
+from app.research import ephemeral_pdf_sandbox as sbx
 from app.rag import pipeline
-from app import web_fx
-from app import web_research as wr
+from app.research import web_fx
+from app.research import web_research as wr
 from app.agents.critic import verify_figure_lock
 from app.rag.claim_verifier import verify_claims
 from app.config.flags import flags

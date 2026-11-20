@@ -18,7 +18,7 @@ const BASE = "/api";
 const TIMEOUT_MS = 15_000;
 
 /**
- * Version tag recorded on each consent receipt. `voice_consent.py` writes
+ * Version tag recorded on each consent receipt. `speech/voice_consent.py` writes
  * "1.0" for the voice purposes, so grants from this UI carry the same version
  * rather than inventing a second one the backend has never seen.
  */

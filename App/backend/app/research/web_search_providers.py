@@ -10,7 +10,7 @@ an empty result list indistinguishable from "URA has published nothing".
 Three things follow from that, and this module is where they are enforced:
 
 * A provider's job ends at :class:`RawResult`. Authority, injection screening
-  and recency are decided once, in :mod:`app.web_research`, so a new backend
+  and recency are decided once, in :mod:`app.research.web_research`, so a new backend
   cannot weaken them. A provider's own generated answer is never requested: it
   is prose with no page behind it.
 * Failure is a distinct outcome. :class:`ProviderError` names why a backend
@@ -19,7 +19,7 @@ Three things follow from that, and this module is where they are enforced:
 * The unsupported HTML path is not available in production at all
   (:func:`unsanctioned_allowed`), whatever the environment says.
 
-Only the closed-vocabulary query from :func:`app.web_research.build_search_queries`
+Only the closed-vocabulary query from :func:`app.research.web_research.build_search_queries`
 reaches this module. Every provider here is an external processor, so
 :func:`external_provider_names` feeds the cross-border gate in
 :mod:`app.production_readiness` (G35).
@@ -41,7 +41,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from . import egress
-from .resilience import CircuitBreaker
+from ..resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -460,7 +460,7 @@ _BREAKER_LOCK = threading.Lock()
 
 def unsanctioned_allowed() -> bool:
     """Whether the HTML fallback may run: never in production, opt-out elsewhere."""
-    from .production_readiness import is_production
+    from ..production_readiness import is_production
 
     if is_production():
         return False
@@ -524,7 +524,7 @@ def reset_breakers() -> None:
 
 def _count(provider: str, outcome: str) -> None:
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "web_search_requests_total",

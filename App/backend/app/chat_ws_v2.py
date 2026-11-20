@@ -45,7 +45,7 @@ from .rag import pipeline as pipeline_module
 from .observability.analytics import MetricSpec, metrics, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .config.flags import flags
-from .voice_ws_v2 import _send_error, _send_json
+from .speech.voice_ws_v2 import _send_error, _send_json
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from app import egress
-from app import ephemeral_pdf_sandbox as sbx
+from app.research import egress
+from app.research import ephemeral_pdf_sandbox as sbx
 from app.guardrails.pdf import PdfRejected
 
 

@@ -18,7 +18,7 @@ from app.main import app
 from app.receptionist.hub import CallEventHub, hub
 from app.receptionist.state import CallRoom, CallState, registry
 from app.receptionist.store import create_call, create_turn, get_call, init_receptionist_schema, update_call
-from app.voice_consent import init_voice_consent_schema
+from app.speech.voice_consent import init_voice_consent_schema
 
 
 def _listen_records(call_id: str) -> list[tuple[str, str, str]]:
@@ -78,7 +78,7 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
 
             # Authenticated caller who accepts the pre-call consent pop-up (voice_consent_accepted=True)
             # has their voice_recording consent receipt persisted just-in-time rather than being rejected.
-            from app.voice_consent import require_voice_consent
+            from app.speech.voice_consent import require_voice_consent
 
             uid = f"user_jit_{uuid.uuid4().hex[:8]}"
             tok = make_dev_token(uid, role="verified_taxpayer")

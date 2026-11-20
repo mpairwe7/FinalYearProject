@@ -58,11 +58,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .db import database as db
-from .guardrails.input_checks import AI_ORGANISATION_SUFFIX, scan_retrieved_text
-from .guardrails.pii import redact_pii_text
-from .linear_text import strip_spans
-from .tax.tables import get_table
+from ..db import database as db
+from ..guardrails.input_checks import AI_ORGANISATION_SUFFIX, scan_retrieved_text
+from ..guardrails.pii import redact_pii_text
+from ..linear_text import strip_spans
+from ..tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
 from .web_search_providers import (
     ALLOWED_SEARCH_ENGINE_HOSTS,
@@ -739,7 +739,7 @@ def resolves_to_public_address(hostname: str) -> bool:
     Checked before connecting, on every redirect hop, as an early refusal. An
     allowlisted name is not proof of a safe destination: a hijacked record could
     point it at a metadata service. The pin that closes DNS rebinding is in
-    :mod:`app.egress`, which validates the very address the socket connects to
+    :mod:`app.research.egress`, which validates the very address the socket connects to
     (T43, ADR-0035); this check alone could not, since it resolves separately.
     """
     try:
@@ -963,7 +963,7 @@ def detect_research_triggers(
     # An RRF score is not comparable to the reranker scale. It reads as "unknown"
     # here, as it does at the abstention gate; reading it as 0.0 sent every
     # question to the web whenever the reranker was down.
-    from .rag.retriever import gating_relevance
+    from ..rag.retriever import gating_relevance
 
     relevances = [
         score
@@ -1280,7 +1280,7 @@ def _established_date(row: RawResult) -> date | None:
 
 def _screened(title: str, snippet: str, raw_text: str = "") -> tuple[str, str, bool]:
     """Clean a result's text. The flag means it read as an instruction."""
-    from .mcp.validation import screen_tool_result
+    from ..mcp.validation import screen_tool_result
 
     clean_title = strip_markup(title)[:_MAX_RESULT_TEXT_CHARS]
     clean_snippet = strip_markup(snippet)[:_MAX_RESULT_TEXT_CHARS]
@@ -1664,7 +1664,7 @@ def _live_check_notice(status: str, checked_at: str, unchecked: Iterable[str] = 
 
 def _record_outcome(outcome: WebResearchTurnOutcome, seconds: float) -> None:
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc("web_research_turns_total", labels={"status": outcome.status})
         metrics.observe("web_research_duration_seconds", seconds)
@@ -1777,7 +1777,7 @@ def corpus_sync_permitted() -> bool:
     production that needs an operator's explicit approval as well as the flag, so
     a search provider going live cannot switch it on by accident (ASI06, G331).
     """
-    from .production_readiness import is_production
+    from ..production_readiness import is_production
 
     if not is_production():
         return True
@@ -1802,7 +1802,7 @@ def run_web_research(
     persist_files: bool = True,
 ) -> WebResearchTurnOutcome:
     """Live research for one turn, inside its wall-clock budget, with an honest status."""
-    from .config.flags import flags
+    from ..config.flags import flags
 
     started = time.monotonic()
     checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1926,7 +1926,7 @@ def run_web_research(
             if do_sync and not corpus_sync_permitted():
                 logger.warning("Corpus sync refused: WEB_SYNC_PRODUCTION_APPROVED is not set")
             elif do_sync and can_persist_to_qdrant(sandbox_doc.url):
-                from .vectorstore.corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
+                from ..vectorstore.corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
 
                 # The topic of the search that found this document, not the
                 # turn's first: the ledger must not mark the wrong topic as checked.

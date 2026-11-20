@@ -15,8 +15,8 @@ from datetime import date
 import pytest
 
 from app.rag import prompt_builder
-from app import web_research as wr
-from app.web_search_providers import RawResult, parse_ddg_html
+from app.research import web_research as wr
+from app.research.web_search_providers import RawResult, parse_ddg_html
 
 POISONED = (
     '<a class="result__a" href="https://ulii.org/akn/ug/judgment/ugca/2026/1">Commissioner v Doe</a>'
@@ -365,7 +365,7 @@ class TestDestinationCheck:
         assert wr.resolves_to_public_address("ura.go.ug") is False
 
     def test_the_downloader_refuses_before_connecting(self, monkeypatch):
-        from app import ephemeral_pdf_sandbox as sbx
+        from app.research import ephemeral_pdf_sandbox as sbx
 
         self._resolving_to(monkeypatch, "169.254.169.254")
 

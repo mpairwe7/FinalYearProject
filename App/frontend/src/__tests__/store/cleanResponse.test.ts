@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import { cleanResponse } from '../../store/useChatStore';
 
-// Verbatim from App/backend/app/web_research.py (LIVE_UNAVAILABLE) and
+// Verbatim from App/backend/app/research/web_research.py (LIVE_UNAVAILABLE) and
 // App/backend/app/rag/pipeline.py (TURN_DEADLINE_MESSAGE).
 const LIVE_UNAVAILABLE =
   "I could not check URA's website just now, so this may not include recent changes. " +

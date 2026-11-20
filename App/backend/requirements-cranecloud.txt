@@ -89,7 +89,7 @@ websockets>=17.2
 pydantic-settings>=2.15.0
 boto3>=1.43.114
 
-# DNS-over-HTTPS resolver (doh_resolver.py) — RENU pods have no working upstream
+# DNS-over-HTTPS resolver (research/doh_resolver.py) — RENU pods have no working upstream
 # DNS; this resolves external hostnames via 1.1.1.1 over TCP/443 when USE_DOH=true.
 dnspython>=2.9.0
 

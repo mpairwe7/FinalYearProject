@@ -49,16 +49,16 @@ App/
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
-│   │   ├── web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
-│   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
+│   │   ├── research/web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
+│   │   ├── research/ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails/    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
 │   │   ├── linear_text.py   # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   ├── guardrails/friction.py # Per-principal cool-down after repeated guard refusals (G464)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
-│   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)
-│   │   ├── voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
+│   │   ├── speech/voice_stream_v2.py # V2 voice session (dual-path + vision)
+│   │   ├── speech/voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
 │   │   └── ...              # resilience, tracing, analytics and the other top-level modules
 │   └── requirements.txt
 └── frontend/          # Next.js 16 PWA frontend
@@ -138,7 +138,7 @@ for normal chat usage.
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
 11. **Cross-MDA Interdependence, Queue-Reduction & New-Taxpayer Onboarding (`tools/mda_interdependence.py`, `ADR-0009`)** — 6 deterministic MCP tools (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) and 2 guided journeys (`mda_ntr_resolution.yaml`, `new_taxpayer_and_relief.yaml`) resolving 3-hop PRN settlement across all 10 high-dependency Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`), `0%` (`UGX 0`) Presumptive Tax onboarding below `UGX 10,000,000`, NIRA NIN-to-TIN pre-flight checks, B2G `IFMS` `6%` WHT / `18%` Deemed VAT / `UNBS` PVoC holds, Day-1 Nil-Return penalty shields (`UGX 200,000/month`), Voluntary Disclosure (`TPC Act s.66(1a)` 100% penalty/interest waiver) / `s.40` TCC-unlocking instalment plans, and FY2026-27 `5%` consumer EFRIS e-receipt refunds (`UGX 2,000,000` threshold)
-12. **Live Web Research, Ephemeral PDF Sandbox & Self-Updating Qdrant (`web_research.py`, `ephemeral_pdf_sandbox.py`, `vectorstore/corpus_sync.py`, `ingestion/pdf_corpus.py`, `ADR-0008`, `ADR-0009`)** — indicative market FX with Bank of Uganda precedence, 9-trigger official source discovery across URA/Parliament/ULII/10-MDA allowlists, `tmpfs`-isolated PDF/XLSX inspection (`pdf_guards` + GPU micro-reranking), and zero-downtime Qdrant corpus hot-swapping (`186` PDFs → `5,639` statutory chunks → `7,251` hybrid vectors)
+12. **Live Web Research, Ephemeral PDF Sandbox & Self-Updating Qdrant (`research/web_research.py`, `research/ephemeral_pdf_sandbox.py`, `vectorstore/corpus_sync.py`, `ingestion/pdf_corpus.py`, `ADR-0008`, `ADR-0009`)** — indicative market FX with Bank of Uganda precedence, 9-trigger official source discovery across URA/Parliament/ULII/10-MDA allowlists, `tmpfs`-isolated PDF/XLSX inspection (`pdf_guards` + GPU micro-reranking), and zero-downtime Qdrant corpus hot-swapping (`186` PDFs → `5,639` statutory chunks → `7,251` hybrid vectors)
 13. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
@@ -463,10 +463,10 @@ Real-time duplex voice via WebSocket (`WS /v1/voice/chat/stream`):
 Client (PCM16 chunks, ~20ms)
   |
   v
-WebSocket Handler (voice_ws.py)
+WebSocket Handler (speech/voice_ws.py)
   |
   v
-VoiceSession (voice_stream.py):
+VoiceSession (speech/voice_stream.py):
   |
   ├─ Energy-based VAD (hysteresis, configurable thresholds)
   |    └─ Emits vad_state events on speech/silence transitions
@@ -493,9 +493,9 @@ VoiceSession (voice_stream.py):
 
 | Module | File | Purpose |
 |--------|------|---------|
-| `voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
-| `voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
-| `voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
+| `speech/voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
+| `speech/voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
+| `speech/voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
 | `rag/offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
 | `speech/accent_detector.py` | `backend/app/` | Prosodic accent classifier |
 
@@ -526,10 +526,10 @@ Target: **p95 < 600ms** end-to-end (fast path) and **< 800ms** (grounded path).
 Client (PCM16 chunks + optional JPEG camera frames)
   |
   v
-V2 WebSocket Handler (voice_ws_v2.py)
+V2 WebSocket Handler (speech/voice_ws_v2.py)
   |
   v
-VoiceSessionV2 (voice_stream_v2.py):
+VoiceSessionV2 (speech/voice_stream_v2.py):
   |
   +-- Energy VAD (same as V1)
   |     +-- Emits vad_state events
@@ -576,8 +576,8 @@ VoiceSessionV2 (voice_stream_v2.py):
 | `vision/encoder.py` | `backend/app/` | Qwen2-VL-2B document understanding + OCR |
 | `vision/ocr.py` | `backend/app/` | EasyOCR wrapper + URA field extraction (TIN, UGX, dates) |
 | `vision/document_classifier.py` | `backend/app/` | Rule-based URA document type classifier |
-| `voice_stream_v2.py` | `backend/app/` | V2 session with dual-path routing + vision |
-| `voice_ws_v2.py` | `backend/app/` | V2 WebSocket handler + 8 Prometheus metrics |
+| `speech/voice_stream_v2.py` | `backend/app/` | V2 session with dual-path routing + vision |
+| `speech/voice_ws_v2.py` | `backend/app/` | V2 WebSocket handler + 8 Prometheus metrics |
 
 **V2 WebSocket protocol extensions (additive over V1):**
 

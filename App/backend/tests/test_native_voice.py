@@ -513,8 +513,8 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
     """V2 voice session pipeline tests."""
 
     def _make_session(self, **kwargs):
-        from app.voice_stream import VADConfig
-        from app.voice_stream_v2 import VoiceSessionV2
+        from app.speech.voice_stream import VADConfig
+        from app.speech.voice_stream_v2 import VoiceSessionV2
 
         speech = _make_speech_mock()
         chat = _make_chat_mock()
@@ -542,7 +542,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         )
         return session, speech, chat
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_process_utterance_yields_complete_event_set(self, mock_flags):
         mock_flags.is_enabled.return_value = False  # disable V2 components
 
@@ -560,7 +560,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertIn("latency_report", types)
         self.assertIn("audio_end", types)
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_barge_in_cancels_pipeline(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 
@@ -576,7 +576,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertIn("transcript_final", types)
         self.assertNotIn("reply_text", types)  # cancelled before LLM
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_barge_in_method(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 
@@ -590,7 +590,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session._is_speaking)
         self.assertEqual(len(session._audio_buffer), 0)
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_close_cleans_up(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 
@@ -600,7 +600,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session._audio_buffer), 0)
         self.assertTrue(session._cancelled.is_set())
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_vad_detect_matches_v1(self, mock_flags):
         """V2 VAD should produce identical results to V1."""
         mock_flags.is_enabled.return_value = False
@@ -617,7 +617,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_speech)
         self.assertFalse(complete)
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_image_frame_buffering(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 
@@ -625,7 +625,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         await session.handle_image_frame(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
         self.assertIsNotNone(session._pending_image)
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_reply_meta_includes_voice_path(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 
@@ -640,7 +640,7 @@ class TestVoiceSessionV2(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(meta_events), 1)
         self.assertIn("voice_path", meta_events[0].data)
 
-    @patch("app.voice_stream_v2.flags")
+    @patch("app.speech.voice_stream_v2.flags")
     async def test_latency_report_includes_v2_fields(self, mock_flags):
         mock_flags.is_enabled.return_value = False
 

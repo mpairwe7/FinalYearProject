@@ -99,7 +99,7 @@ class CallerAudioTap(FrameProcessor):
         self.speech_model = speech_model
         self._officer_vad: Any = None
         if getattr(room.state, "livekit_room", ""):
-            from ..voice_stream import EnergyVAD
+            from ..speech.voice_stream import EnergyVAD
             self._officer_vad = EnergyVAD()
         self._caller_copilot_vad: Any = None
         self._utterance_buffer = bytearray()
@@ -152,7 +152,7 @@ class CallerAudioTap(FrameProcessor):
         if not flags.is_enabled("officer_voice_copilot", cohorts={"ura_staff"}) or self.speech_model is None:
             return
         if self._caller_copilot_vad is None:
-            from ..voice_stream import EnergyVAD
+            from ..speech.voice_stream import EnergyVAD
 
             self._caller_copilot_vad = EnergyVAD()
         _, complete = self._caller_copilot_vad.detect(pcm)

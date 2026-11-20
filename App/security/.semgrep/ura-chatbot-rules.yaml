@@ -264,7 +264,7 @@ rules:
     paths:
       include:
         - "App/backend/app/mcp/*"
-        - "App/backend/app/web_research.py"
+        - "App/backend/app/research/web_research.py"
         - "App/backend/app/publications.py"
     message: >
       follow_redirects=True on outbound MCP, web research, or publication

@@ -1,26 +1,18 @@
-"""WebSocket endpoint for streaming voice chat (2026).
+"""V2 WebSocket handler for streaming voice chat (2026).
 
-Protocol (see ``voice_stream.py`` for the engine):
+Extends the V1 protocol (:mod:`voice_ws`) with:
 
-Client -> Server::
+* **Protocol version negotiation** — ``session_start.protocol_version``
+* **Image frames** — ``{type: "image_frame"}`` + binary JPEG on next message
+* **Partial transcripts** — ``{type: "partial_transcript", text, stable_prefix}``
+* **Vision results** — ``{type: "vision_result", ocr_text, doc_type, summary}``
 
-    {type: "session_start", language, voice, conversation_id, sample_rate, vad_sensitivity}
-    [binary frames: PCM16 LE mono audio, 20ms recommended]
-    {type: "barge_in"}
-    {type: "session_end"}
+Backward-compatible: V1 clients that omit ``protocol_version`` receive
+identical behaviour to the V1 handler.
 
-Server -> Client::
+Feature flags: ``native_voice``, ``voice_vision_v2``
 
-    {type: "session_ready", session_id}
-    {type: "vad_state", speaking: bool}
-    {type: "transcript_final", text, language, latency_s, backend}
-    {type: "audio_start", sample_rate}
-    [binary frames: TTS audio chunks]
-    {type: "audio_end"}
-    {type: "reply_text", text, chunk_index}
-    {type: "reply_meta", sources, citations, faithfulness_score, conversation_id}
-    {type: "latency_report", asr_ms, mt_ms, llm_ms, tts_first_chunk_ms, total_ms}
-    {type: "error", detail, recoverable}
+Route: ``/v2/voice/chat/stream``
 """
 
 from __future__ import annotations
@@ -32,49 +24,54 @@ import uuid
 
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from . import ws_concurrency
-from .observability.analytics import MetricSpec, record_mapped
-from .auth import revocation
-from .auth.jwt_auth import JWTAuthError, JWTVerifier
-from .config.flags import flags
-from .voice_stream import VADConfig, VoiceSession, VoiceStreamEvent
+from .. import ws_concurrency
+from ..observability.analytics import MetricSpec, record_mapped
+from ..auth import revocation
+from ..auth.jwt_auth import JWTAuthError, JWTVerifier
+from ..config.flags import flags
+from .voice_stream import VADConfig
+from .voice_stream_v2 import VoiceSessionV2, VoiceStreamEvent
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Prometheus metrics (recorded through app.observability.analytics)
+# Prometheus metrics (extends V1 metrics)
 # ---------------------------------------------------------------------------
 
 _SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-# Call-site key -> (kind, metric name, buckets); recorded through app.observability.analytics
-# so they reach /metrics with every other worker's samples.
-_METRICS: dict[str, MetricSpec] = {
-    "_ws_connections_total": ("counter", "voice_ws_connections_total", None),
-    "_ws_active": ("gauge", "voice_ws_active_connections", None),
-    "_ws_session_duration": ("histogram", "voice_ws_session_duration_seconds", _SESSION_BUCKETS),
-    "_stream_asr_latency": ("histogram", "voice_stream_asr_latency_seconds", None),
-    "_stream_tts_first_chunk": ("histogram", "voice_stream_tts_first_chunk_seconds", None),
-    "_stream_total_latency": ("histogram", "voice_stream_total_latency_seconds", None),
-    "_barge_in_total": ("counter", "voice_barge_in_total", None),
-    "_vad_utterances_total": ("counter", "voice_vad_utterances_total", None),
-    "_consent_denied_total": ("counter", "voice_consent_denied_total", None),
+# Call-site key -> (kind, metric name, buckets); recorded through app.observability.analytics.
+_V2_METRICS: dict[str, MetricSpec] = {
+    "_v2_connections_total": ("counter", "voice_v2_connections_total", None),
+    "_v2_active": ("gauge", "voice_v2_active_connections", None),
+    "_v2_session_duration": ("histogram", "voice_v2_session_duration_seconds", _SESSION_BUCKETS),
+    "_v2_prefetch_hit": ("counter", "voice_v2_speculative_prefetch_hits_total", None),
+    "_v2_prefetch_miss": ("counter", "voice_v2_speculative_prefetch_misses_total", None),
+    "_v2_vision_requests": ("counter", "voice_v2_vision_requests_total", None),
+    "_v2_path_routing": ("counter", "voice_v2_path_routing_total", None),
+    "_v2_tts_first_byte": ("histogram", "voice_v2_tts_first_byte_seconds", None),
 }
 
 
-def _inc_metric(name: str, value: float = 1.0) -> None:
-    record_mapped(_METRICS, name, value)
+def _v2_metric(name: str, value: float = 1.0, labels: dict | None = None) -> None:
+    """Record a V2 metric."""
+    record_mapped(_V2_METRICS, name, value, labels)
 
 
-def _dec_metric(name: str) -> None:
-    record_mapped(_METRICS, name, -1.0)
+def _v2_dec(name: str) -> None:
+    record_mapped(_V2_METRICS, name, -1.0)
+
+
+# ---------------------------------------------------------------------------
+# Auth helper (reused from V1)
+# ---------------------------------------------------------------------------
 
 
 def _resolve_ws_auth(
     websocket: WebSocket, *, required: bool = False
 ) -> tuple[str, str, float | None]:
-    """Verify WebSocket auth when present and return ``(user_id, tenant_id, issued_at)``.
+    """Verify WebSocket auth when present: ``(user_id, tenant_id, issued_at)``.
 
     *issued_at* is the token's ``iat`` (``None`` when anonymous): the socket's
     loop re-checks it against the person's revocation cutoff (G304, ADR-0053).
@@ -90,7 +87,18 @@ def _resolve_ws_auth(
             raise JWTAuthError("authentication required")
         return "", "default", None
 
-    claims = JWTVerifier().verify(token)
+    from ..auth.dependencies import APP_ENV, _get_verifier
+
+    verifier = _get_verifier()
+    try:
+        claims = verifier.verify(token)
+    except JWTAuthError as e:
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            from ..auth.jwt_auth import _hs256_verify
+
+            claims = _hs256_verify(token, verifier.dev_secret)
+        else:
+            raise
     if revocation.claims_revoked(claims):  # signed out before it expired (G304, ADR-0053)
         raise JWTAuthError("session revoked")
     return str(claims.get("sub", "")), str(claims.get("tenant_id", "default")), revocation.issued_at(claims)
@@ -101,30 +109,25 @@ def _resolve_ws_auth(
 # ---------------------------------------------------------------------------
 
 
-async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
-    """WebSocket handler for ``/v1/voice/chat/stream``.
+async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
+    """V2 WebSocket handler for ``/v2/voice/chat/stream``."""
 
-    Called from ``main.py``.  Manages the full session lifecycle.
-    """
-
-    # ── Feature flag gate ──────────────────────────────────────────
-    if not flags.is_enabled("voice_streaming"):
-        await websocket.close(code=1001, reason="voice_streaming flag is disabled")
+    # Feature flag gate: require native_voice
+    if not flags.is_enabled("native_voice"):
+        await websocket.close(code=1001, reason="native_voice flag is disabled")
         return
 
     try:
-        authenticated_user_id, authenticated_tenant_id, token_issued_at = _resolve_ws_auth(
+        user_id, tenant_id, token_issued_at = _resolve_ws_auth(
             websocket, required=flags.is_enabled("auth_required")
         )
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
         return
 
-    # P1-9: cap concurrent voice sockets per-user and globally.
-    socket_user_key = (
-        authenticated_user_id
-        or f"anon::{websocket.client.host if websocket.client else 'unknown'}"
-    )
+    # P1-9: cap concurrent voice sockets per-user and globally so an
+    # (anonymous) client cannot exhaust ASR/TTS/LLM resources.
+    socket_user_key = user_id or f"anon::{websocket.client.host if websocket.client else 'unknown'}"
     if not ws_concurrency.try_acquire(
         "voice",
         socket_user_key,
@@ -135,17 +138,17 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
         return
 
     await websocket.accept()
-    _inc_metric("_ws_connections_total")
-    _inc_metric("_ws_active")
+    _v2_metric("_v2_connections_total")
+    _v2_metric("_v2_active")
     session_start_time = time.perf_counter()
     max_duration_s = ws_concurrency.int_env("VOICE_WS_MAX_DURATION_S", 30 * 60)
     idle_timeout_s = ws_concurrency.int_env("VOICE_WS_IDLE_TIMEOUT_S", 120)
 
-    session: VoiceSession | None = None
+    session: VoiceSessionV2 | None = None
     receiver: revocation.SessionCheckedReceiver | None = None
 
     try:
-        # ── Wait for session_start config frame ────────────────────
+        # ── session_start config frame ────────────────────────────
         config_raw = await websocket.receive_text()
         try:
             config = json.loads(config_raw)
@@ -157,9 +160,9 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
             await _send_error(websocket, "First message must be session_start", recoverable=False)
             return
 
-        # ── Validate config ────────────────────────────────────────
+        # Parse config (superset of V1)
         language = config.get("language", "en")
-        if not isinstance(language, str) or len(language) != 2:
+        if not isinstance(language, str) or len(language) > 5:
             language = "en"
 
         voice = config.get("voice")
@@ -168,30 +171,33 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
         vad_sensitivity = config.get("vad_sensitivity", "medium")
         tts_enabled = config.get("tts_enabled", True)
         top_k = min(max(int(config.get("top_k", 4)), 1), 10)
-        session_user_id = authenticated_user_id
-        session_tenant_id = authenticated_tenant_id if authenticated_user_id else str(
-            config.get("tenant_id", "default")
-        )
+        vision_enabled = config.get("vision_enabled", False)
+        protocol_version = int(config.get("protocol_version", 2))
 
-        # Clamp sample_rate
         if sample_rate < 8000 or sample_rate > 48000:
             sample_rate = 16000
 
-        # ── Consent check ──────────────────────────────────────────
+        session_user_id = user_id
+        session_tenant_id = tenant_id if user_id else str(config.get("tenant_id", "default"))
+
+        # ── Consent check (same as V1) ────────────────────────────
         if flags.is_enabled("voice_consent"):
             try:
                 from .voice_consent import grant_voice_consent, require_voice_consent
 
                 accepted_flag = bool(config.get("voice_consent_accepted"))
                 if session_user_id:
-                    consent_ok = require_voice_consent(session_user_id)
+                    consent_ok = require_voice_consent(session_user_id, tenant_id=session_tenant_id or "default")
                     if not consent_ok and accepted_flag:
-                        grant_voice_consent(session_user_id, purpose="voice_recording")
+                        grant_voice_consent(
+                            session_user_id,
+                            purpose="voice_recording",
+                            tenant_id=session_tenant_id or "default",
+                        )
                         consent_ok = True
                 else:
                     consent_ok = accepted_flag
                 if not consent_ok:
-                    _inc_metric("_consent_denied_total")
                     await _send_error(
                         websocket,
                         "Voice recording consent required before processing audio.",
@@ -199,9 +205,9 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
                     )
                     return
             except ImportError:
-                pass  # voice_consent module not yet available
+                pass
 
-        # ── Resolve speech + chat model ────────────────────────────
+        # ── Resolve models ────────────────────────────────────────
         speech = getattr(getattr(app, "state", None), "speech", None)
         chat_model = getattr(getattr(app, "state", None), "model", None)
 
@@ -209,11 +215,11 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
             await _send_error(websocket, "Speech or chat model not available", recoverable=False)
             return
 
-        # ── Create session ─────────────────────────────────────────
+        # ── Create V2 session ─────────────────────────────────────
         session_id = str(uuid.uuid4())
         vad_config = VADConfig.from_sensitivity(vad_sensitivity, sample_rate=sample_rate)
 
-        session = VoiceSession(
+        session = VoiceSessionV2(
             session_id=session_id,
             speech=speech,
             chat_model=chat_model,
@@ -225,21 +231,28 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
             top_k=top_k,
             user_id=session_user_id,
             tenant_id=session_tenant_id,
+            vision_enabled=vision_enabled and flags.is_enabled("voice_vision_v2"),
         )
 
-        await _send_json(websocket, {"type": "session_ready", "session_id": session_id})
+        await _send_json(websocket, {
+            "type": "session_ready",
+            "session_id": session_id,
+            "protocol_version": protocol_version,
+            "capabilities": {
+                "streaming_tts": flags.is_enabled("streaming_tts_v2"),
+                "speculative_prefetch": flags.is_enabled("speculative_prefetch"),
+                "vision": vision_enabled and flags.is_enabled("voice_vision_v2"),
+            },
+        })
+
         safe_sess_id = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
         safe_lang = str(language).replace("\r", "\\r").replace("\n", "\\n")
-        safe_vad = str(vad_sensitivity).replace("\r", "\\r").replace("\n", "\\n")
         logger.info(
-            "Voice session started (session=%s, lang=%s, sr=%d, vad=%s)",
-            safe_sess_id,
-            safe_lang,
-            sample_rate,
-            safe_vad,
+            "V2 session started (session=%s, lang=%s, sr=%d, vision=%s)",
+            safe_sess_id, safe_lang, sample_rate, vision_enabled,
         )
 
-        # Audit trail — log session start
+        # Audit log
         try:
             from .voice_consent import log_voice_event
 
@@ -249,27 +262,28 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
                 event_type="session_start",
                 metadata={
                     "language": language,
+                    "protocol_version": protocol_version,
+                    "vision_enabled": vision_enabled,
                     "vad_sensitivity": vad_sensitivity,
-                    "tts_enabled": tts_enabled,
-                    "sample_rate": sample_rate,
                 },
             )
         except Exception:
             logger.debug("Voice audit log failed for session_start", exc_info=True)
 
-        # ── Rate limiting state (per-session audio flood protection) ──
-        _audio_frame_count = 0
-        _audio_frame_window_start = time.perf_counter()
-        _MAX_AUDIO_FRAMES_PER_SEC = 100  # 100 × 20ms = 2s of audio/sec max
-        _MAX_AUDIO_BYTES_PER_FRAME = 64 * 1024  # 64 KB per frame
+        # ── Rate limiting state ───────────────────────────────────
+        audio_frame_count = 0
+        frame_window_start = time.perf_counter()
+        _MAX_FRAMES_PER_SEC = 100
+        _MAX_BYTES_PER_FRAME = 64 * 1024
+        _MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
 
-        # ── Main loop ──────────────────────────────────────────────
+        expecting_image_binary = False
+
+        # ── Main loop ─────────────────────────────────────────────
         # A signed-in socket re-checks its session at least every
         # revocation.SOCKET_CHECK_INTERVAL_S while it waits, and on every
         # frame, and closes 4401 once it is revoked (G304, ADR-0053).
-        receiver = revocation.SessionCheckedReceiver(
-            websocket.receive, authenticated_user_id, token_issued_at
-        )
+        receiver = revocation.SessionCheckedReceiver(websocket.receive, user_id, token_issued_at)
         while True:
             if time.perf_counter() - session_start_time > max_duration_s:
                 await _send_json(
@@ -290,32 +304,36 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
             if message.get("type") == "websocket.disconnect":
                 break
 
-            # Binary frame = audio chunk
+            # Binary frame
             if "bytes" in message and message["bytes"]:
                 chunk = message["bytes"]
 
-                # Per-frame size limit
-                if len(chunk) > _MAX_AUDIO_BYTES_PER_FRAME:
+                # Image binary follows an image_frame control message
+                if expecting_image_binary:
+                    expecting_image_binary = False
+                    if len(chunk) > _MAX_IMAGE_BYTES:
+                        await _send_error(websocket, "Image too large (max 2MB)", recoverable=True)
+                        continue
+                    await session.handle_image_frame(chunk)
+                    _v2_metric("_v2_vision_requests")
+                    continue
+
+                # Audio frame
+                if len(chunk) > _MAX_BYTES_PER_FRAME:
                     await _send_error(websocket, "Audio frame too large (max 64KB)", recoverable=True)
                     continue
 
-                # Sliding-window rate limit
                 now = time.perf_counter()
-                if now - _audio_frame_window_start > 1.0:
-                    _audio_frame_count = 0
-                    _audio_frame_window_start = now
-                _audio_frame_count += 1
-                if _audio_frame_count > _MAX_AUDIO_FRAMES_PER_SEC:
-                    # Drop excess frames silently to avoid flooding ASR
-                    continue
+                if now - frame_window_start > 1.0:
+                    audio_frame_count = 0
+                    frame_window_start = now
+                audio_frame_count += 1
+                if audio_frame_count > _MAX_FRAMES_PER_SEC:
+                    continue  # silently drop excess
 
                 async for event in session.handle_audio_chunk(chunk):
                     await _dispatch_event(websocket, event)
-                    # Track metrics from latency reports
-                    if event.type == "latency_report":
-                        _track_latency_metrics(event.data)
-                    elif event.type == "transcript_final" and event.data.get("text"):
-                        _inc_metric("_vad_utterances_total")
+                    _track_v2_metrics(event)
 
             # Text frame = control message
             elif "text" in message and message["text"]:
@@ -329,7 +347,6 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
 
                 if msg_type == "barge_in":
                     await session.barge_in()
-                    _inc_metric("_barge_in_total")
                     await _send_json(websocket, {"type": "audio_end"})
                     try:
                         from .voice_consent import log_voice_event
@@ -343,23 +360,27 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
                     except Exception:
                         pass
 
+                elif msg_type == "image_frame":
+                    # Next binary frame is a JPEG image
+                    if not session.vision_enabled:
+                        await _send_error(websocket, "Vision not enabled for this session", recoverable=True)
+                    else:
+                        expecting_image_binary = True
+
                 elif msg_type == "session_end":
                     break
 
                 elif msg_type in ("ping", "pong"):
-                    # Application-level keepalive — respond silently
                     await _send_json(websocket, {"type": "pong"})
 
                 else:
                     await _send_error(
-                        websocket,
-                        f"Unknown message type: {msg_type}",
-                        recoverable=True,
+                        websocket, f"Unknown message type: {msg_type}", recoverable=True,
                     )
 
     except WebSocketDisconnect:
         safe_disc_id = str(session.session_id if session else "?").replace("\r", "\\r").replace("\n", "\\n")
-        logger.info("Voice WebSocket disconnected (session=%s)", safe_disc_id)
+        logger.info("V2 WebSocket disconnected (session=%s)", safe_disc_id)
         if session:
             try:
                 from .voice_consent import log_voice_event
@@ -373,7 +394,7 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
             except Exception:
                 pass
     except Exception:
-        logger.exception("Voice WebSocket error")
+        logger.exception("V2 WebSocket error")
         try:
             await _send_error(websocket, "Internal server error", recoverable=False)
         except Exception:
@@ -384,9 +405,9 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
         ws_concurrency.release("voice", socket_user_key)
         if session is not None:
             session.close()
-        _dec_metric("_ws_active")
+        _v2_dec("_v2_active")
         duration = time.perf_counter() - session_start_time
-        _inc_metric("_ws_session_duration", duration)
+        _v2_metric("_v2_session_duration", duration)
         try:
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1000)
@@ -400,12 +421,10 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
 
 
 async def _send_json(ws: WebSocket, data: dict) -> None:
-    """Send a JSON text frame."""
-    await ws.send_text(json.dumps(data))
+    await ws.send_text(json.dumps(data, default=str))
 
 
 async def _send_error(ws: WebSocket, detail: str, recoverable: bool = True) -> None:
-    """Send an error event and optionally close."""
     await _send_json(ws, {"type": "error", "detail": detail, "recoverable": recoverable})
     if not recoverable:
         try:
@@ -417,27 +436,27 @@ async def _send_error(ws: WebSocket, detail: str, recoverable: bool = True) -> N
 async def _dispatch_event(ws: WebSocket, event: VoiceStreamEvent) -> None:
     """Route a VoiceStreamEvent to the appropriate WebSocket frame type."""
     if event.type == "audio_chunk":
-        # Audio data is sent as binary frames
         audio_bytes = event.data.get("audio", b"")
         if audio_bytes:
             await ws.send_bytes(audio_bytes)
     else:
-        # Everything else is JSON
         payload = {"type": event.type, **event.data}
-        # Remove non-serializable fields
         payload.pop("audio", None)
         await ws.send_text(json.dumps(payload, default=str))
 
 
-def _track_latency_metrics(data: dict) -> None:
-    """Record latency histogram observations from a latency_report event."""
-    asr_s = data.get("asr_ms", 0) / 1000
-    tts_first_s = data.get("tts_first_chunk_ms", 0) / 1000
-    total_s = data.get("total_ms", 0) / 1000
+def _track_v2_metrics(event: VoiceStreamEvent) -> None:
+    """Record V2-specific metrics from pipeline events."""
+    if event.type == "latency_report":
+        data = event.data
+        tts_first_s = data.get("tts_first_chunk_ms", 0) / 1000
+        if tts_first_s > 0:
+            _v2_metric("_v2_tts_first_byte", tts_first_s)
 
-    if asr_s > 0:
-        _inc_metric("_stream_asr_latency", asr_s)
-    if tts_first_s > 0:
-        _inc_metric("_stream_tts_first_chunk", tts_first_s)
-    if total_s > 0:
-        _inc_metric("_stream_total_latency", total_s)
+        voice_path = data.get("voice_path", "grounded")
+        _v2_metric("_v2_path_routing", labels={"path": voice_path})
+
+        if data.get("speculative_prefetch_used"):
+            _v2_metric("_v2_prefetch_hit")
+        else:
+            _v2_metric("_v2_prefetch_miss")

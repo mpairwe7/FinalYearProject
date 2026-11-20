@@ -103,7 +103,7 @@ _MIGRATED_MODULES = (
     "audit/verifier.py",
     "memory/semantic.py",
     "memory/episodic.py",
-    "voice_consent.py",
+    "speech/voice_consent.py",
 )
 
 

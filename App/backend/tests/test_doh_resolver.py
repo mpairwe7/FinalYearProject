@@ -11,7 +11,7 @@ import socket
 import unittest
 import unittest.mock as mock
 
-from app import doh_resolver as d
+from app.research import doh_resolver as d
 
 
 def _wire_response(host: str, ip: str) -> bytes:

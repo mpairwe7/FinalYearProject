@@ -10,7 +10,7 @@ Verifies all 5 phases of the high-stakes government RAG Document Intelligence re
   `TripletTableSerializer` semantic triplets.
 - Phase 3 (G444, G445): End-to-end 1-based page provenance (`Chunk.page_range`, `ingestion/pdf_corpus.py`
   `"page"` field, `attachment_passages` page locators) and 40-page vector glyph evidence coverage.
-- Phase 4 (G447): Structure-aware, table-preserving chunking in `ephemeral_pdf_sandbox.py`
+- Phase 4 (G447): Structure-aware, table-preserving chunking in `research/ephemeral_pdf_sandbox.py`
   (never slicing mid-word, mid-UGX-amount, or mid-table-row).
 - Phase 5 (G449, G450): Table cell prompt-injection/bidi/pipe sanitization, vector-vs-OCR
   shadow discrepancy detection (`summarize_fusion_discrepancies`), HITL `urgent_audit` routing,
@@ -25,7 +25,7 @@ from pathlib import Path
 from unittest import mock
 
 from app import documents
-from app import ephemeral_pdf_sandbox as sbx
+from app.research import ephemeral_pdf_sandbox as sbx
 from app.ingestion.docling_intelligence import (
     _convert_via_docling_library,
     _glyph_in_table_bboxes,

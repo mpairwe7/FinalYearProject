@@ -705,9 +705,9 @@ FinalYearProject/
 │   │   │   ├── observability/analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech/speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
 │   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
-│   │   │   ├── voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
-│   │   │   ├── voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
-│   │   │   ├── voice_consent.py # Voice consent, audit log, retention policy
+│   │   │   ├── speech/voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
+│   │   │   ├── speech/voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
+│   │   │   ├── speech/voice_consent.py # Voice consent, audit log, retention policy
 │   │   │   ├── speech/accent_detector.py # Prosodic accent classifier
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
 │   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
@@ -743,9 +743,9 @@ FinalYearProject/
 │   │   │   │   ├── ledger.py        # Hash-chained append-only log
 │   │   │   │   ├── verifier.py      # Chain integrity verification
 │   │   │   │   └── merkle.py        # Merkle tree proofs
-│   │   │   ├── voice_stream.py      # Streaming voice engine (VAD, VoiceSession, barge-in)
-│   │   │   ├── voice_ws.py         # WebSocket handler for streaming voice chat
-│   │   │   ├── voice_consent.py    # Voice consent, audit log, retention policy
+│   │   │   ├── speech/voice_stream.py      # Streaming voice engine (VAD, VoiceSession, barge-in)
+│   │   │   ├── speech/voice_ws.py         # WebSocket handler for streaming voice chat
+│   │   │   ├── speech/voice_consent.py    # Voice consent, audit log, retention policy
 │   │   │   └── speech/accent_detector.py  # Prosodic accent classifier (5 UG profiles)
 │   │   ├── App/tests/          # Backend test suite
 │   │   └── requirements.txt

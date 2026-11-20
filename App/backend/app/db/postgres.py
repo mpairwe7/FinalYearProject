@@ -633,7 +633,7 @@ def cleanup_expired_data() -> dict[str, int]:
             logger.exception("TTL cleanup failed for tickets")
             deleted["tickets"] = 0
 
-        from ..voice_consent import retention_policy
+        from ..speech.voice_consent import retention_policy
 
         voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
         try:

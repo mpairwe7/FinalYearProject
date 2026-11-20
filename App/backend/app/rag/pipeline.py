@@ -4411,7 +4411,7 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     # A live-check sentence is written in English and added to the finished
     # answer, so a body already in the locale would otherwise carry it through
     # untranslated: the guarantee has to hold in every language.
-    from ..web_research import split_live_disclosures
+    from ..research.web_research import split_live_disclosures
 
     body_text, disclosures = split_live_disclosures(text)
     if disclosures and body_text:
@@ -12061,7 +12061,7 @@ class ChatModel:
             # 1b. Semantic cache check AFTER guardrails (Phase 5). An answer about
             #     the present is neither served from the cache nor stored in it.
             if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
-                from ..web_research import query_is_time_sensitive
+                from ..research.web_research import query_is_time_sensitive
 
                 cache_allowed = not query_is_time_sensitive(
                     router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
@@ -14197,7 +14197,7 @@ class ChatModel:
         # Semantic cache check (Phase 5). An answer about the present is neither
         # served from the cache nor stored in it.
         if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
-            from ..web_research import query_is_time_sensitive
+            from ..research.web_research import query_is_time_sensitive
 
             cache_allowed = not query_is_time_sensitive(
                 router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()

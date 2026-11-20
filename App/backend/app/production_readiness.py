@@ -334,7 +334,7 @@ def _external_processor_names() -> list[str]:
     # vocabulary, but that is a reason to approve the transfer, not to skip it.
     # Counted once configured, not once enabled: the flag can be turned on at
     # runtime by a persisted override, long after this gate last ran.
-    from .web_search_providers import external_provider_names
+    from .research.web_search_providers import external_provider_names
 
     providers.extend(f"web search ({name})" for name in external_provider_names())
     return providers
@@ -483,8 +483,8 @@ def _live_research_status() -> dict[str, Any]:
     outage of every other answer.
     """
     from .config.flags import flags
-    from .web_research import corpus_sync_permitted
-    from .web_search_providers import active_providers, sanctioned_provider_configured
+    from .research.web_research import corpus_sync_permitted
+    from .research.web_search_providers import active_providers, sanctioned_provider_configured
 
     return {
         "enabled": flags.is_enabled("live_web_research"),

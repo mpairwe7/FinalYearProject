@@ -2141,7 +2141,7 @@ class CurrencyConversionTool(CalculatorTool):
 
         from datetime import datetime, timezone
         from ..config.flags import flags
-        from ..web_fx import official_bou_rate
+        from ..research.web_fx import official_bou_rate
 
         # The Bank of Uganda rate is the one that counts for a return, so a
         # verified copy outranks any market quote, however fresh.
@@ -2172,7 +2172,7 @@ class CurrencyConversionTool(CalculatorTool):
         today_month = datetime.now(timezone.utc).strftime("%Y-%m")
         date_is_current = not date or str(date).strip()[:7] == today_month
         if date_is_current and (use_live_fx or flags.is_enabled("live_web_research")):
-            from ..web_fx import lookup_live_exchange_rate
+            from ..research.web_fx import lookup_live_exchange_rate
 
             quote = lookup_live_exchange_rate(
                 curr,

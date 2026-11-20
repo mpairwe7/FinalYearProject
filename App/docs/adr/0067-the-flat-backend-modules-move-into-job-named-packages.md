@@ -49,8 +49,9 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | Phase | Package | Modules | Landed |
 | --- | --- | --- | --- |
 | 1 | `speech/` | `speech_service`, `speech_normalization`, `accent_detector`, `orpheus_tts`, `spark_tts_salt` | yes |
-| 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` | no |
-| later | `research/`, `tickets/`, `quality/`, `documents/`, `connectors/`, `offline/` | the live web research, handoff, service-quality, document, connector and offline modules | no |
+| 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` | yes |
+| 3 | `research/` | `web_research`, `web_search_providers`, `web_fx`, `egress`, `doh_resolver`, `ephemeral_pdf_sandbox` | yes |
+| later | `tickets/`, `quality/`, `connectors/`, `offline/` | the handoff, service-quality, connector and offline modules | no |
 
 **What stays flat, and why.**
 
@@ -61,6 +62,9 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
   file, and the next image build re-embeds the corpus for 35 to 40 minutes.
 - `number_words`. Speech uses it, and so do the calculator, memory, entailment
   and the MCP validators.
+- `documents.py` and the modules beside it. A package cannot take the name of a
+  module that still exists, so moving them means renaming `documents`, and the
+  codemod would then rename it in 24 importing files.
 
 **The tool.** The ADR-0056 codemod performs each phase. It was deleted as a
 finished one-shot (G686), so it is read from git
@@ -76,8 +80,9 @@ so merging them would change how a reported number is reproduced.
 
 ## Consequences
 
-- Speech and voice code is found in `app/speech/`. Imports read
-  `from .speech import speech_service`; a caller's own code does not change.
+- Speech and voice code is found in `app/speech/`, and live web research in
+  `app/research/`. Imports read `from .speech import speech_service`; a
+  caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new
   one.

@@ -156,7 +156,7 @@ class TestReceptionistStore(unittest.TestCase):
         self.assertEqual(len(list_turns(old_call_id)), 0)
 
     def test_voice_transcript_retention_uses_voice_ttl_not_chat_ttl(self):
-        from app.voice_consent import VoiceRetentionPolicy
+        from app.speech.voice_consent import VoiceRetentionPolicy
         from unittest.mock import patch
 
         old_call_id = f"call_voice_ttl_{uuid.uuid4().hex[:8]}"
@@ -164,7 +164,7 @@ class TestReceptionistStore(unittest.TestCase):
         create_call(old_call_id, started_at=old_time)
         create_turn(old_call_id, seq=1, speaker="caller", kind="utterance", text="older voice turn", created_at=old_time)
         policy = VoiceRetentionPolicy(transcript_ttl_days=2)
-        with patch("app.voice_consent.retention_policy", policy):
+        with patch("app.speech.voice_consent.retention_policy", policy):
             deleted = db.cleanup_expired_data()
         self.assertGreaterEqual(deleted.get("voice_call_turns", 0), 1)
         self.assertIsNone(get_call(old_call_id))

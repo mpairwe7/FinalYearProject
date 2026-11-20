@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app import web_research as wr
+from app.research import web_research as wr
 
 SCENARIOS = Path(__file__).resolve().parents[3] / "App" / "evals" / "web_research_scenarios" / "adversarial.jsonl"
 ROWS = [json.loads(line) for line in SCENARIOS.read_text(encoding="utf-8").splitlines() if line.strip()]

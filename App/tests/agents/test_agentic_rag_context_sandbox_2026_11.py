@@ -68,7 +68,7 @@ def test_a_parse_child_keeps_only_allowlisted_settings() -> None:
 def test_every_setting_the_extractors_read_is_allowed_through() -> None:
     import re
 
-    sources = ["documents.py", "ephemeral_pdf_sandbox.py", "ingestion/docling_intelligence.py", "guardrails/pdf.py",
+    sources = ["documents.py", "research/ephemeral_pdf_sandbox.py", "ingestion/docling_intelligence.py", "guardrails/pdf.py",
                "ingestion/document_normalization.py", "ocr_service.py"]
     names: set[str] = set()
     for name in sources:
@@ -297,7 +297,7 @@ def _importers_of_pipeline() -> dict[str, set[str]]:
 
 #: Transports and composition roots that may hold a ChatModel.
 _PIPELINE_IMPORTERS = {
-    "main.py", "chat_ws_v2.py", "voice_stream.py", "voice_stream_v2.py", "receptionist/brain.py",
+    "main.py", "chat_ws_v2.py", "speech/voice_stream.py", "speech/voice_stream_v2.py", "receptionist/brain.py",
     "officer_chat.py", "chat_title.py",
     # The HTTP routers carved out of main.py (ADR-0056) and the dependency that hands them the model.
     "api/deps.py", "api/rag.py", "api/health.py", "api/documents.py",
