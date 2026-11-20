@@ -29,8 +29,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import speech_service  # noqa: E402
-from app.speech_service import (  # noqa: E402
+from app.speech import speech_service  # noqa: E402
+from app.speech.speech_service import (  # noqa: E402
     SpeechModel,
     en_edge_voice_choices,
     resolve_edge_voice,

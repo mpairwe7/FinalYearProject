@@ -464,7 +464,7 @@ def local_engine_errors(*, enabled_override: bool | None = None) -> list[str]:
     if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
         errors.append("G36: ORPHEUS_TTS_URL must be the Orpheus voice sidecar's http(s) URL.")
         return errors
-    from ..orpheus_tts import speaker_for
+    from ..speech.orpheus_tts import speaker_for
 
     unvoiced = [lang for lang in get_languages() if speaker_for(lang) is None]
     if unvoiced:

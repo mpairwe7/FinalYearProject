@@ -70,7 +70,7 @@ on:
       - "App/frontend/src/services/accountApi.ts"
       - "App/frontend/src/lib/oidcFlow.ts"
       - "App/frontend/src/lib/roles.ts"
-      - "App/backend/app/speech_service.py"
+      - "App/backend/app/speech/speech_service.py"
       # languages.spec.ts walks every configured locale through narration and
       # dictation, so the locale table and the picker that reads it have to
       # trigger it — adding a language without a voice, or changing a BCP-47

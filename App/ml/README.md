@@ -5,7 +5,7 @@ tooling (data augmentation CLI, fine-tuning, quantization/mobile export,
 model/data cards) was removed — model training now happens outside this
 repository. What remains are the pieces `App/backend` and CI actually
 depend on at runtime, plus the on-device speech inference wrappers
-`speech_service.py` imports for its local backend tier.
+`speech/speech_service.py` imports for its local backend tier.
 
 ## What's here
 
@@ -25,7 +25,7 @@ App/ml/
 │   ├── static_dense.py        # eval_retrieval.py's optional dense-comparison
 │   │                          # arm; degrades to "unavailable" without
 │   │                          # sentence-transformers (not installed in CI)
-│   ├── asr/infer_asr.py       # Local Whisper/Sherpa ASR — speech_service.py's
+│   ├── asr/infer_asr.py       # Local Whisper/Sherpa ASR — speech/speech_service.py's
 │   │                          # local tier (asr/'s other scripts are dev-only:
 │   │                          # ONNX export, model download, fine-tuning)
 │   ├── mt/infer_mt.py         # Local MT inference — same local-tier role
@@ -41,12 +41,12 @@ App/ml/
 ## Why these files are load-bearing
 
 - **`lang_id.py`** is imported at runtime by `App/backend/app/rag/query.py` and
-  `App/backend/app/speech_service.py`, and is explicitly copied into the
+  `App/backend/app/speech/speech_service.py`, and is explicitly copied into the
   Crane Cloud production image (see the comment in
   `App/Dockerfile.cranecloud` — dropping it silently degrades Luganda
   detection to a character heuristic).
 - **`asr/infer_asr.py`, `mt/infer_mt.py`, `tts/infer_tts.py`** are imported
-  lazily by `App/backend/app/speech_service.py` for its local/on-device
+  lazily by `App/backend/app/speech/speech_service.py` for its local/on-device
   ASR, MT, and TTS backend tier (guarded — the cloud/Sunbird tiers are
   tried first). Crane Cloud's production image does not ship these (no
   persistent storage for local models there), but the full checkout — what

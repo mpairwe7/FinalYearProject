@@ -410,7 +410,7 @@ class CallTurnConfidenceGateTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_zero_confidence_words_stay_below_memory_gate(self) -> None:
         """Verify word confidence of 0.0 is preserved and stays below the memory persistence gate."""
-        from app.speech_service import WordConf
+        from app.speech.speech_service import WordConf
 
         self.brain.room.state.locale = "lg"
         words = [WordConf(word="ebyamaguzi", prob=0.0)]

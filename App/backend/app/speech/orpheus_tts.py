@@ -1,6 +1,6 @@
 """Client for the Orpheus-3B Sunbird TTS sidecar — the receptionist's local voice.
 
-Sibling to :mod:`app.spark_tts_salt` (a local batch voice) and
+Sibling to :mod:`app.speech.spark_tts_salt` (a local batch voice) and
 :mod:`app.sunbird` (a cloud one), but a *streaming* voice: the sidecar
 (``App/backend/orpheus_sidecar``) returns 24 kHz PCM frame by frame, so the
 receptionist hears the first ~85 ms of an answer ~350 ms after asking, instead
@@ -155,7 +155,7 @@ def speaker_for(language: str, voice: str | None = None) -> str | None:
     canonical = equivalents[0]
     if voice:
         try:
-            from . import sunbird
+            from .. import sunbird
 
             v_clean = voice.strip()
             if v_clean and v_clean in sunbird.TTS_VOICE_CATALOG.get(canonical, ()):

@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.speech_service import SpeechModel, SynthesizeResult, TranscribeResult
+from app.speech.speech_service import SpeechModel, SynthesizeResult, TranscribeResult
 
 
 def _utterance() -> bytes:
@@ -65,7 +65,7 @@ def _session(speech: MagicMock, chat: MagicMock):
 
 class TestMtDegradation(unittest.IsolatedAsyncioTestCase):
     async def test_inbound_mt_failure_keeps_language_honest(self) -> None:
-        from app.speech_service import TranslateResult
+        from app.speech.speech_service import TranslateResult
 
         speech = _speech_mock(language="lg")
         speech.translate.return_value = TranslateResult(
@@ -91,7 +91,7 @@ class TestMtDegradation(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lg-en", meta.data["mt_degraded"])
 
     async def test_outbound_mt_failure_speaks_english_voice(self) -> None:
-        from app.speech_service import TranslateResult
+        from app.speech.speech_service import TranslateResult
 
         speech = _speech_mock(language="lg")
 
@@ -119,7 +119,7 @@ class TestMtDegradation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meta.data["reply_language"], "en")
 
     async def test_mt_retry_recovers_transient_failure(self) -> None:
-        from app.speech_service import TranslateResult
+        from app.speech.speech_service import TranslateResult
         from app.voice_stream import _translate_with_retry
 
         speech = MagicMock()
@@ -208,7 +208,7 @@ class TestTtsPhraseCache(unittest.TestCase):
 
 class TestAudioSniff(unittest.TestCase):
     def test_containers_accepted_junk_rejected(self) -> None:
-        from app.speech_service import _looks_like_audio
+        from app.speech.speech_service import _looks_like_audio
 
         self.assertTrue(_looks_like_audio(b"RIFF" + b"\x00" * 96))
         self.assertTrue(_looks_like_audio(b"\xff\xfb" + b"\x00" * 96))  # MPEG frame
@@ -221,7 +221,7 @@ class TestCloudDeadline(unittest.TestCase):
     SPEECH_CLOUD_DEADLINE_S — never the whole request via a gateway 504."""
 
     def test_cloud_call_bounds_hung_upstream(self) -> None:
-        from app import speech_service as ss
+        from app.speech import speech_service as ss
 
         self.assertEqual(ss._cloud_call("fast", lambda: 42), 42)
         t0 = time.time()
@@ -234,7 +234,7 @@ class TestCloudDeadline(unittest.TestCase):
         import threading
         from collections import OrderedDict
 
-        from app import speech_service as ss
+        from app.speech import speech_service as ss
         from app import sunbird
 
         model = ss.SpeechModel.__new__(ss.SpeechModel)

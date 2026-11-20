@@ -31,7 +31,7 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 # Each is debt: the runtime should not need the training tree.
 KNOWN_ML_IMPORTERS: dict[str, str] = {
     "rag/query.py": "lang_id — lingua language detection; shipped explicitly in the image",
-    "speech_service.py": "ASR/MT/TTS inference wrappers; speech is disabled on CPU deploys",
+    "speech/speech_service.py": "ASR/MT/TTS inference wrappers; speech is disabled on CPU deploys",
     "ingestion/pdf_corpus.py": "chunkers, used at corpus-build time rather than per request",
     "ingestion/crawl_corpus.py": "chunkers, used at corpus-build time rather than per request",
 }

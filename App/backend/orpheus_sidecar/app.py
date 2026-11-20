@@ -2,7 +2,7 @@
 
 A thin FastAPI wrapper around an in-process vLLM ``AsyncLLMEngine`` serving
 ``Sunbird/orpheus-3b-tts-multilingual`` plus the SNAC 24 kHz decoder. The
-receptionist's Luganda voice (``app.orpheus_tts``) calls it; nothing else
+receptionist's Luganda voice (``app.speech.orpheus_tts``) calls it; nothing else
 does.
 
     POST /v1/audio/speech  {"input": str, "voice": "salt_lug_0001",

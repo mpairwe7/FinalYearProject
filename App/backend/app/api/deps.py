@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request
 
 from ..auth import AuthContext, current_user
 from ..rag.pipeline import ChatModel
-from ..speech_service import SpeechModel
+from ..speech.speech_service import SpeechModel
 
 
 

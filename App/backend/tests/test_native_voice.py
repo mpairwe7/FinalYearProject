@@ -42,7 +42,7 @@ def _tone(duration_ms: int = 100, freq: int = 440, amplitude: int = 10_000, samp
 
 def _make_speech_mock():
     """Create a mock SpeechModel matching the real interface."""
-    from app.speech_service import TranscribeResult, SynthesizeResult, TranslateResult
+    from app.speech.speech_service import TranscribeResult, SynthesizeResult, TranslateResult
 
     speech = MagicMock()
     speech.transcribe.return_value = TranscribeResult(

@@ -3,7 +3,7 @@
 
 English is the one locale Sunbird has no good voice for, and it lands on
 edge-tts for TTS and on Sunbird for ASR (rtf > 4 on a cold path). The Workers AI
-stages already exist in speech_service.py, English-only and ahead of both — they
+stages already exist in speech/speech_service.py, English-only and ahead of both — they
 are simply gated off. This sets the switches that open them.
 
     DO NOT RUN THIS AGAINST THE HF SPACE.

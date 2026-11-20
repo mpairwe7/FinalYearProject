@@ -155,7 +155,7 @@ class LocalOnlyScopeTest(unittest.TestCase):
 
     def test_cloud_fallbacks_stay_off_on_a_call_whatever_is_configured(self) -> None:
         from app.rag import pipeline
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         env = {"LLM_FALLBACK_BACKEND": "gemini", "TRANSLATE_FALLBACK_BACKEND": "gemini"}
         with patch.object(pipeline.flags, "is_enabled", return_value=True), \
@@ -176,13 +176,13 @@ class LocalOnlyScopeTest(unittest.TestCase):
         with patch.object(pipeline, "REPLY_MT_BACKEND", "local_first"), \
              patch("app.rag.generator.translate_text", return_value=None) as local, \
              patch("app.sunbird.translate_from_english", side_effect=AssertionError("Sunbird API called")), \
-             patch("app.speech_service.SpeechModel._sunbird_llm_translate", side_effect=AssertionError("Sunflower called")), \
+             patch("app.speech.speech_service.SpeechModel._sunbird_llm_translate", side_effect=AssertionError("Sunflower called")), \
              local_models_only():
             self.assertIsNone(pipeline._translate_reply("VAT is 18%.", "sw"))
         local.assert_called_once()
 
     def test_speech_translation_keeps_only_local_tiers_on_a_call(self) -> None:
-        from app import speech_service as ss
+        from app.speech import speech_service as ss
 
         labels: list[str] = []
 

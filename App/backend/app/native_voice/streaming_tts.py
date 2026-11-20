@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, AsyncGenerator
 import numpy as np
 
 if TYPE_CHECKING:
-    from ..speech_service import SpeechModel
+    from ..speech.speech_service import SpeechModel
 
 logger = logging.getLogger(__name__)
 

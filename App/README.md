@@ -43,7 +43,7 @@ App/
 │   │   │   └── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (173 PDFs → 5,639 chunks, ADR-0009)
 │   │   ├── vectorstore/
 │   │   │   └── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
-│   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
+│   │   ├── speech/speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
@@ -474,7 +474,7 @@ VoiceSession (voice_stream.py):
   ├─ Utterance complete? ──▶ ASR (existing fallback chain)
   |                           └─▶ transcript_final event
   |
-  ├─ Accent Detection (accent_detector.py, < 50ms)
+  ├─ Accent Detection (speech/accent_detector.py, < 50ms)
   |    └─ Routes to accent-specific Whisper LoRA adapter
   |
   ├─ [MT lg→en] ──▶ LLM RAG ──▶ [MT en→lg]
@@ -497,7 +497,7 @@ VoiceSession (voice_stream.py):
 | `voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
 | `voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
 | `rag/offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
-| `accent_detector.py` | `backend/app/` | Prosodic accent classifier |
+| `speech/accent_detector.py` | `backend/app/` | Prosodic accent classifier |
 
 **New frontend:**
 
@@ -1867,7 +1867,7 @@ tool — see:
   backend using Microsoft Edge Neural TTS (0.4s latency, neural voice
   quality). Added `edge` to backend priority chain: sherpa → edge →
   piper → mock. Uses `imageio-ffmpeg` for MP3→WAV decode.
-- **Speech service:** `App/backend/app/speech_service.py` — Simplified
+- **Speech service:** `App/backend/app/speech/speech_service.py` — Simplified
   `_do_synthesize()` with clean priority chain instead of double-call pattern.
 - **Dependencies:** Installed `edge-tts@7.2.8`, `imageio-ffmpeg@0.6.0`.
 - **LLM prompt:** Added rule 12 to SYSTEM_PROMPT instructing Qwen3-8B

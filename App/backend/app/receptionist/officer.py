@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Any
 
-from ..speech_service import pcm16_to_wav
+from ..speech.speech_service import pcm16_to_wav
 from ..voice_stream import EnergyVAD
 from .hub import hub
 from .store import create_turn

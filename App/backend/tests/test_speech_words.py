@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from app import speech_service as ss
+from app.speech import speech_service as ss
 
 
 class WhisperSaltWordConfidenceTests(unittest.TestCase):

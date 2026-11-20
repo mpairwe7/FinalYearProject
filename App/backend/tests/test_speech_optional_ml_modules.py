@@ -6,7 +6,7 @@ import logging
 import unittest
 from unittest import mock
 
-from app import speech_service
+from app.speech import speech_service
 
 
 class OptionalMlModuleTests(unittest.TestCase):

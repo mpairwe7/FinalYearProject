@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from .number_words import ach_words, decimal_words, en_words, en_year, lg_words, nyn_words, sw_words
+from ..number_words import ach_words, decimal_words, en_words, en_year, lg_words, nyn_words, sw_words
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
 # Bounded leading space to guarantee O(n) linear time on pathological inputs (G87).

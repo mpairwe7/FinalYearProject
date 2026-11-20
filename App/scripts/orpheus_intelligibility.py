@@ -53,7 +53,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=ROOT / "App" / "evals" / "reports")
     args = ap.parse_args()
 
-    from app.speech_service import SpeechModel
+    from app.speech.speech_service import SpeechModel
 
     speech = SpeechModel()
     if speech._whisper_salt is None:

@@ -44,7 +44,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.receptionist.config import get_max_spoken_sentences  # noqa: E402
 from app.receptionist.lexicon import normalize_call_query  # noqa: E402
-from app.speech_normalization import clean_text_for_speech  # noqa: E402
+from app.speech.speech_normalization import clean_text_for_speech  # noqa: E402
 
 from scripts.evaluate_1000_faqs_ngrok import (  # noqa: E402
     EvalFAQ,

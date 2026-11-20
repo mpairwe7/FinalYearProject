@@ -40,7 +40,8 @@ REPO_ROOT = Path("/home/developer/Mpairwe7/FinalYearProject")
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 
-from app import mt, orpheus_tts  # noqa: E402
+from app import mt  # noqa: E402
+from app.speech import orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
 from app.calculator_router import extract_amounts, plan_calculation  # noqa: E402
 from app.conversational import handle_conversational_turn  # noqa: E402
@@ -70,7 +71,7 @@ from app.receptionist.spoken_figure_guard import (  # noqa: E402
     inject_dictation_pauses,
     verify_spoken_figures,
 )
-from app.speech_normalization import clean_text_for_speech  # noqa: E402
+from app.speech.speech_normalization import clean_text_for_speech  # noqa: E402
 from app.text_signals import (  # noqa: E402
     detect_crisis,
     detect_high_stakes,

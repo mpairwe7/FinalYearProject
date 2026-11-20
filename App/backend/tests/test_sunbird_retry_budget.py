@@ -70,7 +70,7 @@ class TestTimeoutsAreNotRetriedWithinAnAccount(unittest.TestCase):
         Worst case is now one timeout per account rather than SUNBIRD_RETRIES
         per account.
         """
-        from app.speech_service import SPEECH_CLOUD_DEADLINE_S
+        from app.speech.speech_service import SPEECH_CLOUD_DEADLINE_S
 
         accounts = 2
         worst_before = sunbird.SUNBIRD_TIMEOUT * sunbird.SUNBIRD_RETRIES * accounts

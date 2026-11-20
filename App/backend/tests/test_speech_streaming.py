@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 import soundfile as sf
-from app.speech_service import (
+from app.speech.speech_service import (
     STREAM_FIRST_PIECE_CHARS,
     STREAM_SECOND_PIECE_CHARS,
     SynthesizeResult,

@@ -15,7 +15,7 @@ from app.receptionist.phrases import phrase
 from app.receptionist.router import LanguageRouter
 from app.receptionist.state import CallRoom, CallState
 from app.receptionist.store import create_call, init_receptionist_schema, list_turns
-from app.speech_service import pcm16_to_wav
+from app.speech.speech_service import pcm16_to_wav
 
 PCM = b"\x10\x00" * 32000
 

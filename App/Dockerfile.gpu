@@ -4,7 +4,7 @@
 # URA Chatbot API — GPU variant (Spark-TTS-SALT baked in)
 #
 # Everything in the base Dockerfile, plus a pinned-commit checkout of
-# github.com/SparkAudio/Spark-TTS (Apache-2.0) so app.spark_tts_salt's local
+# github.com/SparkAudio/Spark-TTS (Apache-2.0) so app.speech.spark_tts_salt's local
 # tier — SPARK_TTS_ENABLED=true by default since 2026-08-19 — actually
 # activates out of the box instead of needing a manual operator step. See
 # App/docs/runbooks/salt-speech-backends.md for why this lives in a separate

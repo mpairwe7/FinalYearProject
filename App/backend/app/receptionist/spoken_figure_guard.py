@@ -13,7 +13,7 @@ from typing import Any
 
 from .. import mt
 from ..config.flags import flags
-from ..speech_service import pcm16_to_wav
+from ..speech.speech_service import pcm16_to_wav
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ _DIGIT_MAP_BY_LOCALE: dict[str, dict[str, str]] = {
 
 def _spoken_realizations_for(val: float, locale: str) -> tuple[str, ...]:
     """Canonical spoken-word realizations produced by ``speech_normalization`` for *val*."""
-    from ..speech_normalization import (
+    from ..speech.speech_normalization import (
         _format_ugx_amount,
         _spoken_number,
         clean_text_for_speech,

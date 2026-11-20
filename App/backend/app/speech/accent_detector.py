@@ -34,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ._root import PROJECT_ROOT as _PROJECT_ROOT
+from .._root import PROJECT_ROOT as _PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 

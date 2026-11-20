@@ -78,7 +78,7 @@ class Methods:
     def _decode(self, pcm: bytes, language: str | None) -> tuple[str, float, float]:
         """Plain SALT decode, no domain prompt. Returns (text, mean_logprob, ms)."""
         import torch
-        from app.speech_service import SALT_LANGUAGE_TOKEN_IDS
+        from app.speech.speech_service import SALT_LANGUAGE_TOKEN_IDS
 
         model, processor = self.speech._whisper_salt
         t0 = time.perf_counter()
@@ -159,7 +159,7 @@ class Methods:
         """
         from app.receptionist.language import LanguagePolicy, LanguageVote, PolicyConfig, fuse
         from app.receptionist.sentinel import TEXT_DECODE_MAX_S
-        from app.speech_service import pcm16_to_wav
+        from app.speech.speech_service import pcm16_to_wav
 
         config = PolicyConfig.from_env()
         t0 = time.perf_counter()
@@ -268,7 +268,7 @@ def main() -> None:
     want = {m.strip().upper() for m in args.methods.split(",") if m.strip()}
 
     from app.receptionist.language import PolicyConfig
-    from app.speech_service import SpeechModel
+    from app.speech.speech_service import SpeechModel
 
     speech = SpeechModel()
     if speech._whisper_salt is None:

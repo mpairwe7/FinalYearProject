@@ -349,7 +349,7 @@ class TestConversationalIntelligenceEngine:
         from app.calculator_router import extract_amounts
         from app.connector_intent import detect_connector_intent, missing_arguments
         from app.api.models import ChatResponse
-        from app.speech_normalization import _format_ugx_amount
+        from app.speech.speech_normalization import _format_ugx_amount
         from app.text_signals import detect_crisis, detect_high_stakes
 
         assert extract_amounts("What does EFRIS hold for TIN 1000000001?") == []
@@ -404,7 +404,7 @@ class TestConversationalIntelligenceEngine:
         assert "2. Main step two" in nested_paren
         assert "sifuri" not in _format_ugx_amount("1,000,000.00", "sw")
         assert "zero" not in _format_ugx_amount("3,500,000.00", "lg")
-        from app.speech_normalization import _spoken_number
+        from app.speech.speech_normalization import _spoken_number
 
         assert _spoken_number("2026.00", "lg") == "two thousand and twenty-six"
 
@@ -431,7 +431,7 @@ class TestConversationalIntelligenceEngine:
         from app.memory.case_facts import _normalize_vernacular_amount_words
         from app.rag.entailment import percentages
         from app.receptionist.lexicon import repair_asr_entities
-        from app.speech_normalization import clean_text_for_speech
+        from app.speech.speech_normalization import clean_text_for_speech
 
         assert clean_text_for_speech("Omushoro gwa VAT guri ebicweka 18% aha eigana.", locale="nyn") == (
             "Omushoro gwa Vat guri ebicweka ikumi na munaana aha eigana."

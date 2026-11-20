@@ -29,7 +29,7 @@ APP_DIR = REPO_ROOT / "App" / "backend" / "app"
 
 KNOWN_ML_IMPORTERS = {
     "rag/query.py",
-    "speech_service.py",
+    "speech/speech_service.py",
     "ingestion/pdf_corpus.py",
     "ingestion/crawl_corpus.py",
 }

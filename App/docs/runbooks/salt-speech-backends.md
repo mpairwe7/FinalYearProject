@@ -1,7 +1,7 @@
 # Runbook — Sunbird SALT speech backends (Updated 2026-11-02)
 
 Operator guide for the Sunbird V2 speech models wired into
-`App/backend/app/speech_service.py` and `App/backend/app/orpheus_tts.py`:
+`App/backend/app/speech/speech_service.py` and `App/backend/app/speech/orpheus_tts.py`:
 - **Primary ASR**: `Sunbird/SunflowerASR-51-african-languages` (51 African languages, Whisper large-v3 SFT on 7,412h + GRPO on CER; replaced `Sunbird/asr-whisper-large-v3-salt` in local HF cache on 2026-10-15).
 - **Primary TTS**: `Sunbird/orpheus-3b-tts-multilingual` (`ORPHEUS_TTS_LANGUAGES=lg,sw,en`, speakers `salt_lug_0001`, `waxal_swa_0006`, `salt_eng_0001`, 24 kHz streaming via SNAC decoder; replaced `Sunbird/spark-tts-salt` which is disabled by default via `SPARK_TTS_ENABLED=false` and removed from local HF cache).
 
@@ -52,7 +52,7 @@ that only looks at HTTP 200 cannot tell these apart; read `status`.
 
 ## ASR — `Sunbird/SunflowerASR-51-african-languages` (formerly `Sunbird/asr-whisper-large-v3-salt`)
 
-One `whisper-large-v3` fine-tune covering 51 African languages including English (`en`: `50259`), Luganda (`lg`: `50332`), Kiswahili (`sw`: `50318`), Runyankole (`nyn`: `50322`), and Acholi (`ach`: `50357`) in a single checkpoint (`SALT_LANGUAGE_TOKEN_IDS` in `speech_service.py`) — a strict upgrade over `WHISPER_ADAPTER_*`, which this deployment only ever populated for Luganda, so English and Kiswahili silently ran through the Luganda-merged adapter (see issue #303's audit).
+One `whisper-large-v3` fine-tune covering 51 African languages including English (`en`: `50259`), Luganda (`lg`: `50332`), Kiswahili (`sw`: `50318`), Runyankole (`nyn`: `50322`), and Acholi (`ach`: `50357`) in a single checkpoint (`SALT_LANGUAGE_TOKEN_IDS` in `speech/speech_service.py`) — a strict upgrade over `WHISPER_ADAPTER_*`, which this deployment only ever populated for Luganda, so English and Kiswahili silently ran through the Luganda-merged adapter (see issue #303's audit).
 
 **On by default.** It is the top ASR tier (`⓪` in `_transcribe_chain`), tried
 before the LoRA adapters, Sherpa, faster-whisper and every cloud fallback.
@@ -136,7 +136,7 @@ to begin with — the ids work despite it, not because of it).
 > "if False, upgrade the driver" remedy is superseded.
 
 
-The in-process path (`_transcribe_whisper_salt` in `speech_service.py`) is
+The in-process path (`_transcribe_whisper_salt` in `speech/speech_service.py`) is
 not the bottleneck — it already does the right things (`torch.no_grad()`,
 `float16` on CUDA, correct device placement, now also explicit
 `attn_implementation="sdpa"` rather than relying on transformers' implicit
@@ -221,7 +221,7 @@ with the snippet above before relying on it.
 ## TTS — `Sunbird/spark-tts-salt`
 
 Local neural TTS for `lg`/`sw`/`ach`/`nyn`, wired at
-`App/backend/app/spark_tts_salt.py` and tried FIRST — local before any API —
+`App/backend/app/speech/spark_tts_salt.py` and tried FIRST — local before any API —
 in `_synthesize_uncached`'s tier `⓪` for those four locales, ahead of
 Sunbird's cloud-native voice, which now runs only if this tier is
 unavailable (unloaded) or fails; tier `①.75` gives it the same priority for
@@ -276,7 +276,7 @@ CPU/CraneCloud/HF-Space images (`requirements-cranecloud.txt`,
 `requirements-receptionist.txt`, `App/deploy/hf-space/Dockerfile`) so
 `speech_service._decode_container` decodes 24 kHz `edge-tts` MP3 into 16 kHz
 PCM16 with 31-tap FIR anti-aliasing (`_resample`) and a 300s duration cap
-(`sf.info`), while `speech_normalization.py` normalizes `VAT`/`V.A.T.`/`V-A-T`
+(`sf.info`), while `speech/speech_normalization.py` normalizes `VAT`/`V.A.T.`/`V-A-T`
 to Title-case `"Vat"` so neural TTS pronounces it as `"vat"`/`"vati"` rather
 than spelling out `"V A T"` (`G415`). See the file's own header comment for the
 driver-compatibility caveat that applies to any GPU Dockerfile in this project,
@@ -366,7 +366,7 @@ Confirmed this doesn't regress anything sparktts needs for this project's
 usage: `torchaudio` is used in exactly two places in the `sparktts`
 package — `utils/audio.py`'s `highpass_biquad()` (only reachable from the
 voice-cloning/reference-audio `tokenize()` path, which
-`app.spark_tts_salt.py`'s `synthesize()` never calls), and
+`app.speech.spark_tts_salt.py`'s `synthesize()` never calls), and
 `bicodec.py`'s `init_mel_transformer()`, which builds a
 `torchaudio.transforms.MelSpectrogram` unconditionally in `BiCodec.__init__`
 (so it IS in the load path) but is never referenced by
@@ -412,14 +412,14 @@ confirms a different or additional one.
 ### Verification status (2026-08-19)
 
 Run end to end on a real GPU against the real weights (not just import-checked):
-`app.spark_tts_salt.load()` loaded both halves (LLM ~29s, BiCodec ~47-80s
+`app.speech.spark_tts_salt.load()` loaded both halves (LLM ~29s, BiCodec ~47-80s
 cold), and `SparkTtsSalt.synthesize()` produced non-trivial audio for all
 four mapped locales — peak 0.72-0.99, RMS 0.07-0.08, 3-3.7s for short
 sentences, none silent or clipped-flat. `en` correctly raised
 `SparkTtsUnavailable` rather than guessing a speaker id (no id is published
 for it — see the speaker-id table above).
 
-Two real bugs surfaced by this run and fixed in `spark_tts_salt.py`, neither
+Two real bugs surfaced by this run and fixed in `speech/spark_tts_salt.py`, neither
 visible from reading the model card — both present in its own
 `generate_speech()` example too, which is why they survived a first reading:
 
@@ -455,7 +455,7 @@ anything user-facing:
 
 ### Verification status — `App/Dockerfile.gpu` bake-in (2026-08-20)
 
-The 2026-08-19 run above verified `spark_tts_salt.py`'s logic in an
+The 2026-08-19 run above verified `speech/spark_tts_salt.py`'s logic in an
 isolated venv with a driver-matched torch/torchaudio pair. This pass
 verifies the same code baked into the actual shipped image, which pins a
 different (project-standard) torch version — the reason the torchaudio fix
@@ -466,7 +466,7 @@ above was needed at all. Layered verification, each step on the real
    `sparktts.models.bicodec.BiCodec` both import cleanly with the `.so`
    removed. `torchaudio.transforms.MelSpectrogram` both constructs and runs
    `forward()` correctly (pure tensor ops, as expected).
-2. **Gated-repo access.** `app.spark_tts_salt.load()` run inside the image
+2. **Gated-repo access.** `app.speech.spark_tts_salt.load()` run inside the image
    with `HF_TOKEN` wired via `--env-file` (matching how
    `docker-compose.yml` actually delivers it in production) successfully
    downloaded and loaded the gated `Sunbird/spark-tts-salt` LLM half —
@@ -749,16 +749,16 @@ Statutory tax percentages and rates must survive translation without distortion 
 Aligning with Sunflower v2 benchmarks, single-hop cross-lingual RAG replaces legacy 4-hop cascade translation (ASR → MT to English → LLM → MT to vernacular → TTS). Sunflower-14B / Gemini natively synthesizes concise vernacular answers grounded on English statutory retrieval passages in a single inference pass, eliminating translation latency and compound figure drift.
 
 ### 4. Government & Cross-MDA Speech Pronunciation & ASR Entity Repair (October 2026)
-Across both `App/backend/app/speech_normalization.py` (`clean_text_for_speech`, `phoneticize_bantu_acronyms`) and `App/frontend/src/lib/answerText.ts` (`cleanMarkdownForSpeech`), statutory and 10-MDA terms and `.go.ug`/`.co.ug`/`.or.ug` domains are normalized case-insensitively before TTS synthesis:
+Across both `App/backend/app/speech/speech_normalization.py` (`clean_text_for_speech`, `phoneticize_bantu_acronyms`) and `App/frontend/src/lib/answerText.ts` (`cleanMarkdownForSpeech`), statutory and 10-MDA terms and `.go.ug`/`.co.ug`/`.or.ug` domains are normalized case-insensitively before TTS synthesis:
 - **Letter-by-Letter Initialisms (space-separated)**: `URA`/`ura` $\rightarrow$ `U R A`, `PRN`/`prn` $\rightarrow$ `P R N`, `KCCA`/`kcca` $\rightarrow$ `K C C A`, `URSB`/`ursb` $\rightarrow$ `U R S B`, `UNBS`/`unbs` $\rightarrow$ `U N B S`, `DCIC` $\rightarrow$ `D C I C`, `UDLS` $\rightarrow$ `U D L S`, `MLHUD` $\rightarrow$ `M L H U D`, `UgNLIS` $\rightarrow$ `U G N L I S`, `UPF` $\rightarrow$ `U P F`, `EPS` $\rightarrow$ `E P S`, `NDA` $\rightarrow$ `N D A`, `NDAMIS` $\rightarrow$ `N D A M I S`, `PPDA` $\rightarrow$ `P P D A`, `IFMS` $\rightarrow$ `I F M S`, `OBRS` $\rightarrow$ `O B R S`, `UESW` $\rightarrow$ `U E S W`, `NTR` $\rightarrow$ `N T R`, `ONTR` $\rightarrow$ `O N T R`, `MoWT` $\rightarrow$ `M O W T`, `MoFPED` $\rightarrow$ `M O F P E D`, `MoLG` $\rightarrow$ `M O L G`, `MAAIF` $\rightarrow$ `M A A I F`, `UCDA` $\rightarrow$ `U C D A`, `PVoC` $\rightarrow$ `P V O C`, `CoC` $\rightarrow$ `C O C`, `CGV` $\rightarrow$ `C G V`, `MZO` $\rightarrow$ `M Z O`, `EIA` $\rightarrow$ `E I A`, `FDN` $\rightarrow$ `F D N`, `EFD` $\rightarrow$ `E F D`, `OTP` $\rightarrow$ `O T P`, `e-GP` $\rightarrow$ `E G P`.
-- **Pronounceable Acronyms Spoken as Natural Words**: `TIN`/`tin` and `NIN`/`nin` are preserved as `TIN`/`tin` and `NIN`/`nin` by `clean_text_for_speech` and `cleanMarkdownForSpeech` (`answerText.ts`) while the backend `apply_tts_engine_phonetics` (`speech_normalization.py`) converts `TIN` $\rightarrow$ `Tin` and `NIN` $\rightarrow$ `Nin` right before TTS synthesis (never `T-I-N` or `N-I-N`); `VAT`/`V.A.T.`/`V-A-T` $\rightarrow$ `Vat` (never spelled `"V A T"`, `G415`), `EFRIS`/`efris` $\rightarrow$ `Efris`, `PAYE`/`paye` $\rightarrow$ `Payee`, `NEMA`/`nema` $\rightarrow$ `Nema`, `NIRA`/`nira` $\rightarrow$ `Nira`, `IRAS`/`iras` $\rightarrow$ `Iras`, `BWIMS`/`bwims` $\rightarrow$ `Bwims`, `COMESA`/`comesa` $\rightarrow$ `Comesa`, `ULII`/`ulii` $\rightarrow$ `Ulii`, `ASYCUDA` $\rightarrow$ `Asycuda`, `e-Citie` $\rightarrow$ `E-City`, `Runyankole`/`Runyankore` $\rightarrow$ `Runyankole`, and `Acholi`/`Lwacholi` $\rightarrow$ `Acholi`/`Lwacholi` (shared across Main Chat `/v1/tts` + `/v1/tts/stream` and Call Receptionist `UraSpeechTTS` + `synthesize_pcm16`, `G439`).
+- **Pronounceable Acronyms Spoken as Natural Words**: `TIN`/`tin` and `NIN`/`nin` are preserved as `TIN`/`tin` and `NIN`/`nin` by `clean_text_for_speech` and `cleanMarkdownForSpeech` (`answerText.ts`) while the backend `apply_tts_engine_phonetics` (`speech/speech_normalization.py`) converts `TIN` $\rightarrow$ `Tin` and `NIN` $\rightarrow$ `Nin` right before TTS synthesis (never `T-I-N` or `N-I-N`); `VAT`/`V.A.T.`/`V-A-T` $\rightarrow$ `Vat` (never spelled `"V A T"`, `G415`), `EFRIS`/`efris` $\rightarrow$ `Efris`, `PAYE`/`paye` $\rightarrow$ `Payee`, `NEMA`/`nema` $\rightarrow$ `Nema`, `NIRA`/`nira` $\rightarrow$ `Nira`, `IRAS`/`iras` $\rightarrow$ `Iras`, `BWIMS`/`bwims` $\rightarrow$ `Bwims`, `COMESA`/`comesa` $\rightarrow$ `Comesa`, `ULII`/`ulii` $\rightarrow$ `Ulii`, `ASYCUDA` $\rightarrow$ `Asycuda`, `e-Citie` $\rightarrow$ `E-City`, `Runyankole`/`Runyankore` $\rightarrow$ `Runyankole`, and `Acholi`/`Lwacholi` $\rightarrow$ `Acholi`/`Lwacholi` (shared across Main Chat `/v1/tts` + `/v1/tts/stream` and Call Receptionist `UraSpeechTTS` + `synthesize_pcm16`, `G439`).
 - **Official `.go.ug` / `.co.ug` / `.or.ug` Domains**: Spoken naturally (e.g., `kcca.go.ug` $\rightarrow$ `K C C A dot go dot u g`, `obrs.ursb.go.ug` $\rightarrow$ `O B R S dot U R S B dot go dot u g`, `nema.go.ug` $\rightarrow$ `Nema dot go dot u g`, `unbs.go.ug` $\rightarrow$ `U N B S dot go dot u g`).
 - **ASR Round-Trip Entity Repair (`App/backend/app/receptionist/lexicon.py`)**: `repair_asr_entities()` reconstructs canonical uppercase acronyms (`KCCA`, `URSB`, `UNBS`, `NEMA`, `NIRA`, `DCIC`, `UDLS`, `MLHUD`, `UgNLIS`, `UPF`, `EPS`, `NDA`, `PPDA`, `IFMS`, `OBRS`, `UESW`, `IRAS`, `BWIMS`, `NTR`, `ONTR`, `MoWT`, `MoFPED`, `MoLG`, `PVoC`, `FDN`, `EFD`, `EIA`, `CGV`, `e-GP`, `e-Citie`) when callers spell them letter-by-letter on voice calls.
 
 ### 5. Sunbird 2-Account Quota Cooldown & Cloudflare / Gemini 3.8 Speech Auto-Failover (November 2026)
 When both `SUNBIRD_API_TOKEN` and `SUNBIRD_FALLBACK_API_TOKEN` return HTTP `429` (`Daily quota exceeded` / `retry_after_seconds >= 60`):
 - **Per-Account Quota Cooldown (`App/backend/app/sunbird.py`)**: `_quota_cooldown_seconds()` records each account's cooldown in `_quota_cooldown_until` up to `retry_after_seconds` (capped at `86400s`) without blocking worker threads. `sunbird.both_accounts_quota_exhausted()` returns `True` while all configured Sunbird accounts are in cooldown and automatically returns `False` the moment either account's quota resets.
-- **Cloudflare AI Gateway / Gemini 3.8 TTS Failover (`_synthesize_gemini_tts` in `App/backend/app/speech_service.py`)**: When `sunbird.both_accounts_quota_exhausted()` is `True` or `TTS_FALLBACK_BACKEND=gemini`, TTS falls over to `GEMINI_TTS_MODEL` (`gemini-3.8-flash-tts`) and `GEMINI_TTS_FALLBACK_MODEL` (`gemini-3.8-flash-lite-tts`) via Cloudflare AI Gateway (`google_ai_studio_base`) with direct Google AI Studio fallback, returning 24 kHz mono PCM16 WAV before degrading to `edge-tts`.
+- **Cloudflare AI Gateway / Gemini 3.8 TTS Failover (`_synthesize_gemini_tts` in `App/backend/app/speech/speech_service.py`)**: When `sunbird.both_accounts_quota_exhausted()` is `True` or `TTS_FALLBACK_BACKEND=gemini`, TTS falls over to `GEMINI_TTS_MODEL` (`gemini-3.8-flash-tts`) and `GEMINI_TTS_FALLBACK_MODEL` (`gemini-3.8-flash-lite-tts`) via Cloudflare AI Gateway (`google_ai_studio_base`) with direct Google AI Studio fallback, returning 24 kHz mono PCM16 WAV before degrading to `edge-tts`.
 - **Cloudflare AI Gateway / Gemini 3.5 Transcribe & Multimodal ASR Failover**: When `STT_ALLOW_MULTILINGUAL_GEMINI=true` or `sunbird.both_accounts_quota_exhausted()`, `_gemini_audio_transcribe` routes 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) audio (guarded by a 14 MiB inline audio cap before consuming breaker/budget) to `GEMINI_STT_MODEL` (`gemini-3.5-transcribe`, parsing `audioTranscription.text` or `text`, with automatic fallback to `gemini-2.5-flash` if `promptFeedback` blocks a candidate). Once Sunbird's quota cooldown expires, ASR, TTS, and MT automatically resume using Sunbird primary/fallback accounts first.
 
 

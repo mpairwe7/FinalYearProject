@@ -60,10 +60,10 @@ Pillow>=13.0.0
 
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch). Also
 # covers the ASR half of the Sunbird SALT speech stack
-# (WHISPER_SALT_MODEL, app/speech_service.py): a plain
+# (WHISPER_SALT_MODEL, app/speech/speech_service.py): a plain
 # WhisperForConditionalGeneration + WhisperProcessor, no extra dependency.
 #
-# The TTS half (SPARK_TTS_MODEL, app/spark_tts_salt.py) is NOT covered here —
+# The TTS half (SPARK_TTS_MODEL, app/speech/spark_tts_salt.py) is NOT covered here —
 # it needs BiCodec from a second, separately-licensed GitHub repository that
 # ships no setup.py/pyproject.toml and so cannot be a normal requirements.txt
 # entry. It is off by default; see App/docs/runbooks/salt-speech-backends.md for

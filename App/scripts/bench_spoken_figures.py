@@ -30,7 +30,7 @@ from pathlib import Path
 
 import httpx
 from app.number_words import en_words
-from app.speech_normalization import clean_text_for_speech
+from app.speech.speech_normalization import clean_text_for_speech
 
 PERCENTS = (0, 10, 12, 15, 18, 20, 25, 30, 40)
 AMOUNTS = ("5,000", "20,000", "335,000", "410,000", "1,000,000", "10,000,000", "150,000,000")

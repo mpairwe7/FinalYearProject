@@ -45,7 +45,8 @@ os.environ.setdefault("LLM_BACKEND", "vllm")
 os.environ.setdefault("ORPHEUS_TTS_URL", "http://127.0.0.1:18100")
 os.environ.setdefault("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
 
-from app import mt, orpheus_tts  # noqa: E402
+from app import mt  # noqa: E402
+from app.speech import orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
 from app.calculator_router import (  # noqa: E402
     extract_amounts,
@@ -91,7 +92,7 @@ from app.receptionist.spoken_figure_guard import (  # noqa: E402
     inject_dictation_pauses,
     verify_spoken_figures,
 )
-from app.speech_normalization import (  # noqa: E402
+from app.speech.speech_normalization import (  # noqa: E402
     clean_text_for_speech,
     verbalize_digits_for_tts,
 )

@@ -9,7 +9,7 @@ Backends (tried in order):
 
 Used by:
     * ``ml/pipelines/evaluate_tts.py``             — round-trip intelligibility
-    * ``App/backend/app/speech_service.py``         — server synthesis
+    * ``App/backend/app/speech/speech_service.py``         — server synthesis
     * ``ml/pipelines/redteam_voice.py``             — synthesize adversarial prompts
 
 Usage::

@@ -13,7 +13,7 @@ import pytest
 from app.rag import pipeline
 from app import sunbird
 from app.providers import breakers, gateway
-from app.speech_service import SpeechModel
+from app.speech.speech_service import SpeechModel
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +141,7 @@ def test_a_failing_judge_opens_the_shared_breaker(judge_on) -> None:
 
 
 def test_the_translation_tier_bounds_failover_by_the_speech_deadline(translation_on) -> None:
-    from app import speech_service
+    from app.speech import speech_service
 
     with mock.patch.object(sunbird, "translate_with_sunflower", return_value="Omusolo") as tr:
         before = speech_service.time.monotonic()

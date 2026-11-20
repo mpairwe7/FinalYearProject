@@ -4186,7 +4186,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
 
     def _fast_fallback() -> str | None:
         try:
-            from ..speech_service import SpeechModel
+            from ..speech.speech_service import SpeechModel
 
             out = SpeechModel._sunbird_llm_translate(text, "en", locale)
             if out and out.strip():
