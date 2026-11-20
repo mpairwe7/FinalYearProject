@@ -709,7 +709,8 @@ def test_the_declared_python_floor_is_the_oldest_python_a_lock_targets():
 def test_dependabot_does_not_propose_what_cannot_install():
     """Two pull requests could never go green. #790 wrote lingua-language-detector 2.2.0, which
     needs Python 3.12, into the lock compiled for 3.11. #798 moved transformers and datasets,
-    which each need huggingface-hub 1.31 or newer, without the huggingface-hub the root list pins."""
+    which each need huggingface-hub 1.31 or newer, without the huggingface-hub the root list pins.
+    datasets 5.2.0 also needs pyarrow 24, a major above the pin."""
     from fnmatch import fnmatch
 
     from packaging.version import Version
@@ -722,17 +723,18 @@ def test_dependabot_does_not_propose_what_cannot_install():
     assert held == (lock_python < Version("3.12")), "the rule lasts exactly as long as the lock targets a Python below 3.12"
 
     root = next(u for u in updates if u["package-ecosystem"] == "pip" and u.get("directory") == "/App")
-    names = ("transformers", "datasets", "huggingface-hub", "sentence-transformers", "fastapi", "loguru")
+    names = ("transformers", "datasets", "huggingface-hub", "sentence-transformers", "pyarrow", "fastapi", "loguru")
     first = {name: next(g for g, group in root["groups"].items() if any(fnmatch(name, p) for p in group["patterns"])) for name in names}
     assert first == {
         "transformers": "hf-cluster",
         "datasets": "hf-cluster",
         "huggingface-hub": "hf-cluster",
         "sentence-transformers": "hf-cluster",
+        "pyarrow": "hf-cluster",
         "fastapi": "fastapi-stack",
         "loguru": "minor-and-patch",
     }
-    assert "update-types" not in root["groups"]["hf-cluster"], "a huggingface-hub major must be able to move with them"
+    assert "update-types" not in root["groups"]["hf-cluster"], "a huggingface-hub or pyarrow major must be able to move with them"
 
 
 def test_dependabot_does_not_propose_what_a_policy_test_rejects():

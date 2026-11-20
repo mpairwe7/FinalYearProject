@@ -116,16 +116,17 @@ updates:
         versions: [">=0.14"]
     groups:
       # The first group whose patterns match takes the update.
-      # transformers and datasets each set a floor for huggingface-hub, which the root list
-      # pins exactly. In the shared group, which takes minor and patch updates, they moved
-      # without it and nothing resolved (#798). No update-types here: the releases after
-      # huggingface-hub 1.x are 2.x.
+      # transformers and datasets each set a floor for huggingface-hub, and datasets sets one
+      # for pyarrow. The root list pins both exactly. In the shared group, which takes minor
+      # and patch updates, the two moved alone and nothing resolved (#798). No update-types
+      # here: the releases that satisfy them are a huggingface-hub major and a pyarrow major.
       hf-cluster:
         patterns:
           - "transformers"
           - "datasets"
           - "huggingface-hub"
           - "sentence-transformers"
+          - "pyarrow"
       fastapi-stack:
         patterns:
           - "fastapi*"
