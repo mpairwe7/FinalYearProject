@@ -27,12 +27,12 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
-from .config.flags import flags
+from ..config.flags import flags
 from .voice_stream import VADConfig, VoiceStreamEvent, _run_blocking, _split_sentences
 
 if TYPE_CHECKING:
-    from .rag.pipeline import ChatModel
-    from .speech.speech_service import SpeechModel
+    from ..rag.pipeline import ChatModel
+    from .speech_service import SpeechModel
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,8 @@ class VoiceSessionV2:
         """Lazy-init V2 components behind feature flags."""
         if flags.is_enabled("native_voice"):
             try:
-                from .native_voice.streaming_asr import StreamingASR
-                from .native_voice.streaming_tts import StreamingTTS
+                from ..native_voice.streaming_asr import StreamingASR
+                from ..native_voice.streaming_tts import StreamingTTS
 
                 self._streaming_asr = StreamingASR(
                     self._speech,
@@ -127,7 +127,7 @@ class VoiceSessionV2:
 
             if flags.is_enabled("speculative_prefetch"):
                 try:
-                    from .native_voice.speculative_prefetch import SpeculativePrefetcher
+                    from ..native_voice.speculative_prefetch import SpeculativePrefetcher
 
                     retriever = getattr(self._chat_model, "_retriever", None)
                     if retriever is not None:
@@ -138,7 +138,7 @@ class VoiceSessionV2:
                     logger.warning("Speculative prefetcher unavailable", exc_info=True)
 
             try:
-                from .native_voice.query_planner import QueryPlanner
+                from ..native_voice.query_planner import QueryPlanner
 
                 supervisor = getattr(self._chat_model, "_supervisor", None)
                 cache = getattr(self._chat_model, "_cache", None)
@@ -149,7 +149,7 @@ class VoiceSessionV2:
 
         if self.vision_enabled and flags.is_enabled("voice_vision_v2"):
             try:
-                from .vision.encoder import VisionEncoder
+                from ..vision.encoder import VisionEncoder
 
                 self._vision_encoder = VisionEncoder()
             except Exception:
@@ -274,7 +274,7 @@ class VoiceSessionV2:
             return
 
         detected_lang = asr_result["language"]
-        from .receptionist.lexicon import (
+        from ..receptionist.lexicon import (
             normalize_acholi_tax_query,
             normalize_luganda_tax_query,
             normalize_runyankole_tax_query,
@@ -347,7 +347,7 @@ class VoiceSessionV2:
         voice_path = "grounded"
         path_decision = None
         if self._query_planner:
-            from .native_voice.query_planner import VoicePath
+            from ..native_voice.query_planner import VoicePath
 
             path_decision = self._query_planner.plan(
                 query_text,
@@ -359,7 +359,7 @@ class VoiceSessionV2:
             voice_path = path_decision.path.value
 
         try:
-            from .receptionist.hybrid_s2s import classify_hybrid_speech_mode
+            from ..receptionist.hybrid_s2s import classify_hybrid_speech_mode
 
             hybrid_decision = classify_hybrid_speech_mode(
                 query_text,
@@ -384,8 +384,8 @@ class VoiceSessionV2:
         # Inject vision context if present (scrubbed + spotlighted against visual prompt injection)
         message_for_llm = query_text
         if image_context:
-            from .guardrails.input_checks import scan_retrieved_text
-            from .vision.ocr import escape_untrusted_document_markers
+            from ..guardrails.input_checks import scan_retrieved_text
+            from ..vision.ocr import escape_untrusted_document_markers
 
             doc_type = image_context.get("doc_type", "document")
             ocr_text, _ = scan_retrieved_text(str(image_context.get("ocr_text", "")))
@@ -449,7 +449,7 @@ class VoiceSessionV2:
             return
 
         try:
-            from .receptionist.spoken_figure_guard import verify_spoken_figures
+            from ..receptionist.spoken_figure_guard import verify_spoken_figures
 
             ver = verify_spoken_figures(
                 reply_text,
@@ -466,7 +466,7 @@ class VoiceSessionV2:
         except Exception:
             logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
 
-        from .guardrails.output_checks import OutputGuard
+        from ..guardrails.output_checks import OutputGuard
 
         reply_for_tts = OutputGuard.redact_pii(reply_for_tts)
 
@@ -540,7 +540,7 @@ class VoiceSessionV2:
         self, text: str, language: str,
     ) -> AsyncGenerator[VoiceStreamEvent, None]:
         """V2 token-level streaming TTS via CosyVoice2."""
-        from .speech.speech_normalization import clean_text_for_speech
+        from .speech_normalization import clean_text_for_speech
 
         text = clean_text_for_speech(text, language)
         audio_started = False

@@ -640,7 +640,7 @@ class SocketSignInTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(socket.frames("ready"), [])
 
 
-@pytest.mark.parametrize("module_name", ["app.voice_ws", "app.voice_ws_v2"])
+@pytest.mark.parametrize("module_name", ["app.speech.voice_ws", "app.speech.voice_ws_v2"])
 def test_a_revoked_token_does_not_open_a_voice_socket(module_name, clean_map) -> None:
     import importlib
 
@@ -658,7 +658,7 @@ def test_a_revoked_token_does_not_open_a_voice_socket(module_name, clean_map) ->
         module._resolve_ws_auth(socket, required=True)
 
 
-@pytest.mark.parametrize("module_name", ["app.voice_ws", "app.voice_ws_v2"])
+@pytest.mark.parametrize("module_name", ["app.speech.voice_ws", "app.speech.voice_ws_v2"])
 def test_a_token_without_iat_does_not_open_a_voice_socket(module_name, clean_map) -> None:
     import importlib
 
@@ -802,14 +802,14 @@ class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
         await self.assert_closed_on_revocation(chat_stream_ws, "ws_chat")
 
     async def test_an_open_voice_socket_closes_when_the_session_is_revoked(self) -> None:
-        from app.voice_ws import voice_stream_ws
+        from app.speech.voice_ws import voice_stream_ws
 
         await self.assert_closed_on_revocation(
             voice_stream_ws, "voice_streaming", VoiceSession=_FakeVoiceSession
         )
 
     async def test_an_open_v2_voice_socket_closes_when_the_session_is_revoked(self) -> None:
-        from app.voice_ws_v2 import voice_stream_ws_v2
+        from app.speech.voice_ws_v2 import voice_stream_ws_v2
 
         await self.assert_closed_on_revocation(
             voice_stream_ws_v2, "native_voice", VoiceSessionV2=_FakeVoiceSession

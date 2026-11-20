@@ -1294,7 +1294,7 @@ def cleanup_expired_data() -> dict[str, int]:
 
     # Voice receptionist tables retention
     try:
-        from ..voice_consent import retention_policy
+        from ..speech.voice_consent import retention_policy
         voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
         cur = conn.execute(
             "DELETE FROM voice_call_turns WHERE created_at < ?",

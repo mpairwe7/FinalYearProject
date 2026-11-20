@@ -53,7 +53,7 @@ def _chat_mock() -> MagicMock:
 
 
 def _session(speech: MagicMock, chat: MagicMock):
-    from app.voice_stream import VADConfig, VoiceSession
+    from app.speech.voice_stream import VADConfig, VoiceSession
 
     return VoiceSession(
         session_id="test",
@@ -120,7 +120,7 @@ class TestMtDegradation(unittest.IsolatedAsyncioTestCase):
 
     async def test_mt_retry_recovers_transient_failure(self) -> None:
         from app.speech.speech_service import TranslateResult
-        from app.voice_stream import _translate_with_retry
+        from app.speech.voice_stream import _translate_with_retry
 
         speech = MagicMock()
         good = TranslateResult(
@@ -143,7 +143,7 @@ class TestLlmDeadline(unittest.IsolatedAsyncioTestCase):
         chat.generate = lambda **kwargs: time.sleep(0.5) or {}  # real fn → executor
         session = _session(speech, chat)
 
-        with patch("app.voice_stream._VOICE_LLM_DEADLINE_S", 0.1):
+        with patch("app.speech.voice_stream._VOICE_LLM_DEADLINE_S", 0.1):
             events = [e async for e in session.process_utterance(_utterance())]
 
         errors = [e for e in events if e.type == "error"]

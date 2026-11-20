@@ -57,8 +57,8 @@ App/
 │   │   ├── guardrails/friction.py # Per-principal cool-down after repeated guard refusals (G464)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
-│   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)
-│   │   ├── voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
+│   │   ├── speech/voice_stream_v2.py # V2 voice session (dual-path + vision)
+│   │   ├── speech/voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
 │   │   └── ...              # resilience, tracing, analytics and the other top-level modules
 │   └── requirements.txt
 └── frontend/          # Next.js 16 PWA frontend
@@ -463,10 +463,10 @@ Real-time duplex voice via WebSocket (`WS /v1/voice/chat/stream`):
 Client (PCM16 chunks, ~20ms)
   |
   v
-WebSocket Handler (voice_ws.py)
+WebSocket Handler (speech/voice_ws.py)
   |
   v
-VoiceSession (voice_stream.py):
+VoiceSession (speech/voice_stream.py):
   |
   ├─ Energy-based VAD (hysteresis, configurable thresholds)
   |    └─ Emits vad_state events on speech/silence transitions
@@ -493,9 +493,9 @@ VoiceSession (voice_stream.py):
 
 | Module | File | Purpose |
 |--------|------|---------|
-| `voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
-| `voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
-| `voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
+| `speech/voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
+| `speech/voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
+| `speech/voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
 | `rag/offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
 | `speech/accent_detector.py` | `backend/app/` | Prosodic accent classifier |
 
@@ -526,10 +526,10 @@ Target: **p95 < 600ms** end-to-end (fast path) and **< 800ms** (grounded path).
 Client (PCM16 chunks + optional JPEG camera frames)
   |
   v
-V2 WebSocket Handler (voice_ws_v2.py)
+V2 WebSocket Handler (speech/voice_ws_v2.py)
   |
   v
-VoiceSessionV2 (voice_stream_v2.py):
+VoiceSessionV2 (speech/voice_stream_v2.py):
   |
   +-- Energy VAD (same as V1)
   |     +-- Emits vad_state events
@@ -576,8 +576,8 @@ VoiceSessionV2 (voice_stream_v2.py):
 | `vision/encoder.py` | `backend/app/` | Qwen2-VL-2B document understanding + OCR |
 | `vision/ocr.py` | `backend/app/` | EasyOCR wrapper + URA field extraction (TIN, UGX, dates) |
 | `vision/document_classifier.py` | `backend/app/` | Rule-based URA document type classifier |
-| `voice_stream_v2.py` | `backend/app/` | V2 session with dual-path routing + vision |
-| `voice_ws_v2.py` | `backend/app/` | V2 WebSocket handler + 8 Prometheus metrics |
+| `speech/voice_stream_v2.py` | `backend/app/` | V2 session with dual-path routing + vision |
+| `speech/voice_ws_v2.py` | `backend/app/` | V2 WebSocket handler + 8 Prometheus metrics |
 
 **V2 WebSocket protocol extensions (additive over V1):**
 

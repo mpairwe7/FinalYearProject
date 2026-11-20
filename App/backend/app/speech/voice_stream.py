@@ -39,8 +39,8 @@ from unittest.mock import Mock
 import numpy as np
 
 if TYPE_CHECKING:
-    from .rag.pipeline import ChatModel
-    from .speech.speech_service import SpeechModel, SynthesizeResult, TranscribeResult
+    from ..rag.pipeline import ChatModel
+    from .speech_service import SpeechModel, SynthesizeResult, TranscribeResult
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +340,7 @@ class VoiceSession:
             return
 
         detected_lang = asr_result.language or self.language
-        from .receptionist.lexicon import (
+        from ..receptionist.lexicon import (
             normalize_acholi_tax_query,
             normalize_luganda_tax_query,
             normalize_runyankole_tax_query,
@@ -502,9 +502,9 @@ class VoiceSession:
         figure_guard_blocked = False
         verified_caption_text = reply_for_tts
         try:
-            from .config.flags import flags
-            from .receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
-            from .speech.speech_normalization import clean_text_for_speech
+            from ..config.flags import flags
+            from ..receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
+            from .speech_normalization import clean_text_for_speech
 
             cleaned_speech = clean_text_for_speech(reply_for_tts, locale=tts_lang)
             if flags.is_enabled("spoken_figure_guard", subject=self.user_id or None):
@@ -532,9 +532,9 @@ class VoiceSession:
         # amount, a name) as its objective, pushing real cases out (Phase 38).
         if self.user_id:
             try:
-                from .config.flags import flags
-                from .memory import get_memory_service
-                from .memory.resolution_ledger import infer_domain_tag
+                from ..config.flags import flags
+                from ..memory import get_memory_service
+                from ..memory.resolution_ledger import infer_domain_tag
 
                 domain = infer_domain_tag(query_text)
                 if domain != "general" and flags.is_enabled("continuous_relationship_memory", subject=self.user_id):

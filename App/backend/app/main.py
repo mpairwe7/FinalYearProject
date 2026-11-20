@@ -734,7 +734,7 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
         return
 
     if ctx.user_id:
-        from .voice_consent import grant_voice_consent, require_voice_consent
+        from .speech.voice_consent import grant_voice_consent, require_voice_consent
 
         eff_tenant = ctx.tenant_id or "default"
         if require_voice_consent(ctx.user_id, tenant_id=eff_tenant):
@@ -906,7 +906,7 @@ async def lifespan(app: FastAPI):
 
     # Voice consent schema (Phase 23) — creates voice_audit_log table.
     try:
-        from .voice_consent import init_voice_consent_schema
+        from .speech.voice_consent import init_voice_consent_schema
 
         init_voice_consent_schema()
     except Exception:
@@ -2149,10 +2149,10 @@ async def voice_chat(
 async def voice_chat_stream_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for streaming voice chat with VAD + barge-in.
 
-    Gated by the ``voice_streaming`` feature flag.  See ``voice_ws.py``
+    Gated by the ``voice_streaming`` feature flag.  See ``speech/voice_ws.py``
     for the full protocol specification.
     """
-    from .voice_ws import voice_stream_ws
+    from .speech.voice_ws import voice_stream_ws
 
     await voice_stream_ws(websocket, app)
 
@@ -2163,9 +2163,9 @@ async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
 
     Gated by the ``native_voice`` feature flag.  Extends the V1 protocol
     with partial transcripts, speculative prefetch, token-level TTS
-    (CosyVoice2), and parallel vision encoding.  See ``voice_ws_v2.py``.
+    (CosyVoice2), and parallel vision encoding.  See ``speech/voice_ws_v2.py``.
     """
-    from .voice_ws_v2 import voice_stream_ws_v2
+    from .speech.voice_ws_v2 import voice_stream_ws_v2
 
     await voice_stream_ws_v2(websocket, app)
 
@@ -4469,7 +4469,7 @@ def voice_audit_endpoint(
     """Voice audit log for regulatory compliance and admin review."""
     import time as _time
 
-    from .voice_consent import get_voice_audit_log, voice_audit_stats
+    from .speech.voice_consent import get_voice_audit_log, voice_audit_stats
 
     since = _time.time() - (days * 86400) if days > 0 else None
     entries = get_voice_audit_log(
@@ -4635,7 +4635,7 @@ def _staff_call_event(ctx: AuthContext, call_id: str, event_type: str, **metadat
     trail shows who acted and in which capacity; the break-glass operator key
     is recorded as ``operator-key``.
     """
-    from .voice_consent import log_voice_event
+    from .speech.voice_consent import log_voice_event
 
     log_voice_event(
         user_id=ctx.user_id or "operator-key",

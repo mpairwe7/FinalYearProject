@@ -31,7 +31,7 @@ class TestVADDetection(unittest.TestCase):
     """Test energy-based VAD with synthetic PCM."""
 
     def _make_session(self, **kwargs):
-        from app.voice_stream import VADConfig, VoiceSession
+        from app.speech.voice_stream import VADConfig, VoiceSession
 
         speech = MagicMock()
         chat = MagicMock()
@@ -122,7 +122,7 @@ class TestVADDetection(unittest.TestCase):
 
 class TestSentenceSplitting(unittest.TestCase):
     def test_basic_splitting(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         result = _split_sentences("Hello there. How are you? I am fine!")
         self.assertEqual(len(result), 3)
@@ -131,26 +131,26 @@ class TestSentenceSplitting(unittest.TestCase):
         self.assertEqual(result[2], "I am fine!")
 
     def test_single_sentence(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         result = _split_sentences("Hello there")
         self.assertEqual(result, ["Hello there"])
 
     def test_short_fragments_merged(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         result = _split_sentences("Hello. Hi. How are you doing today?")
         # "Hi." is <10 chars, should be merged with "Hello."
         self.assertTrue(len(result) <= 3)
 
     def test_empty_text(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         result = _split_sentences("  ")
         self.assertEqual(len(result), 1)
 
     def test_a_number_ending_a_sentence_is_not_a_step(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         self.assertEqual(
             _split_sentences("Your reference number is 123. Keep it safe."),
@@ -158,7 +158,7 @@ class TestSentenceSplitting(unittest.TestCase):
         )
 
     def test_list_markers_are_read_as_steps(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         self.assertEqual(
             _split_sentences("To register: 1. Go to the URA web portal. 2. Click eServices and select TIN."),
@@ -171,7 +171,7 @@ class TestSentenceSplitting(unittest.TestCase):
         )
 
     def test_long_sentence_clause_split(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         long_text = (
             "Under Section 15 of the Value Added Tax Act, every taxable person who makes a taxable supply "
@@ -191,7 +191,7 @@ class TestSentenceSplitting(unittest.TestCase):
 
 class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
     def _make_session(self):
-        from app.voice_stream import VADConfig, VoiceSession
+        from app.speech.voice_stream import VADConfig, VoiceSession
         from app.speech.speech_service import TranscribeResult, SynthesizeResult
 
         speech = MagicMock()
@@ -328,7 +328,7 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meta.data["reply_language"], "en")
 
     def test_split_sentences_numbered_steps(self):
-        from app.voice_stream import _split_sentences
+        from app.speech.voice_stream import _split_sentences
 
         text = "1. Go to the URA web portal. 2. Click eServices and select TIN. 3. Submit your application."
         sentences = _split_sentences(text)
@@ -345,46 +345,46 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
 
 
 class TestVoiceConsent(unittest.TestCase):
-    @patch("app.voice_consent.flags")
+    @patch("app.speech.voice_consent.flags")
     def test_consent_bypassed_when_flag_disabled(self, mock_flags):
-        from app.voice_consent import require_voice_consent
+        from app.speech.voice_consent import require_voice_consent
 
         mock_flags.is_enabled.return_value = False
         self.assertTrue(require_voice_consent("user123"))
 
-    @patch("app.voice_consent.flags")
+    @patch("app.speech.voice_consent.flags")
     def test_consent_denied_for_anonymous(self, mock_flags):
-        from app.voice_consent import require_voice_consent
+        from app.speech.voice_consent import require_voice_consent
 
         mock_flags.is_enabled.return_value = True
         self.assertFalse(require_voice_consent(""))
 
-    @patch("app.voice_consent.flags")
+    @patch("app.speech.voice_consent.flags")
     @patch("app.db.database.has_active_consent")
     def test_consent_granted(self, mock_has_consent, mock_flags):
-        from app.voice_consent import require_voice_consent
+        from app.speech.voice_consent import require_voice_consent
 
         mock_flags.is_enabled.return_value = True
         mock_has_consent.return_value = True
         self.assertTrue(require_voice_consent("user123"))
 
-    @patch("app.voice_consent.flags")
+    @patch("app.speech.voice_consent.flags")
     @patch("app.db.database.has_active_consent")
     def test_consent_denied(self, mock_has_consent, mock_flags):
-        from app.voice_consent import require_voice_consent
+        from app.speech.voice_consent import require_voice_consent
 
         mock_flags.is_enabled.return_value = True
         mock_has_consent.return_value = False
         self.assertFalse(require_voice_consent("user123"))
 
     def test_hash_audio(self):
-        from app.voice_consent import hash_audio
+        from app.speech.voice_consent import hash_audio
 
         result = hash_audio(b"test audio data")
         self.assertEqual(len(result), 64)  # SHA-256 hex digest
 
     def test_voice_event_types_valid(self):
-        from app.voice_consent import VOICE_EVENT_TYPES
+        from app.speech.voice_consent import VOICE_EVENT_TYPES
 
         self.assertIn("recording_start", VOICE_EVENT_TYPES)
         self.assertIn("barge_in", VOICE_EVENT_TYPES)

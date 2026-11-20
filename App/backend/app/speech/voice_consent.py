@@ -24,7 +24,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from .config.flags import flags
+from ..config.flags import flags
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def init_voice_consent_schema() -> None:
     Called from the FastAPI lifespan after ``init_db()``.
     """
     try:
-        from .db import database as db
+        from ..db import database as db
 
         db.execute_script(
             """
@@ -146,7 +146,7 @@ def require_voice_consent(user_id: str, tenant_id: str = "default") -> bool:
         return False
 
     try:
-        from .db import database as db
+        from ..db import database as db
 
         return db.has_active_consent(user_id, "voice_recording", tenant_id=tenant_id)
     except Exception:
@@ -174,7 +174,7 @@ def grant_voice_consent(
         return None
 
     try:
-        from .db import database as db
+        from ..db import database as db
 
         target_uid = user_id
         if hasattr(db, "upsert_user"):
@@ -228,7 +228,7 @@ def log_voice_event(
     meta_json = json.dumps(metadata or {})
 
     try:
-        from .db import database as db
+        from ..db import database as db
 
         db.execute(
             """
@@ -246,7 +246,7 @@ def log_voice_event(
     # Chain into AuditLedger if available
     if flags.is_enabled("audit_ledger"):
         try:
-            from .audit import get_ledger
+            from ..audit import get_ledger
 
             get_ledger().append(
                 event_type=f"voice_{event_type}",
@@ -264,7 +264,7 @@ def log_voice_event(
                 user_id=user_id,
             )
         except Exception:
-            from .observability.analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.inc("audit_append_failed_total", labels={"event_type": f"voice_{event_type}"})
             logger.warning("AuditLedger chain failed for voice event %s", event_type, exc_info=True)
@@ -290,7 +290,7 @@ def get_voice_audit_log(
 ) -> list[dict]:
     """Query voice audit entries for the admin endpoint."""
     try:
-        from .db import database as db
+        from ..db import database as db
 
         clauses: list[str] = []
         params: list = []
@@ -338,7 +338,7 @@ def get_voice_audit_log(
 def voice_audit_stats(days: int = 30) -> dict:
     """Aggregate voice audit statistics for the admin dashboard."""
     try:
-        from .db import database as db
+        from ..db import database as db
 
         cutoff = time.time() - (days * 86400)
 
@@ -394,7 +394,7 @@ def cleanup_expired_voice_data() -> dict[str, int]:
     """
     deleted = {"audit_entries": 0}
     try:
-        from .db import database as db
+        from ..db import database as db
 
         cutoff = time.time() - (retention_policy.analytics_ttl_days * 86400)
 
