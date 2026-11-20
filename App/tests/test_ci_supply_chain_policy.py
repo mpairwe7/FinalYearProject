@@ -701,7 +701,8 @@ def test_dependabot_does_not_propose_what_a_policy_test_rejects():
             assert "oven/bun" in ignored and ignored["oven/bun"] is None, folders
         if "FROM python:" in froms:
             # The locks are compiled for one Python minor, and CI audits on it (#807).
-            assert "version-update:semver-minor" in (ignored.get("python") or []), folders
+            # Exactly these two: with a patch added, 3.14.8 to 3.14.9 would stop being proposed.
+            assert sorted(ignored.get("python") or []) == ["version-update:semver-major", "version-update:semver-minor"], folders
     bun = next(update for update in updates if update["package-ecosystem"] == "bun")
     groups = list(bun["groups"].items())
     first_for_vitest = next(name for name, group in groups if any(p in ("vitest", "*") for p in group["patterns"]))
