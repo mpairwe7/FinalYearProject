@@ -913,9 +913,10 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
     """"What documents are required to clear an imported vehicle at customs?" was answered
     "The common external tariff for finished goods is 25%" on the live Space (G700).
 
-    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Five
-    versions of the fix each lost real answers and were failed by an independent replay. What
-    is left is one closed shape, and every case those replays found is held here.
+    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Six
+    versions of the fix changed that reading, and each lost real answers and was failed by an
+    independent replay. The reading is now left alone. The general tariff is withheld from one
+    closed shape, a plain paperwork question, and every case those replays found is held here.
     """
 
     def _plans(self, cases) -> None:
@@ -927,7 +928,7 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
                 self.assertIsNotNone(plan)
                 self.assertEqual(plan.tax_type or plan.summary, expected)
 
-    def test_a_lone_question_whose_subject_is_paperwork_is_not_an_allowance_question(self) -> None:
+    def test_a_plain_paperwork_question_does_not_get_the_general_tariff(self) -> None:
         from app.tax.calculator_router import plan_rate_lookup
 
         for question in (
@@ -940,7 +941,7 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
             "Which documents are required to clear an imported car at customs?",
             "What documents are needed to clear goods through customs?",
             "What papers are needed to clear goods at customs?",
-            "What permit is required to import used clothing?",
+            "What licence is required to import petrol at customs?",
         ):
             with self.subTest(question=question):
                 self.assertIsNone(plan_rate_lookup(question))
@@ -1032,6 +1033,32 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
                 ("What documents are required for import duty clearance?", "customs_duty_common"),
             )
         )
+
+    def test_a_rate_question_before_the_paperwork_question_is_read_as_before(self) -> None:
+        """Version six looked only at what followed the paperwork question."""
+        self._plans(
+            (
+                ("How much is the duty on beer? What documents are required to import it?", "excise_duty_beer_malt"),
+                ("What is the VAT on imported goods? What documents are required to clear them?", "vat_standard"),
+                ("Tell me the import duty on cars. What documents are required to clear one?", "customs_duty_common"),
+                ("Excise duty on beer? What documents are required to import it?", "excise_duty_beer_malt"),
+            )
+        )
+
+    def test_a_paperwork_question_with_an_answer_of_its_own_is_read_as_before(self) -> None:
+        """Only the general tariff is withheld. A rule about the thing asked after is kept."""
+        self._plans(
+            (
+                ("What documents are required to clear goods in transit through Uganda?", "customs_transit_goods_security"),
+                ("What permit is required to import used clothing?", "environmental_levy_used_clothing"),
+                ("What permits are required for a diplomat to import a car?", "customs_diplomatic_exemption"),
+            )
+        )
+
+    def test_the_rate_test_itself_is_unchanged(self) -> None:
+        from app.tax.calculator_router import _asks_about_rates
+
+        self.assertTrue(_asks_about_rates("What documents are required to clear an imported vehicle at customs?"))
 
     def test_the_paperwork_question_reaches_retrieval(self) -> None:
         from app.rag import pipeline

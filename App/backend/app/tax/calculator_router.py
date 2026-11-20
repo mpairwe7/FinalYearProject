@@ -1654,13 +1654,12 @@ _ALLOWED_KEYWORD_RE = re.compile(
 )
 #: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
 #: the same two words and asks for paperwork. It was answered "the common external tariff is 25%"
-#: (G700). One closed shape stops being an allowance question: the last question in the message,
-#: opening a sentence with what, which or who, then a paperwork noun, then is/are and a word of
-#: need, and after that one plain clause: nothing joined to it, no charge named, nothing following.
-#: Everything else is read as before. Each condition only narrows what changes, so a word these
-#: lists lack leaves a question answered as it was, never unanswered:
-#: "What VAT is required to import a car?", "What is required to be paid to clear a car?" and
-#: "What documents are required to import beer and the excise duty?" keep their answers.
+#: (G700). The rate test is left as it is. One thing changes, in plan_rate_lookup: the general
+#: tariff is not given as the answer when the message is one plain paperwork question and nothing
+#: else in it asks about a rate. The shape is closed: the only asking word in the message, opening
+#: a sentence with what, which or who, then a paperwork noun, then is/are and a word of need, then
+#: one plain clause. A charge named anywhere, anything joined on, or any other answer than the
+#: general tariff leaves the message read as before.
 _NEED_WORD_RE = re.compile(r"\b(?:required|needed|necessary|mandatory)\b|\bthe\b", re.IGNORECASE)
 _SENTENCE_TOKEN_RE = re.compile(r"[A-Za-z]+|[.?!:;\n]")
 _WH_WORDS = frozenset({"what", "which", "who"})
@@ -1672,45 +1671,48 @@ _PAPERWORK_NOUNS = frozenset(
 _NEED_WORDS = frozenset({"required", "needed", "necessary", "mandatory"})
 _PROCESS_NOUNS = frozenset({"process", "procedure", "steps", "requirement", "requirements"})
 _SENTENCE_BREAKS = frozenset(".?!:;\n")
-_JOINING_WORDS = frozenset({"and", "plus", "also", "too", "well", "along", "together", "including", "or", "both", "then"})
+_JOINING_WORDS = frozenset(
+    {"and", "plus", "also", "too", "well", "along", "together", "including", "or", "both", "then", "with", "n", "na", "ne"}
+)
 _CHARGE_WORDS = frozenset(
-    {"duty", "duties", "tax", "taxes", "vat", "excise", "levy", "levies", "tariff", "tariffs", "charge", "charges",
-     "cost", "costs", "fee", "fees", "payable", "amount", "rate", "rates", "bond", "security", "ssente", "emisolo",
-     "musolo", "kodi", "ushuru"}
+    {"duty", "duties", "tax", "taxes", "taxation", "vat", "excise", "levy", "levies", "tariff", "tariffs", "charge",
+     "charges", "cost", "costs", "fee", "fees", "payable", "payment", "payments", "amount", "money", "price", "rate",
+     "rates", "refund", "bond", "security", "ssente", "sente", "pesa", "ada", "emisolo", "musolo", "omusolo", "obusolo",
+     "kodi", "ushuru"}
 )  # fmt: skip
 _JOINING_MARKS = frozenset(",&+/")
+_GENERAL_TARIFF = "customs_duty_common"
 
 
-def _allowance_starts(text: str) -> list[int]:
-    """Ends of each can/is/are/may that can open an allowance question."""
-    starts = [m.end() for m in _ALLOWED_RE.finditer(text)]
-    if not starts or not _NEED_WORD_RE.search(text):
-        return starts
+def _plain_paperwork_ask(text: str) -> int | None:
+    """Where the is/are of a lone, plain paperwork question ends, or None when the message is not one."""
+    if not _NEED_WORD_RE.search(text):
+        return None
     tokens = [(m.end(), m.group().lower()) for m in _SENTENCE_TOKEN_RE.finditer(text)]
     words = [word for _end, word in tokens]
 
     def at(i: int) -> str:
         return words[i] if 0 <= i < len(words) else "."
 
-    # Only the last asking word in the message can open the shape, so at most one is/are is weighed.
-    wh = max((i for i, word in enumerate(words) if word in _ASKING_WORDS), default=-1)
+    asking = [i for i, word in enumerate(words) if word in _ASKING_WORDS]
+    if len(asking) != 1 or words[asking[0]] not in _WH_WORDS:
+        return None
+    wh = asking[0]
     be = wh + 2
-    if wh < 0 or at(wh) not in _WH_WORDS or at(wh - 1) not in _SENTENCE_BREAKS:
-        return starts
-    if at(wh + 1) not in _PAPERWORK_NOUNS or at(be) not in ("is", "are"):
-        return starts
+    if at(wh - 1) not in _SENTENCE_BREAKS or at(wh + 1) not in _PAPERWORK_NOUNS or at(be) not in ("is", "are"):
+        return None
     if not (at(be + 1) in _NEED_WORDS or (at(be + 1) == "the" and at(be + 2) in _PROCESS_NOUNS)):
-        return starts
+        return None
     rest = words[be + 1 :]
     clause_end = next((k for k, word in enumerate(rest) if word in _SENTENCE_BREAKS), len(rest))
-    one_plain_clause = (
-        not any(word in _JOINING_WORDS or word in _CHARGE_WORDS for word in rest)
-        and all(word in _SENTENCE_BREAKS for word in rest[clause_end:])
-        and _JOINING_MARKS.isdisjoint(text[tokens[be][0] :])
-    )
-    if not one_plain_clause:
-        return starts
-    return [end for end in starts if end != tokens[be][0]]
+    if (
+        any(word in _CHARGE_WORDS for word in words)
+        or any(word in _JOINING_WORDS for word in rest)
+        or any(word not in _SENTENCE_BREAKS for word in rest[clause_end:])
+        or not _JOINING_MARKS.isdisjoint(text[tokens[be][0] :])
+    ):
+        return None
+    return tokens[be][0]
 
 
 _SAME_LINE_PAIRS = tuple(
@@ -1751,7 +1753,7 @@ def _same_line(text: str, newlines: list[int], first: re.Pattern[str], second: r
     return False
 
 
-def _asks_about_rates(text: str) -> bool:
+def _asks_about_rates(text: str, *, apart_from: int | None = None) -> bool:
     """The rate-question test that was one ``_RATE_ASK_RE``, in linear time."""
     if _RATE_ASK_RE.search(text) or _asks_how_calculated(text):
         return True
@@ -1773,7 +1775,7 @@ def _asks_about_rates(text: str) -> bool:
     if _keyword_before_stop(sorted(starts), keywords, questions):
         return True
     tax_cut = [m.end() for m in _TAX_CUT_RE.finditer(text)]
-    allowed = _allowance_starts(text)
+    allowed = [m.end() for m in _ALLOWED_RE.finditer(text) if m.end() != apart_from]
     for ends, keyword_re in ((tax_cut, _TAX_CUT_KEYWORD_RE), (allowed, _ALLOWED_KEYWORD_RE)):
         if ends and _keyword_before_stop(ends, [m.start() for m in keyword_re.finditer(text)], questions):
             return True
@@ -2403,6 +2405,12 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                     continue
                 if re.search(r"\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa)\b[^?]{0,50}\b(?:supplies|services|goods|items|emirimu|ebintu|bidhaa)\b", text, re.IGNORECASE):
                     continue
+            if plan.tax_type == _GENERAL_TARIFF and not short_ask:
+                be = _plain_paperwork_ask(text)
+                before = text[: max(0, *(text.rfind(mark, 0, be) for mark in _SENTENCE_BREAKS))] if be else ""
+                names_a_rate = any(pattern.search(before) for _plan, pattern in _RATE_TYPE_RES)
+                if be is not None and not names_a_rate and not _asks_about_rates(text, apart_from=be):
+                    return None  # the general tariff is not an answer to "what documents are required ..."
             return plan
     if _PAYE_THRESHOLD_ASK_RE.search(text):
         return RatePlan(summary="paye")
