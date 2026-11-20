@@ -17,7 +17,7 @@ pydantic>=2.14.3,<2.15
 # Rate limiting + cache (Redis optional, falls back to in-process)
 slowapi>=0.1.10
 limits[redis]>=3.13
-redis>=5.0.0
+redis>=8.1.0
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
 
