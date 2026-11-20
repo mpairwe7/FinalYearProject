@@ -398,3 +398,17 @@ class RollingContextManager:
 
 # Global helper instance
 context_manager = RollingContextManager()
+
+
+def conversation_context(turns: list[dict[str, Any]], conversation_id: str, recent_limit: int) -> dict[str, Any]:
+    """What both stores return from ``get_conversation_context``, built from the turns each one read."""
+    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
+    ctx = mgr.build_context(turns, conversation_id=conversation_id)
+    return {
+        "recent_turns": ctx.recent_turns,
+        "context_summary": ctx.context_summary,
+        "consolidated_spec": ctx.consolidated_spec,
+        "active_entities": ctx.active_entities,
+        "total_turns": ctx.total_turns,
+        "all_turns": ctx.all_turns,
+    }
