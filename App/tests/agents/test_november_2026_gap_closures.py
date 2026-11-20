@@ -22,8 +22,8 @@ from app.workflows.graph.main_graph import node_act, node_observe, node_reflect
 from app.workflows.graph.state import AgentGraphState, GraphOutcome
 from app.rag.context_manager import extract_conversation_entities
 from app.rag.corrective_rag import build_reflection_query
-from app.document_worker import _apply_child_sandbox_limits, try_isolated
-from app.documents import UnsupportedDocumentError, _validate_document_content
+from app.processing.document_worker import _apply_child_sandbox_limits, try_isolated
+from app.processing.documents import UnsupportedDocumentError, _validate_document_content
 from app.config.flags import flags
 from app.graph.build import build_graph, build_summary
 from app.graph.schema import EdgeKind
@@ -264,7 +264,7 @@ def test_procedural_memory_rejects_prompt_injected_or_failed_trajectories() -> N
 # ---------------------------------------------------------------------------
 def test_parent_process_skips_c_extension_pdf_open_when_isolated(monkeypatch) -> None:
     monkeypatch.setenv("DOCUMENT_PARSE_ISOLATED", "true")
-    with mock.patch("app.documents.inspect_pdf_bytes") as spy_inspect:
+    with mock.patch("app.processing.documents.inspect_pdf_bytes") as spy_inspect:
         warnings = _validate_document_content(b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n", "pdf")
         assert warnings == []
         spy_inspect.assert_not_called()

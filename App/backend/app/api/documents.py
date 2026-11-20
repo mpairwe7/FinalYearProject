@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 
-from .. import documents
+from ..processing import documents
 from ..observability.analytics import metrics
 from ..auth import AuthContext, optional_user
 from ..middleware.rate_limiter import DOCUMENT_RATE_LIMIT, limiter

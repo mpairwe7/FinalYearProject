@@ -14,7 +14,7 @@ Retention and subject export/erasure behavior updated 2026-09-30.
 
 After any change to routing (`agents/patterns/*`, `pipeline._maybe_handle_workflow`),
 to a flow under `app/workflows/flows/`, to `app/text_signals.py` or
-`app/turn_guidance.py`, and after every deploy of the api image. It is a
+`app/chat/turn_guidance.py`, and after every deploy of the api image. It is a
 canary: exit status 1 means at least one case missed.
 
 ## Run it

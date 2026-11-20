@@ -11,7 +11,7 @@ Formatting follows IEEE conference / transaction guidelines:
 - Grayscale-friendly colour palette with distinct markers
 
 Usage:
-    python -m App.backend.app.artifact_export [--out-dir ../Artifacts]
+    python -m App.backend.app.quality.artifact_export [--out-dir ../Artifacts]
 
 References:
     IEEE Author Guidelines — https://journals.ieeeauthorcenter.ieee.org
@@ -908,14 +908,14 @@ def export_all(
     _ieee_style()
 
     if results_dir is None:
-        from ._root import CODE_ROOT
+        from .._root import CODE_ROOT
 
         results_dir = CODE_ROOT / "Results"
     else:
         results_dir = Path(results_dir)
 
     if out_dir is None:
-        from ._root import CODE_ROOT
+        from .._root import CODE_ROOT
 
         out_dir = CODE_ROOT / "Artifacts"
     else:

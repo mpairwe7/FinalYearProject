@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.documents import DocumentRecord
+from app.processing.documents import DocumentRecord
 from app.rag.pipeline import ChatModel
 from app.vision.ocr import (
     extract_national_id_card_data,

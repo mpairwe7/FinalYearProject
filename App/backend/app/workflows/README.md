@@ -68,7 +68,7 @@ reply localization path and fall back to English if translation fails.
    want…") is **answered**, not captured, unless it also asks to be guided
    ("guide me", "walk me through", "help me file/register/apply/submit",
    "start", …).
-3. When a question is answered instead, `app/turn_guidance.py` adds a next
+3. When a question is answered instead, `app/chat/turn_guidance.py` adds a next
    action `Guide me step by step through <flow name>`. Its text satisfies both
    rules above, so a click starts that flow. The offer is not added inside a
    flow, on a clarification, a refused input or an escalation; it *is* added to

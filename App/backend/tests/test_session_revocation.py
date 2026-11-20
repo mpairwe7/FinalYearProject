@@ -586,7 +586,7 @@ class SocketSignInTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(ws_concurrency.reset)
 
     def test_the_session_a_socket_signs_in_with_carries_its_issue_time(self) -> None:
-        from app.chat_ws_v2 import resolve_ws_session
+        from app.chat.chat_ws_v2 import resolve_ws_session
 
         iat = int(time.time())
         socket = _Socket([])
@@ -598,7 +598,7 @@ class SocketSignInTests(unittest.IsolatedAsyncioTestCase):
 
     def test_a_revoked_token_does_not_sign_a_socket_in(self) -> None:
         from app.auth import JWTAuthError
-        from app.chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
+        from app.chat.chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
 
         iat = int(time.time())
         token = _signed("okello", "ura_staff", iat=iat)
@@ -609,7 +609,7 @@ class SocketSignInTests(unittest.IsolatedAsyncioTestCase):
 
     def test_a_token_without_iat_does_not_sign_a_socket_in(self) -> None:
         from app.auth import JWTAuthError
-        from app.chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
+        from app.chat.chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
 
         token = _signed("okello", "ura_staff", iat=None)
         for resolve in (resolve_ws_session, _resolve_ws_principal):
@@ -749,7 +749,8 @@ class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self) -> None:
-        from app import chat_ws_v2, ws_concurrency
+        from app.chat import chat_ws_v2
+        from app import ws_concurrency
 
         self.revocation = _revocation()
         self.revocation.reset()
@@ -797,7 +798,7 @@ class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(socket.closed, 4401)
 
     async def test_an_open_chat_socket_closes_when_the_session_is_revoked(self) -> None:
-        from app.chat_ws_v2 import chat_stream_ws
+        from app.chat.chat_ws_v2 import chat_stream_ws
 
         await self.assert_closed_on_revocation(chat_stream_ws, "ws_chat")
 
@@ -816,7 +817,7 @@ class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_a_chat_socket_whose_session_stands_stays_open(self) -> None:
-        from app.chat_ws_v2 import chat_stream_ws
+        from app.chat.chat_ws_v2 import chat_stream_ws
 
         user, iat = _user("taxpayer"), int(time.time())
         socket = self.socket(_signed(user, "verified_taxpayer", iat=iat))
@@ -829,7 +830,7 @@ class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(socket.closed)
 
     async def test_an_anonymous_chat_socket_is_not_affected(self) -> None:
-        from app.chat_ws_v2 import chat_stream_ws
+        from app.chat.chat_ws_v2 import chat_stream_ws
 
         socket = self.socket()
         task = await self.open(chat_stream_ws, socket, "ws_chat")

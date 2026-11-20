@@ -501,7 +501,7 @@ risk_tracking:
 
   missing-file-validation@fastapi-api:
     status: mitigated
-    justification: "Fail-closed guardrails/pdf.py and documents.py validate MIME/magic bytes, reject macros and active scripts, enforce xref/page caps."
+    justification: "Fail-closed guardrails/pdf.py and processing/documents.py validate MIME/magic bytes, reject macros and active scripts, enforce xref/page caps."
     ticket: "SEC-FILE-01"
     date: "2026-08-29"
     checked_by: "URA AI Security Team"

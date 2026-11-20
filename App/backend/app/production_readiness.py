@@ -213,7 +213,7 @@ def _document_errors() -> list[str]:
         errors.append("G13: MALWARE_SCAN_REQUIRED must be true in production.")
     if not _truthy("DOCUMENT_PARSE_ISOLATED"):
         errors.append("G13: DOCUMENT_PARSE_ISOLATED must be true in production.")
-    from .document_worker import parse_mem_cap
+    from .processing.document_worker import parse_mem_cap
 
     cap = parse_mem_cap(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES"))
     if cap is None or cap <= 0:
@@ -500,7 +500,7 @@ def architecture_integrity_status() -> dict[str, Any]:
     from .memory.procedural import ProceduralMemory
     from .storage_protocol import verify_storage_backend_parity
     from .tools.portal_navigator_data import get_portal_knowledge_provenance
-    from .turn_pipeline import CANONICAL_BEHAVIORAL_MANIFEST
+    from .chat.turn_pipeline import CANONICAL_BEHAVIORAL_MANIFEST
 
     parity = verify_storage_backend_parity()
     portal_prov = get_portal_knowledge_provenance()

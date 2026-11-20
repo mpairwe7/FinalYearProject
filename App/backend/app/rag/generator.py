@@ -2196,7 +2196,7 @@ def summarize_title(messages: list[dict[str, str]]) -> str:
 
     Shaped after classify_choice: a minimal ungrounded prompt against the model
     already loaded, output capped hard, every failure an empty string. The
-    caller (app.chat_title) guards the input, strips personal data before it
+    caller (app.chat.chat_title) guards the input, strips personal data before it
     gets here, and cleans or rejects what comes back, so nothing this returns
     is shown unchecked.
     """

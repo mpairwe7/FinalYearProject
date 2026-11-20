@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from .model_welfare import is_model_welfare_query
-from .text_signals import _resolve_courtesy_locale
+from ..text_signals import _resolve_courtesy_locale
 
 
 @dataclass(frozen=True)
@@ -477,7 +477,7 @@ def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
         return "en"
     if norm_loc in ("lg", "sw", "nyn", "ach"):
         try:
-            from .memory.language_state import resolve_turn_locale
+            from ..memory.language_state import resolve_turn_locale
 
             decision = resolve_turn_locale(text, history=[{"locale": norm_loc}])
             if decision.locale in ("en", "lg", "sw", "nyn", "ach"):
@@ -492,7 +492,7 @@ def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
     if courtesy_loc != norm_loc:
         return courtesy_loc
     try:
-        from .rag.query import detect_language
+        from ..rag.query import detect_language
 
         det = detect_language(text, default_lang=norm_loc or "en")
         if det in ("lg", "sw", "nyn", "ach"):

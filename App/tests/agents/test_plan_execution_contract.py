@@ -291,7 +291,7 @@ class TestRuntimeAttestation:
     }
 
     def test_a_complete_turn_attests(self):
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         verdict = attest_turn(self.FULL_TURN)
 
@@ -301,7 +301,7 @@ class TestRuntimeAttestation:
 
     def test_a_tool_turn_is_in_order(self):
         # llm_agentic runs before abstention_check, both inside synthesis.
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         timings = {
             "input_guard": 1.0,
@@ -314,7 +314,7 @@ class TestRuntimeAttestation:
         assert attest_turn(timings)["ok"] is True
 
     def test_a_turn_that_skipped_the_input_guard_fails(self):
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         verdict = attest_turn({"query_rewrite": 1.0, "hybrid_search": 1.0, "llm_generate": 1.0})
 
@@ -322,19 +322,19 @@ class TestRuntimeAttestation:
         assert "stage_1_input_guard" in verdict["missing_mandatory_guards"]
 
     def test_a_guard_after_generation_is_an_order_violation(self):
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         verdict = attest_turn({"llm_generate": 1.0, "input_guard": 1.0})
 
         assert verdict["monotonic_stage_order"] is False
 
     def test_an_early_exit_is_audited_and_attests(self):
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         assert attest_turn({"query_rewrite": 1.0, "lang_detect": 1.0, "input_guard": 1.0})["ok"] is True
 
     def test_live_research_does_not_count_against_the_retrieval_sla(self):
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         verdict = attest_turn({"input_guard": 1.0, "hybrid_search": 100.0, "live_web_research": 6000.0})
 
@@ -342,7 +342,7 @@ class TestRuntimeAttestation:
 
     def test_a_fault_in_attestation_does_not_cost_the_answer(self, tmp_db, fresh_registry, monkeypatch):
         # It runs on every exit of every turn.
-        from app import turn_pipeline
+        from app.chat import turn_pipeline
         from app.rag.pipeline import ChatModel
 
         def explode(*_a, **_k):

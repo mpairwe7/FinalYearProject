@@ -925,7 +925,7 @@ def test_phase9_error_understanding_detection_and_resolution_mechanisms() -> Non
 
 
 def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist() -> None:
-    from app.documents import diagnose_portal_screenshot
+    from app.processing.documents import diagnose_portal_screenshot
     from app.vision.document_classifier import DocumentType, classify_document
 
     # 1. EFRIS error screenshot is classified as PORTAL_SCREENSHOT (not RECEIPT)
@@ -1043,7 +1043,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 
 def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() -> None:
     """Verify MCP tax_calculator tools/prompts, 5-locale empathy Tool-RAG, and paragraph structuring."""
-    from app.conversational import handle_conversational_turn
+    from app.chat.conversational import handle_conversational_turn
     from app.guardrails.output_checks import OutputGuard
     from app.mcp.servers.tax_calculator.server import server as tax_calc_server
     from app.mcp.tool_rag import ToolRAGSelector

@@ -1633,7 +1633,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
 
 
 def test_phase39_eq_conversational_and_structuring_tools_5_locale_uniformity():
-    from app.conversational import handle_conversational_turn
+    from app.chat.conversational import handle_conversational_turn
     from app.guardrails.output_checks import OutputGuard
     from app.rag.pipeline import ChatModel
     from app.text_signals import (
@@ -1939,7 +1939,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
     assert "18" in percentages("Mucoro me VAT obedo dul 18 i kom miya")
 
     # 4. Established conversation locale is preserved in _resolve_conversational_locale
-    from app.conversational import _resolve_conversational_locale
+    from app.chat.conversational import _resolve_conversational_locale
 
     assert _resolve_conversational_locale("Ahabw'enki nitushashura omusolo?", locale="nyn") == "nyn"
 

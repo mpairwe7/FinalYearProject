@@ -217,7 +217,7 @@ class TestEveryPathToAnOfficer:
 
 class TestTheOfferInTheConversation:
     def test_an_urgent_case_is_offered_a_person_first(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
+        from app.chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
 
         monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "true")
         result = {"retrieval_mode": "hybrid", "reply": "Here is how agency notices work.", "next_actions": ["Check balance"]}
@@ -225,7 +225,7 @@ class TestTheOfferInTheConversation:
         assert result["next_actions"][0] == HANDOFF_ACTION
 
     def test_stakes_without_distress_are_offered_after_the_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
+        from app.chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
 
         monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "true")
         result = {"retrieval_mode": "hybrid", "reply": "Here is the procedure.", "next_actions": ["Check release status"]}
@@ -234,7 +234,7 @@ class TestTheOfferInTheConversation:
         assert result["next_actions"][0] != HANDOFF_ACTION
 
     def test_an_ordinary_question_is_not_offered_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
+        from app.chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
 
         monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "true")
         result = {"retrieval_mode": "hybrid", "reply": "18%.", "next_actions": []}
