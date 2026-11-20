@@ -29,6 +29,7 @@ import threading
 import time
 import zlib
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -967,18 +968,21 @@ class _CpuLexicalReranker:
     # What `_reranker_emits_logits` reads: these scores are already probabilities.
     activation_fn = type("Sigmoid", (), {})()
 
-    def __init__(self, sparse_encoder: Any = None) -> None:
-        self._sparse_encoder = sparse_encoder
+    def __init__(self, sparse_encoder: Callable[[], Any] | None = None) -> None:
+        # A callable: an alias refresh replaces the retriever's encoder, and a reranker
+        # holding the old one would gate on the last index's word weights.
+        self._sparse_encoder = sparse_encoder or (lambda: None)
 
     def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
         scores: list[float] = []
+        encoder = self._sparse_encoder()
         for q, doc in pairs:
             q_toks = [t for t in re.sub(r"[^\w\s]", " ", (q or "").lower()).split() if len(t) >= 2]
             d_toks = [t for t in re.sub(r"[^\w\s]", " ", (doc or "").lower()).split() if len(t) >= 2]
             if not q_toks or not d_toks:
                 scores.append(0.0)
                 continue
-            base = lexical_relevance(q, {"text": doc}, self._sparse_encoder) if self._sparse_encoder else 0.0
+            base = lexical_relevance(q, {"text": doc}, encoder) if encoder else 0.0
             d_set = set(d_toks)
             overlap = sum(1 for t in q_toks if t in d_set) / len(q_toks)
             q_bi = {f"{a}_{b}" for a, b in zip(q_toks, q_toks[1:])}
@@ -988,8 +992,9 @@ class _CpuLexicalReranker:
         return scores
 
 
-def _sparse_only_reranker(sparse_encoder: Any) -> _CpuLexicalReranker | None:
-    """The reranker for an image that cannot load a cross-encoder: word overlap, where switched on."""
+def _sparse_only_reranker(sparse_encoder: Callable[[], Any]) -> _CpuLexicalReranker | None:
+    """The reranker for an image that cannot load a cross-encoder: word overlap, where both
+    ``RERANK_ENABLED`` and ``SPARSE_CPU_RERANKER`` are on. *sparse_encoder* returns the current one."""
     return _CpuLexicalReranker(sparse_encoder) if RERANK_ENABLED and SPARSE_CPU_RERANKER else None
 
 
@@ -1688,7 +1693,7 @@ class HybridRetriever:
                     return False
                 self._sparse_only = True
                 self._dense_model = None
-                self._reranker = _sparse_only_reranker(self._sparse_encoder)
+                self._reranker = _sparse_only_reranker(lambda: self._sparse_encoder)
                 self._ready = True
                 logger.info(
                     "HybridRetriever ready in SPARSE-ONLY mode (url=%s collection=%s) — "
