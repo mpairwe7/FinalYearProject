@@ -22,7 +22,7 @@ load numbers on this same hardware class).
 ## 1. Intent
 
 `docker-compose.local-sunflower.yml` (LLM) and the SALT backends
-(`App/backend/app/speech/spark_tts_salt.py`, `speech/speech_service.py`) had each been
+(`App/backend/app/spark_tts_salt.py`, `speech_service.py`) had each been
 verified independently, but never brought up together as one running
 stack, GPU-pinned, and reached from outside the host. This run does that:
 one command, one named GPU, every component real (no mocks/stubs), public
@@ -130,8 +130,8 @@ generating server-side, and completed successfully after the client had
 already given up:
 
 ```
-12:52:51.537  app.speech.spark_tts_salt: Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cpu)
-12:53:23.529  app.speech.spark_tts_salt: Spark-TTS-SALT ready (device=cpu, sample_rate=16000)
+12:52:51.537  app.spark_tts_salt: Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cpu)
+12:53:23.529  app.spark_tts_salt: Spark-TTS-SALT ready (device=cpu, sample_rate=16000)
 12:55:19.104  INFO 172.29.0.6:57660 - "POST /v1/tts HTTP/1.1" 200 OK
 ```
 

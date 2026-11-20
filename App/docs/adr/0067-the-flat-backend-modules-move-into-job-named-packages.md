@@ -70,8 +70,9 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 finished one-shot (G686), so it is read from git
 (`9a8e344c^:App/backend/scripts/restructure_rag_layout.py`) and driven by one
 move table per phase. It rewrites every import, patch-target string and path,
-and it is not committed again. ADRs, gap rows, plans and reports are left as
-written: they are dated records.
+and it is not committed again. ADRs, gap rows, plans, reports and the
+traceability records are left as written: they are dated records, and a log
+line quoted in one names the module as it was then.
 
 **Not done.** The experiment scripts in `App/scripts` stay as they are. Several
 are near-copies at different sizes, but each writes its own published report,
