@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import re
 
-from .rag import generator
-from .guardrails.friction import note_refusal, paused
-from .guardrails.input_checks import InputGuard
-from .guardrails.pii import contains_pii, redact_pii_text
-from .prompts.title import CHAT_TITLE_SYSTEM as _SYSTEM_PROMPT
+from ..rag import generator
+from ..guardrails.friction import note_refusal, paused
+from ..guardrails.input_checks import InputGuard
+from ..guardrails.pii import contains_pii, redact_pii_text
+from ..prompts.title import CHAT_TITLE_SYSTEM as _SYSTEM_PROMPT
 
 MAX_WORDS = 6
 # Translations run longer than English; a localized title gets a little room.
@@ -126,7 +126,7 @@ def generate_title(
     if locale and locale != "en":
         # Generated in English and localized in the one place answers are.
         # localize_reply hands back the English on any failure.
-        from .rag.pipeline import localize_reply  # noqa: PLC0415 — service imports are heavy
+        from ..rag.pipeline import localize_reply  # noqa: PLC0415 — service imports are heavy
 
         localized = clean_title(localize_reply(title, locale), max_words=MAX_WORDS_LOCALIZED)
         if localized:

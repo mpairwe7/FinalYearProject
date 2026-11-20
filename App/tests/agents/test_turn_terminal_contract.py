@@ -24,7 +24,7 @@ import pytest
 from app.rag import pipeline as pipeline_module
 from app.audit import turns
 from app.guardrails.output_checks import OutputGuard
-from app.turn_pipeline import attest_turn
+from app.chat.turn_pipeline import attest_turn
 
 HIT = {"text": "The standard VAT rate in Uganda is 18 percent.", "source": "vat.pdf", "score_rerank": 0.9}
 CITATION = {"marker": "1", "ref": "[1]", "source": "vat.pdf", "text": HIT["text"]}

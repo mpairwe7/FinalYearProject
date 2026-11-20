@@ -39,13 +39,13 @@ from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from . import confirm_tokens
-from .db import database as db
-from .rag import pipeline as pipeline_module
-from .observability.analytics import MetricSpec, metrics, record_mapped
-from .auth.jwt_auth import JWTAuthError, JWTVerifier
-from .config.flags import flags
-from .speech.voice_ws_v2 import _send_error, _send_json
+from .. import confirm_tokens
+from ..db import database as db
+from ..rag import pipeline as pipeline_module
+from ..observability.analytics import MetricSpec, metrics, record_mapped
+from ..auth.jwt_auth import JWTAuthError, JWTVerifier
+from ..config.flags import flags
+from ..speech.voice_ws_v2 import _send_error, _send_json
 
 logger = logging.getLogger(__name__)
 
@@ -151,19 +151,19 @@ def _verified_ws_claims(
             raise JWTAuthError("authentication required")
         return None
 
-    from .auth.dependencies import APP_ENV, _get_verifier
+    from ..auth.dependencies import APP_ENV, _get_verifier
 
     verifier = _get_verifier()
     try:
         claims = verifier.verify(token)
     except JWTAuthError as e:
         if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
-            from .auth.jwt_auth import _hs256_verify
+            from ..auth.jwt_auth import _hs256_verify
 
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
-    from .auth.revocation import claims_revoked
+    from ..auth.revocation import claims_revoked
 
     if claims_revoked(claims):
         raise JWTAuthError("session revoked")
@@ -174,7 +174,7 @@ def _principal_of(claims: dict[str, Any] | None) -> tuple[str, str, str, list[st
     """``(user_id, tenant_id, user_role, granted_purposes)`` of verified *claims*."""
     if claims is None:
         return "", "default", "public", []
-    from .auth.dependencies import _get_verifier, resolve_role
+    from ..auth.dependencies import _get_verifier, resolve_role
 
     role = resolve_role(claims, _get_verifier().audience)
     granted = claims.get("granted_purposes", [])
@@ -213,7 +213,7 @@ def resolve_ws_session(
     the person's revocation cutoff, so a session revoked after sign-in also
     closes the socket (G304, ADR-0053).
     """
-    from .auth.revocation import issued_at
+    from ..auth.revocation import issued_at
 
     claims = _verified_ws_claims(websocket, required=required, token_override=token_override)
     user_id, tenant_id, role, _purposes = _principal_of(claims)
@@ -375,7 +375,7 @@ async def _run_response_create(
         await _send_json(websocket, {"type": "response.done"})
         return
 
-    from .rag.query import SUPPORTED_LOCALES
+    from ..rag.query import SUPPORTED_LOCALES
 
     turn_locale = msg.get("locale")
     turn_explicit = msg.get("locale_explicit")
@@ -401,8 +401,8 @@ async def _run_response_create(
 
     final_log: dict[str, Any] | None = None
     full_reply = ""
-    from .guardrails.output_checks import OutputGuard
-    from .guardrails.pii import StreamingDLPFilter, user_stated_identifiers
+    from ..guardrails.output_checks import OutputGuard
+    from ..guardrails.pii import StreamingDLPFilter, user_stated_identifiers
 
     stated_ids = user_stated_identifiers(user_input)
     dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
@@ -682,7 +682,7 @@ async def _handle_tool_call_confirm(
     # here would skip authorization entirely, letting a confirmation token —
     # which carries no role/consent — drive a privileged write (P0-1).
     try:
-        from .mcp import get_client
+        from ..mcp import get_client
 
         args = dict(proposal)
         args.pop("requires_confirmation", None)
@@ -756,7 +756,7 @@ def _audit_tool_confirm(
     try:
         import hashlib
 
-        from .audit import get_ledger
+        from ..audit import get_ledger
 
         ledger = get_ledger()
         ledger.append(
@@ -791,7 +791,7 @@ def _log_ws_turn(
     response_id: str = "",
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
-    from .rag.pipeline import ChatModel as _CM
+    from ..rag.pipeline import ChatModel as _CM
 
     result = log_payload.get("result") or {}
     elapsed_ms = log_payload.get("elapsed_ms", 0.0)
@@ -851,7 +851,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         await websocket.close(code=1011, reason="chat model not available")
         return
 
-    from .auth import revocation
+    from ..auth import revocation
 
     try:
         claims = _verified_ws_claims(websocket)
@@ -863,7 +863,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
     # it too (G304, ADR-0053).
     token_issued_at = revocation.issued_at(claims)
 
-    from .ws_concurrency import is_ws_origin_allowed
+    from ..ws_concurrency import is_ws_origin_allowed
 
     origin = websocket.headers.get("origin")
     if not is_ws_origin_allowed(origin):
@@ -901,7 +901,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             await _send_error(websocket, "First message must be session_start", recoverable=False)
             return
 
-        from .rag.query import SUPPORTED_LOCALES
+        from ..rag.query import SUPPORTED_LOCALES
 
         requested_locale = config.get("locale")
         supported = isinstance(requested_locale, str) and requested_locale in SUPPORTED_LOCALES

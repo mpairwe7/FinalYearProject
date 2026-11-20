@@ -14,7 +14,8 @@ import io
 from pathlib import Path
 import pytest
 
-from app import documents, pdf_export
+from app.processing import documents
+from app import pdf_export
 from app.tickets import hitl_routing
 from app.ingestion.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
 

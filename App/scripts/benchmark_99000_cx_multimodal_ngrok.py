@@ -57,8 +57,8 @@ from app.tax.calculator_router import (  # noqa: E402
     plan_calculation,
 )
 from app.connector_intent import detect_connector_intent, missing_arguments  # noqa: E402
-from app.conversational import handle_conversational_turn  # noqa: E402
-from app.documents import diagnose_portal_screenshot  # noqa: E402
+from app.chat.conversational import handle_conversational_turn  # noqa: E402
+from app.processing.documents import diagnose_portal_screenshot  # noqa: E402
 from app.tickets.escalation_policy import (  # noqa: E402
     after_hours_escalation_message,
     after_hours_escalation_notice,

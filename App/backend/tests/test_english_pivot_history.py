@@ -215,7 +215,7 @@ class WebSocketResumeRestoresEnglishFormsTest(unittest.TestCase):
     """CodeRabbit on #543: a resumed session replays the English forms too."""
 
     def test_try_resume_carries_content_en(self) -> None:
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         session = chat_ws_v2.WsChatSession(
             session_id="s", conversation_id="c", user_id="u", tenant_id="default", locale="lg"

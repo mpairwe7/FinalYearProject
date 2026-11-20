@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from PIL import Image
 from starlette.requests import Request
 
-from app import ocr_service
+from app.processing import ocr_service
 from app.vision import ocr
 
 

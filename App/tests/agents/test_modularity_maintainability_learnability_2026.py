@@ -16,7 +16,7 @@ from app.tools.portal_navigator_data import (
     get_portal_knowledge_provenance,
     load_portal_knowledge_pack,
 )
-from app.turn_pipeline import (
+from app.chat.turn_pipeline import (
     CANONICAL_BEHAVIORAL_MANIFEST,
     TurnPipelineOrchestrator,
     TurnStage,

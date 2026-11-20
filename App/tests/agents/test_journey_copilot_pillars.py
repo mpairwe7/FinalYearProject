@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from app.rag.pipeline import _WORKFLOW_SENSITIVE_SLOTS, ChatModel
-from app.turn_guidance import apply_turn_guidance
+from app.chat.turn_guidance import apply_turn_guidance
 from app.workflows.journey_copilot import (
     bind_document_facts_to_workflow,
     build_form_draft_surface,
@@ -458,7 +458,7 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
 
     from app.db import database
     from app.rag.pipeline import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
-    from app.turn_guidance import apply_turn_guidance
+    from app.chat.turn_guidance import apply_turn_guidance
     from app.workflows.journey_copilot import (
         _OBJECTIVE_PATTERNS,
         WORKFLOW_FORM_SCHEMAS,

@@ -36,7 +36,7 @@ def _recv(ws) -> dict:
 
 class WsChatSessionUnitTest(unittest.TestCase):
     def test_history_cache_caps_at_max(self) -> None:
-        from app.chat_ws_v2 import _HISTORY_CACHE_MAX, WsChatSession
+        from app.chat.chat_ws_v2 import _HISTORY_CACHE_MAX, WsChatSession
 
         s = WsChatSession(
             session_id="s",
@@ -54,7 +54,7 @@ class WsChatSessionUnitTest(unittest.TestCase):
         self.assertEqual(s.history[-1]["role"], "assistant")
 
     def test_resume_with_no_conversation_id_returns_false(self) -> None:
-        from app.chat_ws_v2 import WsChatSession
+        from app.chat.chat_ws_v2 import WsChatSession
 
         s = WsChatSession(
             session_id="s",
@@ -94,7 +94,7 @@ class WsSessionStateIntegrationTest(unittest.TestCase):
                 },
             )
 
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(

@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from .db import database
-from . import documents
+from .processing import documents
 
 logger = logging.getLogger(__name__)
 

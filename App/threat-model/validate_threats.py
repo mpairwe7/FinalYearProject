@@ -330,7 +330,7 @@ THREAT_REGISTRY: list[dict] = [
             "Residual: the OCR, Triton and vision addresses the extractors call, and any proxy, stay visible "
             "when credential-free; network isolation (gVisor, microVM or a dedicated pool) is the open control"
         ),
-        "evidence": ["App/backend/app/document_worker.py", "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "evidence": ["App/backend/app/processing/document_worker.py", "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -340,7 +340,7 @@ THREAT_REGISTRY: list[dict] = [
         "owasp_llm": "LLM10",
         "mitre_atlas": None,
         "mitigation": "1 GiB RLIMIT_AS by default, production refuses 0; the 30 s deadline and CPU limit stand",
-        "evidence": ["App/backend/app/document_worker.py", "App/backend/app/production_readiness.py",
+        "evidence": ["App/backend/app/processing/document_worker.py", "App/backend/app/production_readiness.py",
                      "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
@@ -912,7 +912,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Pydantic input validation with max_length, Docker resource limits, read-only filesystem",
         "evidence": [
             "App/backend/app/api/models.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
             "App/docker-compose.yml",
             "App/infra/compose/docker-compose.full.yml",
         ],
@@ -993,7 +993,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Fail-closed PDF guards reject encryption, JS/Launch/GoToR/XFA/embedded files before extract or OCR",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1006,8 +1006,8 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Header/magic checks, xref and page-edge caps, Office zip-slip/macro/encryption reject, Pillow pixel cap, OCR sidecar magic + concurrency",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
-            "App/backend/app/ocr_service.py",
+            "App/backend/app/processing/documents.py",
+            "App/backend/app/processing/ocr_service.py",
         ],
         "status": "mitigated",
     },
@@ -1019,7 +1019,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0051",
         "mitigation": "scan_retrieved_text on extract and on prompt assembly; untrusted_user_document wrappers; system rule that uploads are evidence only",
         "evidence": [
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
             "App/backend/app/guardrails/",
             "App/backend/app/rag/generator.py",
         ],
@@ -1033,7 +1033,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "Session/user binding, unguessable ids, TTL spool, no path built from user ids, analytics redacts attachment text",
         "evidence": [
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1046,7 +1046,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "PDF header must be %PDF- at start; Office ZIP must contain Content_Types + word/ or xl/; images verified by Pillow; client MIME is untrusted",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1395,7 +1395,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/rag/pipeline.py",
             "App/backend/app/audit/turns.py",
-            "App/backend/app/turn_pipeline.py",
+            "App/backend/app/chat/turn_pipeline.py",
             "App/tests/agents/test_turn_terminal_contract.py",
             "App/tests/agents/test_autonomy_gate_contract.py",
         ],

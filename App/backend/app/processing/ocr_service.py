@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException, Request
 from PIL import Image, UnidentifiedImageError  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
-from .vision.ocr import OCRUnavailableError, extract_text_with_boxes_local, local_ocr_status
+from ..vision.ocr import OCRUnavailableError, extract_text_with_boxes_local, local_ocr_status
 
 logger = logging.getLogger(__name__)
 

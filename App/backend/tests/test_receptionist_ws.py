@@ -283,7 +283,7 @@ class TestSocketTokenResolution(unittest.TestCase):
     def test_explicit_empty_first_message_token_does_not_fall_back_to_query(self):
         from types import SimpleNamespace
 
-        from app.chat_ws_v2 import _resolve_ws_principal
+        from app.chat.chat_ws_v2 import _resolve_ws_principal
         from app.auth.jwt_auth import JWTAuthError
 
         query_token = make_dev_token("staff_q", role="ura_staff")
@@ -294,7 +294,7 @@ class TestSocketTokenResolution(unittest.TestCase):
     def test_first_message_token_resolves_staff_identity(self):
         from types import SimpleNamespace
 
-        from app.chat_ws_v2 import _resolve_ws_principal
+        from app.chat.chat_ws_v2 import _resolve_ws_principal
 
         token = make_dev_token("staff_frame", tenant_id="tenant-a", role="ura_staff")
         socket = SimpleNamespace(headers={}, query_params={})

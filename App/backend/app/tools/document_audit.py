@@ -1,7 +1,7 @@
 """Automated tax document audit & reconciliation tool (MCP).
 
 Exposes the financial arithmetic reconciliation and statutory tax compliance
-auditor from ``app.documents`` to the MCP client layer and specialist agents.
+auditor from ``app.processing.documents`` to the MCP client layer and specialist agents.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class AuditTaxDocumentTool(Tool):
         session_id: str = "",
         **kwargs: Any,
     ) -> dict[str, Any]:
-        from ..documents import get_document, reconcile_tax_document
+        from ..processing.documents import get_document, reconcile_tax_document
         from ..guardrails.input_checks import scan_retrieved_text
         from ..vision.ocr import (
             extract_dates,

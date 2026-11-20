@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Final
 
 from ..db import database as db
-from .. import documents as documents_module
+from ..processing import documents as documents_module
 from . import generator as generator_module
 from .. import mt
 from ..tickets import officer_hours
@@ -117,7 +117,7 @@ _FAREWELL_PHRASES = (
     | _NYN_FAREWELL_PHRASES
     | _ACH_FAREWELL_PHRASES
 )
-from ..conversational import handle_conversational_turn
+from ..chat.conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
@@ -160,7 +160,7 @@ from ..guardrails.output_checks import OutputGuard, neutralize_untrusted_links
 from ..guardrails.pii import STORE_RAW_PROMPTS, redact_pii_text, user_stated_identifiers
 from ..memory.language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from ..memory import get_memory_service
-from ..model_welfare import is_model_welfare_query
+from ..chat.model_welfare import is_model_welfare_query
 from ..guardrails.premise import FalsePremiseResult, check_abolished_claim, check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
@@ -244,7 +244,7 @@ from ..observability.tracing import (
     turn_usage_scope,
     usage_summary,
 )
-from ..turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
+from ..chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
 from ..verified_resources import resources_for_turn
 from ..workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from ..workflows.slots import validate_slot
@@ -2628,7 +2628,7 @@ def _finish_streamed_turn(
     completed turn is attested, because the others did not finish the pipeline.
     """
     from ..observability.analytics import record_chat_turn
-    from ..turn_pipeline import attest_turn
+    from ..chat.turn_pipeline import attest_turn
 
     result = log_payload.get("result") or {}
     served = {
@@ -10005,7 +10005,7 @@ class ChatModel:
                 and re.search(r"\d+[\d,.]*", text)
             )
         ):
-            from ..documents import reconcile_tax_document
+            from ..processing.documents import reconcile_tax_document
             from ..vision.ocr import (
                 extract_tin_numbers, extract_prn_numbers, extract_efris_invoice_numbers,
                 extract_ugx_amounts, extract_dates, extract_reference_numbers, extract_tax_heads
@@ -12503,7 +12503,7 @@ class ChatModel:
                         force_tool_whitelist = None
 
             # 2. Try hybrid retrieval using rewritten query (or model-welfare architectural context)
-            from ..model_welfare import (
+            from ..chat.model_welfare import (
                 build_welfare_grounding_hits,
                 build_welfare_prompt_guidance,
                 match_welfare_categories,
@@ -13653,7 +13653,7 @@ class ChatModel:
         (:py:meth:`record_turn_audit`), so its reply digest is of the text
         the taxpayer received.
         """
-        from ..turn_pipeline import attest_turn
+        from ..chat.turn_pipeline import attest_turn
 
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
@@ -14575,7 +14575,7 @@ class ChatModel:
                     force_agentic = False
                     force_tool_whitelist = None
 
-        from ..model_welfare import (
+        from ..chat.model_welfare import (
             build_welfare_grounding_hits,
             build_welfare_prompt_guidance,
             match_welfare_categories,

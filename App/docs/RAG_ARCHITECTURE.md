@@ -136,7 +136,7 @@ User Query
 | Preference Boost (`apply_preference_boost`) | Idempotent post-retrieval soft ranking: boosts current FY (`+0.08`) and matched tax head / topic sections (`TOPIC_SECTION_BOOST = +0.05`, word-boundary matched via `TOPIC_SECTION_HINTS`) while soft-demoting sector-specific guides (`SECTOR_GUIDE_DEMOTION = -0.06`, `SECTOR_GUIDE_SOURCE_PATTERNS`) unless the query explicitly names a sector (`_SECTOR_QUERY_RE`). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
-| Docling Document Intelligence (`ingestion/docling_intelligence.py`, `ingestion/pdf_corpus.py`, `documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
+| Docling Document Intelligence (`ingestion/docling_intelligence.py`, `ingestion/pdf_corpus.py`, `processing/documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
 
 ### LLM Generation (`rag/generator.py`)
 
@@ -310,7 +310,7 @@ long as the server keeps the conversations. A call started from the chat opens a
 session carrying the chat's task and a coarse English account of it, only for the
 chat's owner (`receptionist/carryover.py`).
 
-**WebSocket resume** (`chat_ws_v2.py`):
+**WebSocket resume** (`chat/chat_ws_v2.py`):
 - Each completed response has a server-minted response ID. Resume requires an
   unexpired mapping for that exact response, user, tenant, and conversation.
 - Anonymous sockets do not advertise durable resume. Same-socket history remains

@@ -160,7 +160,7 @@ class Supervisor:
         #    precedence over any other intent (unless the query is a
         #    self-referential AI/model-welfare interview question without
         #    an explicit first-person handoff request).
-        from ..model_welfare import match_welfare_categories
+        from ..chat.model_welfare import match_welfare_categories
 
         for pat, reason in pats.escalate:
             if pat.search(q):

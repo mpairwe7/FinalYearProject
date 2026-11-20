@@ -1,4 +1,4 @@
-"""Conversation titles for the sidebar — see ``app.chat_title``.
+"""Conversation titles for the sidebar — see ``app.chat.chat_title``.
 
 The model names the conversation; everything around it decides whether that
 name is shown. These cases pin the part that is not the model: what it is
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from app.rag import generator, pipeline
-from app.chat_title import clean_title, generate_title
+from app.chat.chat_title import clean_title, generate_title
 
 
 @pytest.mark.parametrize(

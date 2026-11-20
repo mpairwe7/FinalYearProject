@@ -72,7 +72,7 @@ class PerUserSocketCapTest(unittest.TestCase):
         flags.clear("ws_chat")
         os.environ.pop("WS_CHAT_MAX_PER_USER", None)
         # Clear the in-memory counter so other tests aren't polluted.
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         with chat_ws_v2._active_per_user_lock:  # noqa: SLF001
             chat_ws_v2._active_per_user.clear()  # noqa: SLF001

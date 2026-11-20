@@ -29,11 +29,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .tickets.escalation_policy import TIER_PRIORITY, assess_escalation
-from .config.flags import flags
-from .text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
-from .workflows.journey_copilot import infer_taxpayer_objective
-from .workflows.registry import WorkflowRegistry
+from ..tickets.escalation_policy import TIER_PRIORITY, assess_escalation
+from ..config.flags import flags
+from ..text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
+from ..workflows.journey_copilot import infer_taxpayer_objective
+from ..workflows.registry import WorkflowRegistry
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -163,7 +163,7 @@ def _offer_person(
         # put first (a paused guided flow leads with the officer, Phase 39).
         actions.append(HANDOFF_ACTION)
     try:
-        from .observability.analytics import metrics  # noqa: PLC0415
+        from ..observability.analytics import metrics  # noqa: PLC0415
 
         metrics.inc(
             "cx_escalation_tier_total",

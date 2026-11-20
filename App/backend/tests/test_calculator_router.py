@@ -356,7 +356,7 @@ class ServiceCalculatorPathTests(unittest.TestCase):
             self._flags.set("workflows", True)
 
     def test_a_tax_figure_is_not_small_talk(self) -> None:
-        from app.conversational import handle_conversational_turn
+        from app.chat.conversational import handle_conversational_turn
 
         self.assertIsNone(handle_conversational_turn("why do we pay VAT on 350000000"))
         civic = handle_conversational_turn("why do we pay taxes?")

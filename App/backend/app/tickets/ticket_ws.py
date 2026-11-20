@@ -71,7 +71,7 @@ def filter_ticket_event(
 
 async def ticket_stream_ws(websocket: WebSocket) -> None:
     """Serve one staff subscriber."""
-    from ..chat_ws_v2 import _resolve_ws_principal
+    from ..chat.chat_ws_v2 import _resolve_ws_principal
     from ..auth import JWTAuthError
 
     try:

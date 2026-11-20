@@ -609,8 +609,8 @@ owasp_agentic_2026:
     - id: "ASI05"
       name: "Unexpected Code Execution (RCE)"
       status: "mitigated"
-      evidence: "App/backend/app/documents.py, App/backend/app/document_worker.py, App/backend/app/research/ephemeral_pdf_sandbox.py, App/backend/app/tax/schedule_sandbox.py, App/security/.bandit.yaml"
-      controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED, document_worker.py with secret env scrubbing, POSIX RLIMITs, SIGKILL escalation, and parent-process pure-Python PDF pre-checks; research/ephemeral_pdf_sandbox.py — ADR-0008, ADR-0024), capability-restricted Decimal AST schedule sandbox (schedule_sandbox.py), and PDF structural/malware guards"
+      evidence: "App/backend/app/processing/documents.py, App/backend/app/processing/document_worker.py, App/backend/app/research/ephemeral_pdf_sandbox.py, App/backend/app/tax/schedule_sandbox.py, App/security/.bandit.yaml"
+      controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED, processing/document_worker.py with secret env scrubbing, POSIX RLIMITs, SIGKILL escalation, and parent-process pure-Python PDF pre-checks; research/ephemeral_pdf_sandbox.py — ADR-0008, ADR-0024), capability-restricted Decimal AST schedule sandbox (schedule_sandbox.py), and PDF structural/malware guards"
       verified_by:
         - "App/backend/tests/test_pdf_guards.py"
         - "App/tests/agents/test_ephemeral_pdf_sandbox.py"
@@ -791,7 +791,7 @@ owasp_agentic_2026:
       status: "mitigated"
       control_integrity: "ADR-0022: attestation now needs evidence: a turn that served model text must show a guard stage, streamed turns are attested (closes G325), and the graph path runs the output guards (G350, G351). Every turn writes a row with its disposition and what generated it (G349, G359)."
       live_web_assurance: "ADR-0021: attest_turn holds each REST turn to the behavioural manifest from its real stage timings, and the plan digest and verdict enter the audit row. Streaming turns are not attested (G325)."
-      evidence: "App/backend/app/turn_pipeline.py, App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/config/flags.py"
+      evidence: "App/backend/app/chat/turn_pipeline.py, App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/config/flags.py"
       controls: "Hash-chained turn and action audit ledger v3 with RFC 3161 seals, risk-tiered autonomy gates, and per-feature kill switches"
       verified_by:
         - "App/tests/agents/test_turn_terminal_contract.py"

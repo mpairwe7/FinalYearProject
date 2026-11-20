@@ -42,10 +42,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .guardrails.input_checks import scan_retrieved_text
-from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
-from .vision.document_classifier import classify_document
-from .vision.ocr import (
+from ..guardrails.input_checks import scan_retrieved_text
+from ..guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+from ..vision.document_classifier import classify_document
+from ..vision.ocr import (
     clean_ocr_text,
     escape_untrusted_document_markers,
     extract_dates,
@@ -216,7 +216,7 @@ def _validate_document_content(data: bytes, kind: str) -> list[str]:
     """
     if kind == "pdf":
         from .document_worker import isolated_enabled
-        from .guardrails.pdf import scan_pdf_object_text, validate_pdf_header
+        from ..guardrails.pdf import scan_pdf_object_text, validate_pdf_header
 
         try:
             validate_pdf_header(data)
@@ -460,7 +460,7 @@ class DocumentRecord:
                 lines.append(f"  - {trip}")
         header = escape_untrusted_document_markers("\n".join(lines))
         remaining = max(200, char_budget - len(header) - 80)
-        from .ingestion.docling_intelligence import strip_document_furniture
+        from ..ingestion.docling_intelligence import strip_document_furniture
 
         cleaned_pages, _ = strip_document_furniture([self.text])
         cleaned_text = cleaned_pages[0] if cleaned_pages else self.text
@@ -533,7 +533,7 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
             header = headers[col].strip() or f"column_{col + 1}"
             numeric_totals[header] = round(sum(parsed), 2)
 
-    from .ingestion.docling_intelligence import serialize_table_to_triplets
+    from ..ingestion.docling_intelligence import serialize_table_to_triplets
 
     triplets = serialize_table_to_triplets(safe_name, rows, max_triplets=30)
     summary = TableSummary(
@@ -641,7 +641,7 @@ def _extract_pdf(data: bytes) -> _Extraction:
             out.warnings.append("The PDF could not be parsed (corrupt or password-protected).")
             return out
 
-    from .ingestion.docling_intelligence import strip_document_furniture
+    from ..ingestion.docling_intelligence import strip_document_furniture
 
     parts, furniture_removed = strip_document_furniture(parts)
     if furniture_removed:
@@ -1730,7 +1730,7 @@ def diagnose_portal_screenshot(
         portal_category = "e_services"
 
     # 2. Identify issues & error states (including the 8 URA statutory error families from portal_copilot)
-    from .portal_copilot import classify_portal_task, diagnose_ura_error, extract_task_entities
+    from ..portal_copilot import classify_portal_task, diagnose_ura_error, extract_task_entities
 
     err_diag = diagnose_ura_error(text)
     issues_detected: list[str] = []
@@ -2202,7 +2202,7 @@ def diagnose_portal_screenshot(
     # 4. Canonical portal_key, Auth Requirement & Screenshot Completeness Check (Phase 42)
     import urllib.parse
 
-    from .tools.portal_navigator_data import portal_requires_auth
+    from ..tools.portal_navigator_data import portal_requires_auth
 
     if is_installment_screen:
         portal_key = "prn_payments"
@@ -2441,7 +2441,7 @@ def analyze_document(
     if len(data) > MAX_FILE_BYTES:
         raise ValueError(f"File exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB limit.")
 
-    from .malware_scan import scan_bytes
+    from ..malware_scan import scan_bytes
 
     scan = scan_bytes(data, filename=filename)
     kind = detect_kind(filename, content_type)
@@ -2536,7 +2536,7 @@ def analyze_document(
         user_id=user_id or "",
     )
     try:
-        from .tickets.hitl_routing import assess_document_for_human_review
+        from ..tickets.hitl_routing import assess_document_for_human_review
         hitl_assessment = assess_document_for_human_review(record)
         record.meta["hitl_requires_review"] = hitl_assessment.requires_review
         record.meta["hitl_reasons"] = hitl_assessment.reasons
