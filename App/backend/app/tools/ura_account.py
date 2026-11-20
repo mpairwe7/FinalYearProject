@@ -90,7 +90,7 @@ class UraAccountProfileTool(Tool):
                     ),
                 }
 
-        from ..ura_account_mock import account_mode, lookup_mock
+        from ..connectors.ura_account_mock import account_mode, lookup_mock
 
         mode = account_mode()
         if mode == "mock":
@@ -139,7 +139,7 @@ class UraAccountProfileTool(Tool):
 
 def account_api_status() -> dict[str, Any]:
     """Describe the account connector. Mock is never reported as live."""
-    from ..ura_account_mock import account_mode, live_credentials_configured
+    from ..connectors.ura_account_mock import account_mode, live_credentials_configured
 
     mode = account_mode()
     live = mode == "live" and live_credentials_configured()

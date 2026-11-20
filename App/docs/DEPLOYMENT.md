@@ -654,7 +654,7 @@ Run through every item before go-live:
 - [ ] Rollback procedure tested with a known-good image tag
 - [ ] SLO alerting rules loaded in Prometheus/Alertmanager
 - [ ] `python App/scripts/validate_env.py --env production` passes with 0 errors
-- [ ] `PYTHONPATH=App/backend python3 -m app.production_readiness --as-production` is ok (see `App/docs/PRODUCTION_GATES.md`)
+- [ ] `PYTHONPATH=App/backend python3 -m app.security.production_readiness --as-production` is ok (see `App/docs/PRODUCTION_GATES.md`)
 - [ ] `URA_ACCOUNT_API_MODE` is `off` unless a real URA contract + `URA_ACCOUNT_LIVE_ACK=true`
 - [ ] `MALWARE_SCAN_REQUIRED=true` and `DOCUMENT_PARSE_ISOLATED=true`
 - [ ] `URA_PUBLICATIONS_URL` is https (not `fixture`)

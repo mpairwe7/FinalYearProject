@@ -41,7 +41,8 @@ from docx import Document
 from openpyxl import Workbook
 
 from app.db import database as db
-from app import documents, pdf_export
+from app.processing import documents
+from app.processing import pdf_export
 
 
 def get_mem_mb() -> float:

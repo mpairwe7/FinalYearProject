@@ -1777,7 +1777,7 @@ def corpus_sync_permitted() -> bool:
     production that needs an operator's explicit approval as well as the flag, so
     a search provider going live cannot switch it on by accident (ASI06, G331).
     """
-    from ..production_readiness import is_production
+    from ..security.production_readiness import is_production
 
     if not is_production():
         return True

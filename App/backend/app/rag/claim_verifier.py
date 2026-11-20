@@ -14,7 +14,7 @@ from typing import Any
 
 from .claim_polarity import polarity_conflicts
 from .entailment import canonical_amounts, is_contradicted, percentages
-from ..model_welfare import is_self_reflection_sentence
+from ..chat.model_welfare import is_self_reflection_sentence
 from ..text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")

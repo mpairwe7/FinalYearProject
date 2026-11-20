@@ -8,7 +8,7 @@ import threading
 import urllib.parse
 from typing import Any
 
-from ..verified_resources import get_resource, is_authoritative_ura_url
+from ..connectors.verified_resources import get_resource, is_authoritative_ura_url
 
 logger = logging.getLogger(__name__)
 
@@ -6404,7 +6404,7 @@ def _diagnose_portal_state(
 
 #: portal key → intent → (official resource id, navigation trail).
 #:
-#: Links resolve through ``app.verified_resources``, so each is a page that was
+#: Links resolve through ``app.connectors.verified_resources``, so each is a page that was
 #: checked live. The eTax and EFRIS portals sit behind a login and publish no
 #: stable deep links, so a route names URA's public page for the task, and the
 #: trail is that page's position in the ura.go.ug menu. Nothing from the
@@ -7206,7 +7206,7 @@ def find_relevant_forms_and_resources(
     max_items: int = 3,
 ) -> list[dict[str, Any]]:
     """Match and return verified downloadable forms, online portals, and statutory sources."""
-    from ..verified_resources import get_verified_resources
+    from ..connectors.verified_resources import get_verified_resources
     return get_verified_resources(query, tax_type=tax_type, intent=intent, max_items=max_items)
 
 

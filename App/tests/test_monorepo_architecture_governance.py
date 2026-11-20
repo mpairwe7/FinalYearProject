@@ -226,7 +226,7 @@ def test_storage_backend_api_parity_and_flag_lifecycle_taxonomy() -> None:
     """db/database.py and db/postgres.py must expose 100% identical public functions, and all 85 flags must classify cleanly."""
     from app.db import database, postgres
     from app.config.flags import _REGISTRY, flags
-    from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
+    from app.db.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
 
     parity = verify_storage_backend_parity(APP_DIR)
     assert parity["ok"] is True, f"Storage backend parity drift: {parity}"

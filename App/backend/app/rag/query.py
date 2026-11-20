@@ -1392,7 +1392,7 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     # If local detection is low-confidence and no English words found, try Sunbird API
     if en_hits == 0:
         try:
-            from .. import sunbird
+            from ..providers import sunbird
             if sunbird.is_available():
                 sb_result = sunbird.detect_language(corrected)
                 if sb_result and sb_result.get("locale"):
@@ -1933,7 +1933,7 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
         return generator_module.translate_text(query_for_mt, source_lang=locale, target_lang="en")
 
     def _cloud() -> str | None:
-        from .. import sunbird
+        from ..providers import sunbird
 
         return sunbird.translate_to_english(query_for_mt, locale)
 

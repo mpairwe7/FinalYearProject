@@ -848,7 +848,7 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn(t
 
 def test_phase9_error_understanding_detection_and_resolution_mechanisms() -> None:
     from app.mcp.validation import build_validation_repair_hints, coerce_arguments_to_schema
-    from app.portal_copilot import (
+    from app.connectors.portal_copilot import (
         analyze_portal_context,
         classify_portal_task,
         diagnose_ura_error,
@@ -925,7 +925,7 @@ def test_phase9_error_understanding_detection_and_resolution_mechanisms() -> Non
 
 
 def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist() -> None:
-    from app.documents import diagnose_portal_screenshot
+    from app.processing.documents import diagnose_portal_screenshot
     from app.vision.document_classifier import DocumentType, classify_document
 
     # 1. EFRIS error screenshot is classified as PORTAL_SCREENSHOT (not RECEIPT)
@@ -959,7 +959,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert any("Resolve EFRIS_INSUFFICIENT_STOCK" in p for p in sg["recommended_prompts"])
 
     # 3. Clicking the recommended remediation prompt triggers detect_portal_task_intent -> efris_stock_management
-    from app.portal_copilot import detect_portal_task_intent
+    from app.connectors.portal_copilot import detect_portal_task_intent
 
     rem_prompt = sg["recommended_prompts"][0]
     intent = detect_portal_task_intent(rem_prompt)
@@ -971,7 +971,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 
     # 5. Real URA Installment Payment (Sections B–F) & EFRIS First-Time Registration / Reports screenshots
     #    plus 10/12-digit Ugandan phone numbers (07..., 2567..., +2567...) never misclassified as PRNs
-    from app.portal_copilot import extract_task_entities
+    from app.connectors.portal_copilot import extract_task_entities
 
     for ph in ("0752427971", "256783354554", "+256783354554"):
         ph_ents = extract_task_entities(f"Contact Mobile Number: {ph}")
@@ -1021,7 +1021,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 
     # 6. Fuzzy PRN expired with inline PRN number, TCC application rejected, 5,000-space commodity padding,
     #    and Resolve <ERROR_CODE> with <spec.title> intent resolution
-    from app.portal_copilot import diagnose_ura_error, evaluate_turn
+    from app.connectors.portal_copilot import diagnose_ura_error, evaluate_turn
 
     prn_exp = diagnose_ura_error("URA e-Tax Payment Portal — PRN 226000112233 has expired after 21 days.")
     assert prn_exp is not None and prn_exp["error_code"] == "PRN_EXPIRED_OR_INVALID"
@@ -1043,7 +1043,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 
 def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() -> None:
     """Verify MCP tax_calculator tools/prompts, 5-locale empathy Tool-RAG, and paragraph structuring."""
-    from app.conversational import handle_conversational_turn
+    from app.chat.conversational import handle_conversational_turn
     from app.guardrails.output_checks import OutputGuard
     from app.mcp.servers.tax_calculator.server import server as tax_calc_server
     from app.mcp.tool_rag import ToolRAGSelector

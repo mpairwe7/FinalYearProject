@@ -704,13 +704,13 @@ FinalYearProject/
 │   │   │   ├── observability/tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
 │   │   │   ├── observability/analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech/speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
-│   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
+│   │   │   ├── providers/sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
 │   │   │   ├── speech/voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
 │   │   │   ├── speech/voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
 │   │   │   ├── speech/voice_consent.py # Voice consent, audit log, retention policy
 │   │   │   ├── speech/accent_detector.py # Prosodic accent classifier
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
-│   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
+│   │   │   ├── processing/pdf_export.py # Branded PDF conversation/tax export
 │   │   │   ├── quality/evaluation.py # RAG evaluation harness (8 metrics)
 │   │   │   ├── auth/       # JWT auth (HS256 dev / RS256 prod OIDC)
 │   │   │   │   ├── jwt_auth.py      # Token verification + JWKS cache

@@ -1,6 +1,6 @@
 /**
  * The key an answer override is stored and matched on, as the server makes it
- * (`App/backend/app/cms.py:normalize_query`): case folded, punctuation dropped
+ * (`App/backend/app/db/cms.py:normalize_query`): case folded, punctuation dropped
  * except a `.` or `-` between digits, spacing collapsed (G637).
  *
  * The console shows it so an administrator sees what will match, and which

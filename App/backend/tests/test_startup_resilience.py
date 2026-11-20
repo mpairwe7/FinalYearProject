@@ -77,7 +77,7 @@ class RetentionCleanupIsNotFatalTests(unittest.TestCase):
         guard, so neither a cold store nor a mid-life failure can kill the pod."""
         source = Path(__file__).resolve().parents[1] / "app" / "main.py"
         text = source.read_text(encoding="utf-8")
-        body = text[text.index("from .retention import run_retention_cleanup"):]
+        body = text[text.index("from .security.retention import run_retention_cleanup"):]
         body = body[: body.index("retention_task = asyncio.create_task")]
         calls = [
             ln.strip() for ln in body.splitlines()

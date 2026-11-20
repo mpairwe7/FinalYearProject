@@ -391,7 +391,7 @@ risks:
     threat: Agentic portal task confirmation tampering, cross-session replay, step-up OAuth open-redirect (returnTo), or DOM co-pilot secret harvesting (ADR-0013, ADR-0014, OWASP ASI02/ASI03/ASI09)
     severity: Critical
     cvss: "9.1"
-    existing_controls: 4-tier portal task policy engine (portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing
+    existing_controls: 4-tier portal task policy engine (connectors/portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing
     status: Mitigated
     mitigation_target: Shipped
     owner: backend-team

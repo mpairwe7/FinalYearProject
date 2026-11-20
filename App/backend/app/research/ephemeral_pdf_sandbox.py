@@ -39,7 +39,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from . import egress
-from ..document_worker import try_isolated
+from ..processing.document_worker import try_isolated
 from ..redis_shared import shared_redis
 from ..guardrails.input_checks import _record_guardrail_security_event, injection_present
 from ..malware_scan import MalwareRejected, scan_bytes
@@ -307,7 +307,7 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
     inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)
     pages: list[tuple[int, str]] = []
 
-    # 1. Primary: pypdfium2 (matches documents.py and guardrails/pdf.py)
+    # 1. Primary: pypdfium2 (matches processing/documents.py and guardrails/pdf.py)
     try:
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 

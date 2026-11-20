@@ -59,7 +59,7 @@ Rights are cited from the Constitution of Uganda, 1995. Harm IDs are from the
 | Access to information (Art. 41) | A wrong or superseded figure (H1, H10). | Figures come from the statutory knowledge kernel and are held until verified (ADR-0022, ADR-0033). Answers cite their source, and the output guard abstains without grounding. CI blocks a quality drop against [quality_baseline.json](../../../ml/configs/quality_baseline.json). |
 | Equality and freedom from discrimination (Art. 21) | Worse service in a local language (H9) or for small businesses (H4). | `UraLanguageAbstentionGap` alerts on a language gap in live traffic ([monitoring](../../monitoring/README.md)). [bias_fairness_audit.py](../../../scripts/bias_fairness_audit.py) compares individual and SME taxpayers offline. |
 | Privacy (Art. 27) | Personal data in prompts, logs, tickets or voice. | The [DPIA](dpia.md), [privacy controls](privacy_controls.md), PII redaction and TTL deletion ([audit](../../audit/README.md)). |
-| Just and fair treatment in administrative decisions (Art. 42) | A taxpayer relies on an answer as if URA had decided (H5). | Disclaimers, the AI disclosure in chat and in the call greeting ([ai_disclosure.py](../../../backend/app/ai_disclosure.py)), and a route to a person on every turn. |
+| Just and fair treatment in administrative decisions (Art. 42) | A taxpayer relies on an answer as if URA had decided (H5). | Disclaimers, the AI disclosure in chat and in the call greeting ([security/ai_disclosure.py](../../../backend/app/security/ai_disclosure.py)), and a route to a person on every turn. |
 | Dignity | Emotion inferred from a caller's voice. | Off by default. See the open classification question. |
 
 ## (e) Human oversight

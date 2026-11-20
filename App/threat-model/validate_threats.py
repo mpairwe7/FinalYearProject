@@ -55,7 +55,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/ml/scripts/data_aug/crawler.py",
             "App/backend/app/ingestion/crawl_corpus.py",
-            "App/backend/app/crawl_gate.py",
+            "App/backend/app/ingestion/crawl_gate.py",
             "App/tests/test_crawl_gate.py",
         ],
         "status": "mitigated",
@@ -330,7 +330,7 @@ THREAT_REGISTRY: list[dict] = [
             "Residual: the OCR, Triton and vision addresses the extractors call, and any proxy, stay visible "
             "when credential-free; network isolation (gVisor, microVM or a dedicated pool) is the open control"
         ),
-        "evidence": ["App/backend/app/document_worker.py", "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "evidence": ["App/backend/app/processing/document_worker.py", "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -340,7 +340,7 @@ THREAT_REGISTRY: list[dict] = [
         "owasp_llm": "LLM10",
         "mitre_atlas": None,
         "mitigation": "1 GiB RLIMIT_AS by default, production refuses 0; the 30 s deadline and CPU limit stand",
-        "evidence": ["App/backend/app/document_worker.py", "App/backend/app/production_readiness.py",
+        "evidence": ["App/backend/app/processing/document_worker.py", "App/backend/app/security/production_readiness.py",
                      "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
@@ -602,7 +602,7 @@ THREAT_REGISTRY: list[dict] = [
             "never an invented answer. Sunbird refusals log their error code. Residual: a suspended account (G539) "
             "and the relay (G540) are fixed outside the code"
         ),
-        "evidence": ["App/backend/app/rag/pipeline.py", "App/backend/app/sunbird.py",
+        "evidence": ["App/backend/app/rag/pipeline.py", "App/backend/app/providers/sunbird.py",
                      "App/backend/app/providers/gateway.py", "App/backend/app/providers/breakers.py",
                      "App/tests/agents/test_sunbird_primary_llm_2026_11.py", "App/backend/tests/test_gemini_routing.py"],
         "status": "in_progress",
@@ -625,7 +625,7 @@ THREAT_REGISTRY: list[dict] = [
             "the portal call and the receipt write leaves the lease held until it lapses, and the outcome is "
             "read from the connector, not from this service"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/db/database.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/db/database.py",
                      "App/backend/app/db/postgres.py", "App/backend/app/main.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
         "status": "mitigated",
@@ -649,7 +649,7 @@ THREAT_REGISTRY: list[dict] = [
             "shows. 27 hostile pages run as a gate. Residual: the instruction-phrase screen misses sentences it "
             "does not know; the structural rules do not depend on it"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
                      "App/backend/app/api/models.py", "App/evals/portal_copilot_scenarios/adversarial.jsonl",
                      "App/tests/agents/test_portal_copilot_adversarial_eval.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
@@ -703,7 +703,7 @@ THREAT_REGISTRY: list[dict] = [
             "refused for those sign-ins until it issues one (G565); an unsigned state is accepted outside "
             "production when no secret is set (G564)"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/main.py",
+        "evidence": ["App/backend/app/connectors/portal_copilot.py", "App/backend/app/main.py",
                      "App/plugins/tin_registration/connector.py",
                      "App/backend/app/tools/portal_navigator_data.py",
                      "App/tests/agents/test_browser_agent_assurance_2026_11.py"],
@@ -912,7 +912,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Pydantic input validation with max_length, Docker resource limits, read-only filesystem",
         "evidence": [
             "App/backend/app/api/models.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
             "App/docker-compose.yml",
             "App/infra/compose/docker-compose.full.yml",
         ],
@@ -993,7 +993,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Fail-closed PDF guards reject encryption, JS/Launch/GoToR/XFA/embedded files before extract or OCR",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1006,8 +1006,8 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Header/magic checks, xref and page-edge caps, Office zip-slip/macro/encryption reject, Pillow pixel cap, OCR sidecar magic + concurrency",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
-            "App/backend/app/ocr_service.py",
+            "App/backend/app/processing/documents.py",
+            "App/backend/app/processing/ocr_service.py",
         ],
         "status": "mitigated",
     },
@@ -1019,7 +1019,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0051",
         "mitigation": "scan_retrieved_text on extract and on prompt assembly; untrusted_user_document wrappers; system rule that uploads are evidence only",
         "evidence": [
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
             "App/backend/app/guardrails/",
             "App/backend/app/rag/generator.py",
         ],
@@ -1033,7 +1033,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "Session/user binding, unguessable ids, TTL spool, no path built from user ids, analytics redacts attachment text",
         "evidence": [
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1046,7 +1046,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "PDF header must be %PDF- at start; Office ZIP must contain Content_Types + word/ or xl/; images verified by Pillow; client MIME is untrusted",
         "evidence": [
             "App/backend/app/guardrails/pdf.py",
-            "App/backend/app/documents.py",
+            "App/backend/app/processing/documents.py",
         ],
         "status": "mitigated",
     },
@@ -1271,9 +1271,9 @@ THREAT_REGISTRY: list[dict] = [
         "description": "Agentic portal task confirmation tampering, cross-session replay, step-up OAuth open-redirect (returnTo), or DOM co-pilot secret harvesting (ADR-0013, ADR-0014, OWASP ASI02/ASI03/ASI09, TPCA Cap. 343 s. 75)",
         "owasp_llm": "LLM06",
         "mitre_atlas": "AML.T0051",
-        "mitigation": "4-tier portal task policy engine (portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing",
+        "mitigation": "4-tier portal task policy engine (connectors/portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing",
         "evidence": [
-            "App/backend/app/portal_copilot.py",
+            "App/backend/app/connectors/portal_copilot.py",
             "App/frontend/src/lib/oidcFlow.ts",
             "App/tests/agents/test_portal_copilot.py",
         ],
@@ -1322,7 +1322,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Queries and topic keys are built from a closed vocabulary of generic tax terms, so an unknown word cannot leave. Hosted providers are external processors under the G35 cross-border gate and are refused in sovereign mode. The transfer assessment itself is outstanding (G326)",
         "evidence": [
             "App/backend/app/research/web_research.py",
-            "App/backend/app/production_readiness.py",
+            "App/backend/app/security/production_readiness.py",
             "App/tests/agents/test_web_evidence_boundary.py",
             "App/tests/agents/test_web_search_providers.py",
         ],
@@ -1395,7 +1395,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/rag/pipeline.py",
             "App/backend/app/audit/turns.py",
-            "App/backend/app/turn_pipeline.py",
+            "App/backend/app/chat/turn_pipeline.py",
             "App/tests/agents/test_turn_terminal_contract.py",
             "App/tests/agents/test_autonomy_gate_contract.py",
         ],

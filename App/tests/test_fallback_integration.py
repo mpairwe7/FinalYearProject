@@ -146,8 +146,8 @@ class TestChatEndpointFallback:
         model = deterministic_pipeline
         model._llm_available = True
         with mock.patch.object(pipeline_module.generator_module, "generate", return_value=""), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+                 mock.patch("app.providers.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
             resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
 
         assert resp.status_code == 200
@@ -165,8 +165,8 @@ class TestChatEndpointFallback:
             with mock.patch.object(pipeline_module.generator_module, "is_available",
                                    return_value=False), \
                  mock.patch.object(pipeline_module.generator_module, "generate", return_value=""), \
-                 mock.patch("app.sunbird.is_available", return_value=True), \
-                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
+                 mock.patch("app.providers.sunbird.is_available", return_value=True), \
+                 mock.patch("app.providers.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
                 resp = client.post(
                     "/v1/chat", json={"message": "Which VAT rules apply to imports?"}
                 )
@@ -203,8 +203,8 @@ class TestChatStreamEndpointFallback:
         with mock.patch.object(pipeline_module.generator_module, "is_available", return_value=True), \
              mock.patch.object(pipeline_module.generator_module, "generate_stream",
                                return_value=iter([])), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+                 mock.patch("app.providers.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
             with client.stream(
                 "POST", "/v1/chat/stream", json={"message": "How is VAT charged on local supplies?"}
             ) as resp:
@@ -259,7 +259,7 @@ class TestSpeechTranscriptionFallback:
              mock.patch.object(cloud_config, "is_gemini_configured", return_value=True), \
              mock.patch.object(cloud_config, "get_cloud_settings", return_value=settings), \
              mock.patch.object(budget, "try_consume_gemini_call", return_value=True), \
-             mock.patch("app.sunbird.is_available", return_value=False), \
+             mock.patch("app.providers.sunbird.is_available", return_value=False), \
              mock.patch("httpx.post", return_value=answer):
             breakers.GEMINI_BREAKER.record_success()
             return speech_service.SpeechModel._transcribe_chain(_EveryOtherSpeechTierDown(), b"\x00\x00" * 1600, 16000, "en")

@@ -170,7 +170,7 @@ class NoLocalVoiceTests(unittest.TestCase):
                 latency_s=0.01, backend="edge_tts", voice=seen["voice"],
             )
 
-        from app import sunbird
+        from app.providers import sunbird
 
         with patch.object(ss, "PROJECT_ROOT", Path("/nonexistent-voice-root")), \
                 patch.object(sunbird, "is_available", return_value=False), \
@@ -206,7 +206,7 @@ class LocalBeforeCloudOrderingTests(unittest.TestCase):
         # exercises tier ⓪'s prefer_native_voice gate unambiguously.
         model = _model()
         model._spark_tts = self._spark_stub()
-        from app import sunbird
+        from app.providers import sunbird
 
         with patch.object(
             sunbird, "is_available",
@@ -221,7 +221,7 @@ class LocalBeforeCloudOrderingTests(unittest.TestCase):
         unchanged from before Spark-TTS-SALT existed: Sunbird cloud first."""
         model = _model()
         self.assertIsNone(model._spark_tts)  # _model()'s default
-        from app import sunbird
+        from app.providers import sunbird
 
         with patch.object(sunbird, "is_available", return_value=True), \
                 patch.object(sunbird, "text_to_speech",
@@ -236,7 +236,7 @@ class LocalBeforeCloudOrderingTests(unittest.TestCase):
         model = _model()
         model._spark_tts = self._spark_stub()
         model._spark_tts.synthesize.side_effect = RuntimeError("spark down")
-        from app import sunbird
+        from app.providers import sunbird
 
         with patch.object(sunbird, "is_available", return_value=True), \
                 patch.object(sunbird, "text_to_speech",
@@ -251,7 +251,7 @@ class LocalBeforeCloudOrderingTests(unittest.TestCase):
         Spark-TTS-SALT the same priority over Sunbird that tier ⓪ does."""
         model = _model()
         model._spark_tts = self._spark_stub()
-        from app import sunbird
+        from app.providers import sunbird
 
         with patch.object(ss, "PROJECT_ROOT", Path("/nonexistent-voice-root")), \
                 patch.object(sunbird, "is_available",

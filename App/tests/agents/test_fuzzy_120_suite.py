@@ -26,14 +26,14 @@ from app.guardrails.pii import redact_pii_text
 from app.malware_scan import MalwareRejected, scan_required
 from app.mt import citations_survived, figures_survived, units_survived
 from app.guardrails.premise import check_false_premise
-from app.production_readiness import gap_gate_errors
+from app.security.production_readiness import gap_gate_errors
 from app.rag.query import correct_spelling, rewrite_with_history
 from app.resilience import CircuitBreaker, CircuitState
 from app.tax.money import to_decimal
 from app.tenancy import qdrant_payload_filter, rls_set_local_sql
 from app.tools import ToolRegistry
 from app.tools.ura_account import account_api_status
-from app.ura_account_mock import account_mode
+from app.connectors.ura_account_mock import account_mode
 
 
 # ===========================================================================

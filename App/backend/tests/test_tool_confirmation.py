@@ -59,7 +59,7 @@ class _StubMCPClient:
 
 class ConfirmTokenUnitTest(unittest.TestCase):
     def test_round_trip(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="call_0_0",
@@ -74,7 +74,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertEqual(payload["idempotency_key"], "ik_abc")
 
     def test_tampered_token_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c", tool_name="t", idempotency_key="k", session_id="s"
@@ -83,7 +83,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertIsNone(verify(tampered))
 
     def test_wrong_session_id_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c", tool_name="t", idempotency_key="k", session_id="s_legit"
@@ -92,7 +92,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertIsNone(verify(token, expected_session_id="s_other"))
 
     def test_expired_token_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c",
@@ -105,7 +105,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
             self.assertIsNone(verify(token))
 
     def test_malformed_token_rejected(self) -> None:
-        from app.confirm_tokens import verify
+        from app.security.confirm_tokens import verify
 
         self.assertIsNone(verify("not.a.real.token"))
         self.assertIsNone(verify(""))
@@ -167,7 +167,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         return token
 
     def test_approve_routes_submit_through_policy(self) -> None:
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         stub = _StubMCPClient()
         client = _client(True)
@@ -210,7 +210,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         self.assertEqual(rec["kwargs"]["idempotency_key"], "ik_phase4")
 
     def test_reject_does_not_invoke_tool(self) -> None:
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         stub = _StubMCPClient()
         client = _client(True)
@@ -239,7 +239,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         self.assertEqual(stub.calls, [])
 
     def test_replayed_confirmation_rejected(self) -> None:
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         stub = _StubMCPClient()
         client = _client(True)
@@ -302,7 +302,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         """An anonymous/public socket cannot drive a critical submit even with
         a valid confirmation token — the real ura_action_proposal tool is
         re-authorized through MCP policy and denied."""
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
         from app.mcp import reset_client
 
         reset_client()  # use the real in-process client + tool registry
@@ -334,7 +334,7 @@ class WsConfirmFlowTest(unittest.TestCase):
     def test_critical_tool_allowed_for_authorized_principal(self) -> None:
         """A staff principal holding the right consents passes the policy gate
         at submit (the tool itself fail-closes when the URA API is unset)."""
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
         from app.auth.jwt_auth import make_dev_token
         from app.mcp import reset_client
 

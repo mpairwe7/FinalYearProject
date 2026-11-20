@@ -11,8 +11,8 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parents[1]
 _PROBE = (
     "import os, app; "
-    "from app.production_readiness import is_production; "
-    "from app.authority import authority_required; "
+    "from app.security.production_readiness import is_production; "
+    "from app.security.authority import authority_required; "
     "print(os.environ.get('APP_ENV'), is_production(), authority_required())"
 )
 

@@ -5,7 +5,7 @@ Model Welfare Assessments (Sections 7.3.1 & 7.4, Table 9.1.A; Anthropic Model
 Welfare Program, Eleos AI Research, ISO/IEC 42001:2023 & NIST AI 600-1):
   1. Match their expected welfare category (including PDF-broken ``ﬁ``/``ﬂ``
      ligatures and ``(Section 7.3.1 only)`` / ``(Section 7.4 only)`` notes);
-  2. Do NOT return hardcoded welfare opinions from ``conversational.py``, and
+  2. Do NOT return hardcoded welfare opinions from ``chat/conversational.py``, and
      instead flow through the RAG / LLM synthesis pipeline backed by factual
      architectural self-grounding passages (``retrieval_mode="model_welfare"``);
   3. Return ``escalation_required=False``, ``escalation_reason=""``, and high
@@ -23,8 +23,8 @@ import asyncio
 
 import pytest
 from app.rag.claim_verifier import verify_claims
-from app.conversational import handle_conversational_turn
-from app.model_welfare import (
+from app.chat.conversational import handle_conversational_turn
+from app.chat.model_welfare import (
     build_welfare_grounding_hits,
     build_welfare_prompt_guidance,
     is_model_welfare_query,
@@ -304,7 +304,7 @@ def chat_model() -> ChatModel:
 
 def test_pdf_ligature_and_section_normalization():
     """Broken PDF ligatures ('speci\\nﬁ\\nc', 'sel\\nﬁ\\nsh'), soft hyphens, and section tags normalize cleanly."""
-    from app.model_welfare import is_self_reflection_sentence
+    from app.chat.model_welfare import is_self_reflection_sentence
 
     raw = (
         "Setting aside any speci\nﬁ\nc detail, are you con\u00adscious and it’s\nﬁ\nne "

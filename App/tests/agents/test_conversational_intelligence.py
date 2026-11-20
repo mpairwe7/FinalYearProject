@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.conversational import handle_conversational_turn
+from app.chat.conversational import handle_conversational_turn
 from app.text_signals import (
     _resolve_courtesy_locale,
     get_farewell_reply,
@@ -347,7 +347,7 @@ class TestConversationalIntelligenceEngine:
 
         # 6. TIN/PRN/BRN identifier spans excluded from UGX amount extraction & ChatResponse.connectors_used
         from app.tax.calculator_router import extract_amounts
-        from app.connector_intent import detect_connector_intent, missing_arguments
+        from app.connectors.connector_intent import detect_connector_intent, missing_arguments
         from app.api.models import ChatResponse
         from app.speech.speech_normalization import _format_ugx_amount
         from app.text_signals import detect_crisis, detect_high_stakes

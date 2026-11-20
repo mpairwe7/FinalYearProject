@@ -9,5 +9,5 @@ set +a
 echo "Prototype env loaded (APP_ENV=$APP_ENV, URA_ACCOUNT_API_MODE=$URA_ACCOUNT_API_MODE)."
 echo "API:  cd App/backend && PYTHONPATH=. uvicorn app.main:app --reload --port 8887"
 echo "Web:  cd App/frontend && bun dev"
-echo "Seed: PYTHONPATH=App/backend python3 -m app.seed_prototype"
+echo "Seed: PYTHONPATH=App/backend python3 -m app.db.seed_prototype"
 echo "Do not export this file into production."

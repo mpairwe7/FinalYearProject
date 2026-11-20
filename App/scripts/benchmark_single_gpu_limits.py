@@ -78,7 +78,8 @@ from openpyxl import Workbook
 from fastapi.testclient import TestClient
 
 from app.db import database as db
-from app import documents, pdf_export
+from app.processing import documents
+from app.processing import pdf_export
 from app.main import app
 
 

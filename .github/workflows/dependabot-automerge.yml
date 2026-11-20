@@ -53,11 +53,13 @@ jobs:
             echo "::warning::${BASE} requires no status checks, so auto-merge would merge before CI finishes; leaving this PR for review."
           fi
 
-      # Auto-merge minor, patch, and grouped updates once the required checks pass.
+      # Auto-merge minor and patch updates, grouped or not, once the required checks pass.
+      # `update-type` is the highest change in the pull request, so a group that holds a
+      # major is left for a person. Three groups in dependabot.yml can hold one.
       - name: Enable auto-merge for non-major updates
         if: >-
           steps.gate.outputs.required == 'true' &&
-          (steps.metadata.outputs.update-type != 'version-update:semver-major' || steps.metadata.outputs.package-group != '')
+          steps.metadata.outputs.update-type != 'version-update:semver-major'
         run: |
           gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"

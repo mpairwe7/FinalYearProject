@@ -70,7 +70,7 @@ main() {
   require_cmd bash
   if [[ "${APP_ENV:-development}" == "production" || "${REQUIRE_FRESH_AUTHORITY:-false}" == "true" ]]; then
     require_cmd python3
-    ROOT_DIR="$ROOT_DIR" python3 -c "import os, sys; sys.path.insert(0, os.path.join(os.environ['ROOT_DIR'], 'backend')); from app.authority import get_authority_status; s=get_authority_status(); print('AUTHORITY', 'ok' if s.get('ok') else 'failed', s.get('manifest_path')); sys.exit(0 if s.get('ok') else 1)" \
+    ROOT_DIR="$ROOT_DIR" python3 -c "import os, sys; sys.path.insert(0, os.path.join(os.environ['ROOT_DIR'], 'backend')); from app.security.authority import get_authority_status; s=get_authority_status(); print('AUTHORITY', 'ok' if s.get('ok') else 'failed', s.get('manifest_path')); sys.exit(0 if s.get('ok') else 1)" \
       || {
         printf 'Authority manifest preflight failed. Set URA_AUTHORITY_MANIFEST to a fresh hash-checked bundle.\n' >&2
         exit 1

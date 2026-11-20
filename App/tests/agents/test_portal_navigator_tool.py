@@ -2686,7 +2686,7 @@ def test_portal_navigator_efris_invoicing_intent():
 
 
 def test_diagnose_portal_screenshot_bounding_boxes_and_selectors():
-    from app.documents import diagnose_portal_screenshot
+    from app.processing.documents import diagnose_portal_screenshot
 
     res = diagnose_portal_screenshot(
         text="Internal Server Error 500 on URA e-services payment submission",
@@ -2762,7 +2762,7 @@ def test_portal_dom_action_recipes_and_navigation():
 
 
 def test_image_and_receipt_visual_guidance_and_navigation():
-    from app.documents import diagnose_portal_screenshot
+    from app.processing.documents import diagnose_portal_screenshot
 
     # 1. Receipt image capture
     res_receipt = diagnose_portal_screenshot(

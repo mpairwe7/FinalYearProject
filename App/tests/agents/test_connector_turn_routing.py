@@ -22,7 +22,7 @@ from app.rag import pipeline as pipeline_module
 from app.mcp import MCPClient
 from app.mcp.transport import InProcessTransport
 from app.text_signals import CONNECTOR_UNAVAILABLE_REPLY
-from app.verified_resources import resources_for_turn
+from app.connectors.verified_resources import resources_for_turn
 
 LOOKUP = "Is the taxpayer with TIN 1000000002 registered for VAT? Check EFRIS."
 PROCEDURE = "How do I register for a TIN?"

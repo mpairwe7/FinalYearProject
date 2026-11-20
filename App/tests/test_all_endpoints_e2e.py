@@ -873,14 +873,14 @@ def test_offline_status_flag_on():
 #    (reportlab is not a test dependency; the route wiring is what's under test).
 # ---------------------------------------------------------------------------
 def _fake_pdf_module() -> types.ModuleType:
-    mod = types.ModuleType("App.backend.app.pdf_export")
+    mod = types.ModuleType("App.backend.app.processing.pdf_export")
     mod.generate_conversation_pdf = lambda messages, title="", session_id="": b"%PDF-1.4 fake-conv"
     mod.generate_tax_summary_pdf = lambda calculation, taxpayer_ref="": b"%PDF-1.4 fake-tax"
     return mod
 
 
 def test_export_conversation_pdf():
-    with mock.patch.dict(sys.modules, {"App.backend.app.pdf_export": _fake_pdf_module()}):
+    with mock.patch.dict(sys.modules, {"App.backend.app.processing.pdf_export": _fake_pdf_module()}):
         r = _client().post(
             "/v1/export/conversation",
             json={"messages": [{"role": "user", "content": "hi"}], "title": "Report"},
@@ -891,7 +891,7 @@ def test_export_conversation_pdf():
 
 
 def test_export_tax_summary_pdf():
-    with mock.patch.dict(sys.modules, {"App.backend.app.pdf_export": _fake_pdf_module()}):
+    with mock.patch.dict(sys.modules, {"App.backend.app.processing.pdf_export": _fake_pdf_module()}):
         r = _client().post(
             "/v1/export/tax-summary",
             headers=_bearer(USER),

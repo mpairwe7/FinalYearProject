@@ -86,7 +86,7 @@ def validate(env: str = "development") -> tuple[list[str], list[str]]:
         if str(backend) not in sys.path:
             sys.path.insert(0, str(backend))
         try:
-            from app.production_readiness import gap_gate_errors
+            from app.security.production_readiness import gap_gate_errors
 
             errors.extend(gap_gate_errors())
         except ImportError as exc:

@@ -1417,7 +1417,9 @@ def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_c
 
 
 def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
-    from app import glossary, mt, sunbird
+    from app.tax import glossary
+    from app import mt
+    from app.providers import sunbird
     from app.speech import orpheus_tts, spark_tts_salt
     from app.speech import speech_service as ss
     from app.memory.language_state import normalize_locale_tag, resolve_turn_locale
@@ -1633,7 +1635,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
 
 
 def test_phase39_eq_conversational_and_structuring_tools_5_locale_uniformity():
-    from app.conversational import handle_conversational_turn
+    from app.chat.conversational import handle_conversational_turn
     from app.guardrails.output_checks import OutputGuard
     from app.rag.pipeline import ChatModel
     from app.text_signals import (
@@ -1776,7 +1778,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
     from app.tax.calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
     from app.quality.discrepancy_detector import format_discrepancy_acknowledgement
     from app.memory.resolution_ledger import ResolutionCase, build_resumption_prompt
-    from app.ura_account_mock import format_prn_voucher_reply
+    from app.connectors.ura_account_mock import format_prn_voucher_reply
     from app.workflows.registry import is_side_question
     from app.workflows.slots import validate_slot
 
@@ -1939,7 +1941,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
     assert "18" in percentages("Mucoro me VAT obedo dul 18 i kom miya")
 
     # 4. Established conversation locale is preserved in _resolve_conversational_locale
-    from app.conversational import _resolve_conversational_locale
+    from app.chat.conversational import _resolve_conversational_locale
 
     assert _resolve_conversational_locale("Ahabw'enki nitushashura omusolo?", locale="nyn") == "nyn"
 

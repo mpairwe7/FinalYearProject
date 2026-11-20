@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from app.rag import generator
 from app.rag import pipeline as pipeline_module
-from app.connector_outcome import DEMO_NOTICE
+from app.connectors.connector_outcome import DEMO_NOTICE
 from app.config.flags import flags
 from app.mcp import MCPClient
 from app.mcp.transport import InProcessTransport

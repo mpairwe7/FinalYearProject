@@ -1,4 +1,4 @@
-"""Tests for the document attachment pipeline (``app/documents.py``).
+"""Tests for the document attachment pipeline (``app/processing/documents.py``).
 
 Covers per-type extraction (text / CSV / XLSX / DOCX / PDF), URA
 classification + field extraction, the TTL registry with session binding,
@@ -29,7 +29,7 @@ os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_ENABLED", "false")
 
 from app.db import database as db  # noqa: E402
-from app import documents  # noqa: E402
+from app.processing import documents  # noqa: E402
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -367,7 +367,7 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertEqual(len(record.meta["ocr_page_numbers"]), 4)
 
     def test_pypdfium2_and_pdfplumber_extraction_pure_permissive(self):
-        from app.pdf_export import generate_tax_summary_pdf
+        from app.processing.pdf_export import generate_tax_summary_pdf
 
         # Generate a standard PDF with fpdf2 (pure Apache-2.0 / LGPL)
         calc_data = {
@@ -591,7 +591,7 @@ class ServiceInjectionTest(_RegistryIsolation):
 @unittest.skipUnless(_has("fpdf"), "fpdf2 not installed")
 class ReportPdfTest(_RegistryIsolation):
     def test_report_pdf_bytes(self):
-        from app.pdf_export import (
+        from app.processing.pdf_export import (
             generate_conversation_pdf,
             generate_document_report_pdf,
             generate_tax_summary_pdf,

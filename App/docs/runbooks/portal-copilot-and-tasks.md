@@ -1,6 +1,6 @@
 # Runbook: URA Portal Task Execution, Claude-Style Confirmation & Inbuilt DOM Co-Pilot
 
-- **Subsystem:** `App/backend/app/portal_copilot.py`, `POST /v1/portal/tasks/execute`, `App/frontend/src/components/PortalCopilotCard.tsx`, `App/frontend/src/app/portal/[portalKey]/page.tsx`
+- **Subsystem:** `App/backend/app/connectors/portal_copilot.py`, `POST /v1/portal/tasks/execute`, `App/frontend/src/components/PortalCopilotCard.tsx`, `App/frontend/src/app/portal/[portalKey]/page.tsx`
 - **Governing ADR:** [ADR-0014](../adr/0014-agentic-portal-tasks-and-stuck-user-dom-copilot.md)
 - **Feature Flag:** `portal_copilot` (`FLAG_PORTAL_COPILOT`, default `true`, category `kill_switch`)
 

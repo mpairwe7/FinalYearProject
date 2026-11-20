@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from ..verified_resources import portal_action_for, resolve_resource_ids
+from ..connectors.verified_resources import portal_action_for, resolve_resource_ids
 from .slots import enum_options
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ def load_workflow(path: Path) -> WorkflowDefinition:
     """Parse a YAML file into a :class:`WorkflowDefinition`.
 
     ``resources`` and ``portal_action`` name entries in
-    :mod:`app.verified_resources` by id rather than carrying URLs, so every
+    :mod:`app.connectors.verified_resources` by id rather than carrying URLs, so every
     link a guided flow shows is one that was checked live; an unknown id is
     logged and dropped.
     """

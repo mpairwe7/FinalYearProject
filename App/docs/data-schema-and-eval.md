@@ -29,7 +29,7 @@
 
 The backend maintains application-owned tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
 
-Prototype sample rows live in `App/Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.seed_prototype`.
+Prototype sample rows live in `App/Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.db.seed_prototype`.
 
 - **feedback**: User thumbs-up/down on chatbot responses.
   - id (PK), message_id, session_id, rating (up|down), comment, user_query, bot_reply, created_at.

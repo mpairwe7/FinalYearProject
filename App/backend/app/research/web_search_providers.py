@@ -22,7 +22,7 @@ Three things follow from that, and this module is where they are enforced:
 Only the closed-vocabulary query from :func:`app.research.web_research.build_search_queries`
 reaches this module. Every provider here is an external processor, so
 :func:`external_provider_names` feeds the cross-border gate in
-:mod:`app.production_readiness` (G35).
+:mod:`app.security.production_readiness` (G35).
 """
 
 from __future__ import annotations
@@ -460,7 +460,7 @@ _BREAKER_LOCK = threading.Lock()
 
 def unsanctioned_allowed() -> bool:
     """Whether the HTML fallback may run: never in production, opt-out elsewhere."""
-    from ..production_readiness import is_production
+    from ..security.production_readiness import is_production
 
     if is_production():
         return False

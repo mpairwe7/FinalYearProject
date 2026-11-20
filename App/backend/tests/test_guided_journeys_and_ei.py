@@ -30,14 +30,14 @@ from app.text_signals import (
     strip_repeated_ack,
 )
 from app.tools.empathy import assess
-from app.turn_guidance import (
+from app.chat.turn_guidance import (
     HANDOFF_ACTION,
     apply_turn_guidance,
     finalize_turn_actions,
     guided_mode_action,
     turns_from_history,
 )
-from app.verified_resources import is_authoritative_ura_url
+from app.connectors.verified_resources import is_authoritative_ura_url
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry, WorkflowSession, compute_workflow_progress
 

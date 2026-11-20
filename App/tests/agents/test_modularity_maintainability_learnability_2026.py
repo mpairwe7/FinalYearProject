@@ -10,13 +10,13 @@ from app.config.flags import _REGISTRY, flags
 from app.memory.procedural import ProceduralMemory
 from app.guardrails.premise import check_false_premise
 from app.tax.scenario_planner import should_defer_to_scenario_planner
-from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
+from app.db.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
 from app.tools.portal_navigator_data import (
     _WORKFLOWS,
     get_portal_knowledge_provenance,
     load_portal_knowledge_pack,
 )
-from app.turn_pipeline import (
+from app.chat.turn_pipeline import (
     CANONICAL_BEHAVIORAL_MANIFEST,
     TurnPipelineOrchestrator,
     TurnStage,
@@ -189,7 +189,7 @@ def test_phase3_modularity_turn_pipeline_portal_pack_and_g224_fixes() -> None:
 
     # 2b. MemoryService integration & architecture_integrity_status in production_readiness
     from app.memory.service import MemoryService
-    from app.production_readiness import architecture_integrity_status, readiness_report
+    from app.security.production_readiness import architecture_integrity_status, readiness_report
 
     memsvc = MemoryService()
     exp_block = memsvc.retrieve_procedural_trajectories(

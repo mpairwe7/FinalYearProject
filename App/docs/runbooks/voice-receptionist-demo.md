@@ -587,7 +587,7 @@ transport selection, one worker/replica and the operator acknowledgement — and
 since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
 `LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
 `RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
-`python -m app.production_readiness --as-production` reports those G36 checks.
+`python -m app.security.production_readiness --as-production` reports those G36 checks.
 Run in a shell inside the supervisord image's container, it reads that image's
 `UVICORN_WORKERS=2` and reports a G36 worker-count error that does not apply to
 the Space: the call process, the only one that starts the receptionist, runs one
@@ -754,7 +754,7 @@ enabling the feature:
 6. Run the production gate before enabling the feature:
 
    ```bash
-   APP_ENV=production PYTHONPATH=App/backend python3 -m app.production_readiness
+   APP_ENV=production PYTHONPATH=App/backend python3 -m app.security.production_readiness
    PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_receptionist_livekit.py App/backend/tests/test_receptionist_claims.py -q
    ```
 

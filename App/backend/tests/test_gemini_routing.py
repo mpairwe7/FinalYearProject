@@ -168,12 +168,12 @@ class TestTheSunbirdOutputBudget(unittest.TestCase):
     reply at 512)."""
 
     def test_the_budget_leaves_room_for_reasoning(self):
-        from app import sunbird
+        from app.providers import sunbird
 
         self.assertGreaterEqual(sunbird.SUNBIRD_LLM_MAX_TOKENS, 512)
 
     def test_the_chat_call_sends_the_budget_and_the_model(self):
-        from app import sunbird
+        from app.providers import sunbird
 
         class _Resp:
             def json(self):
@@ -189,7 +189,7 @@ class TestTheSunbirdOutputBudget(unittest.TestCase):
         self.assertEqual(body["max_tokens"], sunbird.SUNBIRD_LLM_MAX_TOKENS)
 
     def test_an_empty_reply_is_a_failure_the_breaker_sees(self):
-        from app import sunbird
+        from app.providers import sunbird
 
         class _Resp:
             def json(self):
@@ -216,8 +216,8 @@ class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
             pipeline.flags, "is_enabled", return_value=True
         ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
-        ), patch("app.sunbird.is_available", return_value=True), patch(
-            "app.sunbird.chat_completion", return_value=sunbird_reply
+        ), patch("app.providers.sunbird.is_available", return_value=True), patch(
+            "app.providers.sunbird.chat_completion", return_value=sunbird_reply
         ) as sb, patch(
             "app.providers.gateway.workers_ai_chat", return_value="a full answer."
         ) as cf, patch("app.providers.gateway.gemini_generate", return_value="x") as gem:

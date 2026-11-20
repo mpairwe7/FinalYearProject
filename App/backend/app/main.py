@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover – uvicorn always present at runtime
 from pydantic import BaseModel, Field, field_validator
 
 from .db import database as db
-from . import documents
+from .processing import documents
 from .tickets import officer_hours
 from .observability.analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .observability.security_events import record_http_security_event
@@ -57,7 +57,7 @@ from .auth.models import (
     DevTokenResponse,
     ProfileUpdateRequest,
 )
-from .authority import authority_required, get_authority_status
+from .security.authority import authority_required, get_authority_status
 from .tickets.escalation_notify import known_teams
 from .quality.journey_analytics import build_journey_funnel
 from .api.models import (
@@ -110,8 +110,8 @@ from .api.models import (
     VoiceVisionChatResponse,
 )
 from .rag.query import gate_locale
-from .seed_prototype import seed as _seed_prototype
-from .seed_prototype import should_seed as _should_seed
+from .db.seed_prototype import seed as _seed_prototype
+from .db.seed_prototype import should_seed as _should_seed
 from .rag.pipeline import ChatModel, localize_reply
 from .speech.speech_service import (
     SPEECH_ASR_BACKEND,
@@ -250,7 +250,7 @@ def _validate_production_env() -> None:
     # owner's decision a receptionist that cannot run makes calls unavailable,
     # with /ready, the log and an alert saying why (receptionist.start,
     # ADR-0041). It used to refuse to start the whole API.
-    from .production_readiness import gap_gate_errors
+    from .security.production_readiness import gap_gate_errors
 
     errors.extend(gap_gate_errors(include_receptionist=False))
 
@@ -441,7 +441,7 @@ def _validate_production_env() -> None:
     # The confirmation HMAC secret must come from real config in prod;
     # leaving the env unset would fall back to a per-process random key
     # and break any cross-replica confirmation flow.
-    from . import confirm_tokens
+    from .security import confirm_tokens
 
     if _production_flag_enabled("ws_chat") and (
         len(confirm_tokens.effective_secret_str()) < confirm_tokens.MIN_SECRET_CHARS
@@ -831,7 +831,7 @@ async def lifespan(app: FastAPI):
 
     # Sovereign mode guard — blocks startup whenever SOVEREIGN_MODE=true and any
     # commercial LLM fallback or API key is configured, regardless of APP_ENV.
-    from .production_readiness import assert_sovereign_mode
+    from .security.production_readiness import assert_sovereign_mode
 
     assert_sovereign_mode()
 
@@ -967,7 +967,7 @@ async def lifespan(app: FastAPI):
     # Startup alone is insufficient: an otherwise idle pod would retain
     # expired documents and in-memory data indefinitely. The job itself is
     # idempotent, including when several replicas run it at once.
-    from .retention import run_retention_cleanup
+    from .security.retention import run_retention_cleanup
 
     def _run_retention_cleanup_guarded() -> None:
         """Housekeeping must never decide whether the service starts or stays up.
@@ -1348,7 +1348,7 @@ def execute_portal_task_decision(
     ctx: AuthContext = Depends(optional_user),
 ) -> PortalTaskDecisionResponse:
     """Verify HMAC-signed `request_state` and execute or decline a confirmed URA portal task."""
-    from . import portal_copilot as pc_mod
+    from .connectors import portal_copilot as pc_mod
     from .config.flags import flags
 
     if not flags.is_enabled("portal_copilot", subject=ctx.user_id or None):
@@ -1740,7 +1740,7 @@ def export_conversation(
     _ctx: AuthContext = Depends(optional_user),
 ) -> Response:
     """Export a conversation as a branded PDF."""
-    from .pdf_export import generate_conversation_pdf
+    from .processing.pdf_export import generate_conversation_pdf
 
     started = time.perf_counter()
     pdf_bytes = generate_conversation_pdf(
@@ -1770,7 +1770,7 @@ def export_tax_summary(
     _ctx: AuthContext = Depends(current_user),
 ) -> Response:
     """Export a tax calculation summary as a branded PDF."""
-    from .pdf_export import generate_tax_summary_pdf
+    from .processing.pdf_export import generate_tax_summary_pdf
 
     started = time.perf_counter()
     pdf_bytes = generate_tax_summary_pdf(
@@ -1832,7 +1832,7 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
     `default: true` marks the speaker used when a caller names none.
     """
     from .speech import orpheus_tts
-    from . import sunbird
+    from .providers import sunbird
     from .speech.speech_service import en_edge_voice_choices
 
     sunbird_ready = sunbird.is_available()
@@ -3471,7 +3471,7 @@ def put_override_endpoint(
     body: dict,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    from . import cms
+    from .db import cms
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
@@ -3606,7 +3606,7 @@ def verify_discrepancy_endpoint(
     try:
         # Optional 1-Click Answer Override
         if body.get("create_override"):
-            from . import cms
+            from .db import cms
 
             override_query = str(body.get("override_query") or "").strip()
             if not override_query and report.get("conversation_id"):
@@ -3918,7 +3918,7 @@ def list_outbox_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Notification outbox with live provider metrics, status counts, and real-time state."""
-    from .notify import is_live, configured_providers
+    from .notifications.notify import is_live, configured_providers
 
     items = db.list_notification_outbox(limit=limit, status=status)
     stats = db.get_outbox_stats()
@@ -3937,7 +3937,7 @@ def dispatch_outbox_endpoint(
 ) -> dict[str, Any]:
     """Trigger live drain and delivery of queued notification outbox messages."""
     _require_staff_writer(ctx)
-    from .notify import drain_outbox
+    from .notifications.notify import drain_outbox
 
     res = drain_outbox(limit=limit)
     _audit_staff_action(ctx, "staff.outbox_dispatched", {"processed": res.get("processed", 0), "sent": res.get("sent", 0)})
@@ -3951,7 +3951,7 @@ def retry_outbox_endpoint(
 ) -> dict[str, Any]:
     """Retry sending a specific queued or failed outbox notification."""
     _require_staff_writer(ctx)
-    from .notify import retry_notification
+    from .notifications.notify import retry_notification
 
     res = retry_notification(notification_id)
     if not res.get("ok"):
@@ -3967,7 +3967,7 @@ def test_outbox_endpoint(
 ) -> dict[str, Any]:
     """Send an immediate test notification across a live communication channel."""
     _require_staff_writer(ctx)
-    from .notify import test_notification
+    from .notifications.notify import test_notification
 
     res = test_notification(
         channel=req.channel,
@@ -5173,7 +5173,7 @@ def me_list_reminders(ctx: AuthContext = Depends(require_user)) -> dict:
 @app.post("/v1/me/reminders/refresh", tags=["me"])
 def me_refresh_reminders(ctx: AuthContext = Depends(require_user)) -> dict:
     """Run the selector and persist matches to the inbox."""
-    from .reminders import refresh_inbox
+    from .notifications.reminders import refresh_inbox
 
     row = db.upsert_user(
         external_id=ctx.user.user_id,
@@ -5392,7 +5392,7 @@ def export_artifacts(request: Request) -> dict:
     """
     require_ops_key(request)
 
-    from .artifact_export import export_all
+    from .quality.artifact_export import export_all
 
     files = export_all()
     return {
@@ -5682,8 +5682,8 @@ def admin_offline_stats(
 
     Combines bundle manager stats + sync engine stats.
     """
-    from .offline_bundle import BundleManager
-    from .offline_sync import OfflineSyncEngine
+    from .offline.offline_bundle import BundleManager
+    from .offline.offline_sync import OfflineSyncEngine
 
     bundle_mgr = BundleManager()
     bundle_stats = bundle_mgr.get_stats()

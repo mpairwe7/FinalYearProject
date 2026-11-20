@@ -1,7 +1,7 @@
 """Client for the Orpheus-3B Sunbird TTS sidecar — the receptionist's local voice.
 
 Sibling to :mod:`app.speech.spark_tts_salt` (a local batch voice) and
-:mod:`app.sunbird` (a cloud one), but a *streaming* voice: the sidecar
+:mod:`app.providers.sunbird` (a cloud one), but a *streaming* voice: the sidecar
 (``App/backend/orpheus_sidecar``) returns 24 kHz PCM frame by frame, so the
 receptionist hears the first ~85 ms of an answer ~350 ms after asking, instead
 of after the whole sentence is rendered (Spark-TTS-SALT ≈ 4.3 s, Sunbird cloud
@@ -140,7 +140,7 @@ def in_cooldown() -> bool:
 def speaker_for(language: str, voice: str | None = None) -> str | None:
     """The Orpheus speaker for *language* (ISO 639-1 or ISO 639-3), or ``None`` if unvoiced.
 
-    When *voice* names a valid speaker for *language* in :data:`app.sunbird.TTS_VOICE_CATALOG`,
+    When *voice* names a valid speaker for *language* in :data:`app.providers.sunbird.TTS_VOICE_CATALOG`,
     that speaker is returned; otherwise the locale's configured/default speaker is used.
     """
     if not is_configured():
@@ -155,7 +155,7 @@ def speaker_for(language: str, voice: str | None = None) -> str | None:
     canonical = equivalents[0]
     if voice:
         try:
-            from .. import sunbird
+            from ..providers import sunbird
 
             v_clean = voice.strip()
             if v_clean and v_clean in sunbird.TTS_VOICE_CATALOG.get(canonical, ()):

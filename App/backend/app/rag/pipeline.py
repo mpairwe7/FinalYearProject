@@ -45,17 +45,17 @@ from pathlib import Path
 from typing import Any, Callable, Final
 
 from ..db import database as db
-from .. import documents as documents_module
+from ..processing import documents as documents_module
 from . import generator as generator_module
 from .. import mt
 from ..tickets import officer_hours
 from ..agents import AgentRoute, supervisor
 from ..agents.critic import RevisionBudget, evaluate
 from ..observability.analytics import metrics
-from ..connector_intent import ConnectorIntent, detect_connector_intent
-from ..connector_outcome import classify_all as classify_connector_outcomes
-from ..connector_outcome import compose as compose_connector_reply
-from ..connector_outcome import connectors_used as _outcome_connectors_used
+from ..connectors.connector_intent import ConnectorIntent, detect_connector_intent
+from ..connectors.connector_outcome import classify_all as classify_connector_outcomes
+from ..connectors.connector_outcome import compose as compose_connector_reply
+from ..connectors.connector_outcome import connectors_used as _outcome_connectors_used
 from ..tickets.escalation_notify import notify_ticket_created, team_for_topic
 from ..agents.patterns.ach import (
     _FAREWELL_PHRASES as _ACH_FAREWELL_PHRASES,
@@ -117,7 +117,7 @@ _FAREWELL_PHRASES = (
     | _NYN_FAREWELL_PHRASES
     | _ACH_FAREWELL_PHRASES
 )
-from ..conversational import handle_conversational_turn
+from ..chat.conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
@@ -160,7 +160,7 @@ from ..guardrails.output_checks import OutputGuard, neutralize_untrusted_links
 from ..guardrails.pii import STORE_RAW_PROMPTS, redact_pii_text, user_stated_identifiers
 from ..memory.language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from ..memory import get_memory_service
-from ..model_welfare import is_model_welfare_query
+from ..chat.model_welfare import is_model_welfare_query
 from ..guardrails.premise import FalsePremiseResult, check_abolished_claim, check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
@@ -233,7 +233,7 @@ from ..text_signals import (
     split_sentences,
     tone_hint_for,
 )
-from ..topics import classify_topic, resolve_topic, topic_retrieval_query
+from ..memory.topics import classify_topic, resolve_topic, topic_retrieval_query
 from ..observability.tracing import (
     record_evaluation,
     record_retrieval_metrics,
@@ -244,8 +244,8 @@ from ..observability.tracing import (
     turn_usage_scope,
     usage_summary,
 )
-from ..turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
-from ..verified_resources import resources_for_turn
+from ..chat.turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
+from ..connectors.verified_resources import resources_for_turn
 from ..workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from ..workflows.slots import validate_slot
 
@@ -928,7 +928,7 @@ def _llm_cloud_fallback(
     other request behind them.  An in-flight HTTP call still runs to its own
     timeout; this only stops a *new* hop from starting once time is up.
     """
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return ""
@@ -981,7 +981,7 @@ def _llm_cloud_fallback(
     if _budget_exhausted():
         logger.warning("LLM fallback chain total budget exhausted before Sunbird attempt")
     elif backend == "sunbird" and cloud_models_allowed():
-        from .. import sunbird
+        from ..providers import sunbird
 
         # Sunbird's failover is bounded by the chain's budget, less a reserve for Workers
         # AI, so a slow primary account cannot also spend the fallback's time.
@@ -1120,7 +1120,7 @@ def _cloud_llm_ready() -> bool:
     if backend not in ("sunbird", "workers_ai"):
         return False
     if backend == "sunbird":
-        from .. import sunbird
+        from ..providers import sunbird
 
         if sunbird.is_available():
             return True
@@ -1578,7 +1578,7 @@ def _local_llm_then_cloud(
         if reply and reply.strip():
             circuit.record_success()
             _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
-            from ..production_readiness import is_sovereign_mode
+            from ..security.production_readiness import is_sovereign_mode
 
             finish_reason = gen_meta.get("finish_reason")
             # E.4: When finish_reason is available from vLLM, complete_with_continuation
@@ -1889,7 +1889,7 @@ def _with_connector_outcomes(result: dict[str, Any] | None) -> dict[str, Any] | 
     A record is summarised by the model; "no record", "I need the TIN" and
     "the service could not be asked" are the services' own words, and the
     practice-data notice is attached here rather than hoped for
-    (:mod:`app.connector_outcome`). A turn that made no connector call is
+    (:mod:`app.connectors.connector_outcome`). A turn that made no connector call is
     returned untouched.
     """
     if not result or not result.get("tool_calls"):
@@ -2628,7 +2628,7 @@ def _finish_streamed_turn(
     completed turn is attested, because the others did not finish the pipeline.
     """
     from ..observability.analytics import record_chat_turn
-    from ..turn_pipeline import attest_turn
+    from ..chat.turn_pipeline import attest_turn
 
     result = log_payload.get("result") or {}
     served = {
@@ -4224,7 +4224,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
         return generator_module.translate_text(text, source_lang="en", target_lang=locale)
 
     def _cloud() -> str | None:
-        from .. import sunbird
+        from ..providers import sunbird
 
         return sunbird.translate_from_english(text, locale)
 
@@ -4789,7 +4789,7 @@ def _judge_rescue(
     if not FAQ_JUDGE_ENABLED or not query.strip() or not cloud_models_allowed():
         return []
     try:
-        from .. import sunbird as _sunbird
+        from ..providers import sunbird as _sunbird
         from ..providers import breakers as _breakers
 
         if not _sunbird.is_available():
@@ -4820,7 +4820,7 @@ def _judge_rescue(
         f"{i}. {c['question']} — {str(c.get('answer') or '')[:160]}"
         for i, c in enumerate(candidates, 1)
     )
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return []
@@ -7047,7 +7047,7 @@ class ChatModel:
         if not portal_context and not portal_task_submission and detect_foreign_jurisdiction(router_message or message):
             return None, None
 
-        from .. import portal_copilot as pc_mod
+        from ..connectors import portal_copilot as pc_mod
 
         eff_tenant = tenant_id or "default"
         if (
@@ -9705,7 +9705,7 @@ class ChatModel:
             any(k in text for k in ("generate a prn", "generate prn", "create a prn", "create prn", "issue a prn", "issue prn", "generate my prn", "prn slip for my"))
             and not any(k in text for k in ("guide me to", "workflow", "how to generate", "how do i generate", "steps to generate"))
         ):
-            from ..ura_account_mock import generate_mock_prn, format_prn_voucher_reply
+            from ..connectors.ura_account_mock import generate_mock_prn, format_prn_voucher_reply
             from ..tax.calculator_router import extract_amounts
 
             amts = extract_amounts(message) or extract_amounts(rewritten)
@@ -10005,7 +10005,7 @@ class ChatModel:
                 and re.search(r"\d+[\d,.]*", text)
             )
         ):
-            from ..documents import reconcile_tax_document
+            from ..processing.documents import reconcile_tax_document
             from ..vision.ocr import (
                 extract_tin_numbers, extract_prn_numbers, extract_efris_invoice_numbers,
                 extract_ugx_amounts, extract_dates, extract_reference_numbers, extract_tax_heads
@@ -11787,7 +11787,7 @@ class ChatModel:
                 return crisis
 
             if flags.is_enabled("answer_overrides"):
-                from .. import cms as _cms
+                from ..db import cms as _cms
 
                 override = (
                     _cms.lookup(message)
@@ -12503,7 +12503,7 @@ class ChatModel:
                         force_tool_whitelist = None
 
             # 2. Try hybrid retrieval using rewritten query (or model-welfare architectural context)
-            from ..model_welfare import (
+            from ..chat.model_welfare import (
                 build_welfare_grounding_hits,
                 build_welfare_prompt_guidance,
                 match_welfare_categories,
@@ -13572,7 +13572,7 @@ class ChatModel:
             # Read by resources_for_turn: no form links under a service's record.
             result["connector_lookup"] = True
         if (os.getenv("EVAL_DEBUG") or "").strip().lower() in {"1", "true", "yes"}:
-            from ..production_readiness import is_production
+            from ..security.production_readiness import is_production
 
             if not is_production():
                 gen_meta = generator_module.get_last_generation_meta()
@@ -13653,7 +13653,7 @@ class ChatModel:
         (:py:meth:`record_turn_audit`), so its reply digest is of the text
         the taxpayer received.
         """
-        from ..turn_pipeline import attest_turn
+        from ..chat.turn_pipeline import attest_turn
 
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
@@ -13981,7 +13981,7 @@ class ChatModel:
             }
 
         if flags.is_enabled("answer_overrides"):
-            from .. import cms as _cms
+            from ..db import cms as _cms
 
             override_s = (
                 _cms.lookup(message)
@@ -14575,7 +14575,7 @@ class ChatModel:
                     force_agentic = False
                     force_tool_whitelist = None
 
-        from ..model_welfare import (
+        from ..chat.model_welfare import (
             build_welfare_grounding_hits,
             build_welfare_prompt_guidance,
             match_welfare_categories,

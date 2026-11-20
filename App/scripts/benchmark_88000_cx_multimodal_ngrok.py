@@ -54,8 +54,8 @@ from app.tax.calculator_router import (  # noqa: E402
     format_calc_reply,
     plan_calculation,
 )
-from app.conversational import handle_conversational_turn  # noqa: E402
-from app.documents import diagnose_portal_screenshot  # noqa: E402
+from app.chat.conversational import handle_conversational_turn  # noqa: E402
+from app.processing.documents import diagnose_portal_screenshot  # noqa: E402
 from app.tickets.escalation_policy import (  # noqa: E402
     after_hours_escalation_message,
     after_hours_escalation_notice,
@@ -68,7 +68,7 @@ from app.mcp.tool_rag import ToolRAGSelector  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402
 from app.tickets.officer_handoff import prune_required_details  # noqa: E402
-from app.portal_copilot import (  # noqa: E402
+from app.connectors.portal_copilot import (  # noqa: E402
     PORTAL_TASK_CATALOG,
     analyze_portal_context,
     build_portal_task_card,

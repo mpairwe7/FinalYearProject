@@ -7,13 +7,13 @@ import sqlite3
 import pytest
 
 from app.db import database as db
-from app.cms import lookup, normalize_query, upsert
-from app.notify import dispatch
-from app.reminders import Reminder
+from app.db.cms import lookup, normalize_query, upsert
+from app.notifications.notify import dispatch
+from app.notifications.reminders import Reminder
 from app.tools.ura_account import UraAccountProfileTool, account_api_status
 from app.tools.ura_actions import UraActionProposalTool
-from app.ura_account_mock import MOCK_PROFILES, account_mode, lookup_mock
-from app.document_worker import isolated_enabled, try_isolated
+from app.connectors.ura_account_mock import MOCK_PROFILES, account_mode, lookup_mock
+from app.processing.document_worker import isolated_enabled, try_isolated
 
 
 @pytest.fixture

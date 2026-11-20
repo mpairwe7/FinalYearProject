@@ -105,7 +105,7 @@ class TestChatWsLifecycle(unittest.TestCase):
                 {"result": {"sources": []}, "full_reply": "Hello world!", "elapsed_ms": 12.3},
             )
 
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(
@@ -174,7 +174,7 @@ class TestChatWsLifecycle(unittest.TestCase):
                 {"result": {"sources": []}, "full_reply": "ok", "elapsed_ms": 22.0},
             )
 
-        from app import chat_ws_v2
+        from app.chat import chat_ws_v2
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(

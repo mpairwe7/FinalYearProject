@@ -136,7 +136,7 @@ User Query
 | Preference Boost (`apply_preference_boost`) | Idempotent post-retrieval soft ranking: boosts current FY (`+0.08`) and matched tax head / topic sections (`TOPIC_SECTION_BOOST = +0.05`, word-boundary matched via `TOPIC_SECTION_HINTS`) while soft-demoting sector-specific guides (`SECTOR_GUIDE_DEMOTION = -0.06`, `SECTOR_GUIDE_SOURCE_PATTERNS`) unless the query explicitly names a sector (`_SECTOR_QUERY_RE`). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
-| Docling Document Intelligence (`ingestion/docling_intelligence.py`, `ingestion/pdf_corpus.py`, `documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
+| Docling Document Intelligence (`ingestion/docling_intelligence.py`, `ingestion/pdf_corpus.py`, `processing/documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
 
 ### LLM Generation (`rag/generator.py`)
 
@@ -310,7 +310,7 @@ long as the server keeps the conversations. A call started from the chat opens a
 session carrying the chat's task and a coarse English account of it, only for the
 chat's owner (`receptionist/carryover.py`).
 
-**WebSocket resume** (`chat_ws_v2.py`):
+**WebSocket resume** (`chat/chat_ws_v2.py`):
 - Each completed response has a server-minted response ID. Resume requires an
   unexpired mapping for that exact response, user, tenant, and conversation.
 - Anonymous sockets do not advertise durable resume. Same-socket history remains
@@ -464,10 +464,10 @@ App/backend/app/
 │   ├── flags.py         #   Feature flag registry (91 flags, env-backed, cohort rollout)
 │   └── settings.py      #   API title and version
 │
-├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
+├── memory/topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── guardrails/        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
 ├── linear_text.py       # strip_spans, strip_blocks: one-pass scans for regexes slow on chat text (ADR-0057)
-├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
+├── ingestion/crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── research/web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── research/web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── research/ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
@@ -475,11 +475,11 @@ App/backend/app/
 ├── tax/calculator_router.py # Single-calculator fast path & multi-turn amount carryover
 ├── guardrails/premise.py     # False-premise detector, legitimate statutory modifier allowlist, abolished-tax claims
 ├── speech/speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
-├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
+├── providers/sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── observability/tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
 ├── observability/analytics.py         # Prometheus-compatible metrics middleware
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
-├── pdf_export.py        # Branded PDF conversation/tax summary export
+├── processing/pdf_export.py        # Branded PDF conversation/tax summary export
 ├── quality/evaluation.py        # RAG evaluation harness (8 metrics)
 │
 ├── auth/                # JWT authentication (Phase 14)
@@ -542,7 +542,7 @@ App/backend/app/
 
 When `FLAG_AGENTIC_MODE=true` (the default after the English golden-set
 gate ≥ 0.95), the supervisor classifier (`agents/supervisor.py`) routes
-queries before retrieval. G6 topic persistence (`topics.py`) runs on
+queries before retrieval. G6 topic persistence (`memory/topics.py`) runs on
 every turn: the catalog label is merged into the prompt and anaphoric
 queries are prefixed for retrieval.
 
@@ -833,7 +833,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
 | `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41, ADR-0021: a deterministic 9-trigger check over the question (`research/web_research.py`), failover across Tavily, Brave and SearXNG (`research/web_search_providers.py`), 3-tier source authority, closed-vocabulary queries and the ephemeral document sandbox. Web text stays labelled evidence and never enters `verified_facts`; every check ends in a `status`, and a failed one is disclosed. Market FX (`research/web_fx.py`) is an indicative estimate; a verified Bank of Uganda snapshot takes precedence. Time-sensitive turns bypass the semantic cache. |
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`vectorstore/corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
-| `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42/43 (`ADR-0014`, `ADR-0025`): 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) with `<untrusted_portal_dom_telemetry>` spotlighting, and unified DTS stamp catalog/fees. `ADR-0038`: one approval runs once behind a lease in the shared store (`claim_workflow_session`, lifetime `PORTAL_TASK_STATE_TTL_SECONDS`, default 900) and is in the ledger before the portal is reached; a decision needs a session and `displayed_fields_sha256`; selectors come from the server only and every `dom_actions` list leaves through `harden_dom_actions`. Other `G416`–`G438` fixes are not gated by this flag; see `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` |
+| `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42/43 (`ADR-0014`, `ADR-0025`): 4-tier URA portal task execution (`connectors/portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) with `<untrusted_portal_dom_telemetry>` spotlighting, and unified DTS stamp catalog/fees. `ADR-0038`: one approval runs once behind a lease in the shared store (`claim_workflow_session`, lifetime `PORTAL_TASK_STATE_TTL_SECONDS`, default 900) and is in the ledger before the portal is reached; a decision needs a session and `displayed_fields_sha256`; selectors come from the server only and every `dom_actions` list leaves through `harden_dom_actions`. Other `G416`–`G438` fixes are not gated by this flag; see `App/docs/GAPS_AND_AGENTIC_ROADMAP.md` |
 | `guardrail_strike_friction` (`FLAG_GUARDRAIL_STRIKE_FRICTION`) | on | G464 (`ADR-0029`): a user, session or conversation that trips the input guard `GUARD_STRIKE_THRESHOLD` times (default 5) inside `GUARD_STRIKE_WINDOW_S` (600) is answered with a fixed notice and URA contacts for `GUARD_STRIKE_COOLDOWN_S` (300) without a model call, and a `guardrail_strike_cooldown` security event is recorded (`guardrails/friction.py`). Per replica; the IP rate limit stays in front |
 | `graph_checkpoint_routine` (`FLAG_GRAPH_CHECKPOINT_ROUTINE`) | off | ADR-0030: also persist routine graph transitions (full state: question, history, passages) to `agent_checkpoints`. Off, only a suspended approval, its resume claim and its markers are written. Nothing reads routine rows; turn on for a debugging window only |
 | `semantic_layer` (`FLAG_SEMANTIC_LAYER`) | off | ADR-0033 phase 3 (G507): staff-only `semantic_layer` namespace (`semantic_metric_catalogue`, `semantic_metric_query`, `ura_staff`/`ura_admin` only). Certified aggregate metrics over certified views, never free SQL; SELECT-only guard; read-only, 500 rows, 10 s; groups under 10 suppressed. Production refuses it without https `VAULT_ADDR`, `SEMANTIC_LAYER_VAULT_PATH`, `SEMANTIC_LAYER_DSA_REF`, `SEMANTIC_LAYER_DPIA_REF` and a certified metric. The graph backend is separate: `GRAPH_STORE_BACKEND=neo4j` (G506) needs `neo4j+s://` or `bolt+s://` in production |

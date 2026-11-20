@@ -2834,7 +2834,7 @@ class HybridRetriever:
             return 0.0
 
         from .claim_polarity import polarity_conflicts
-        from ..model_welfare import is_self_reflection_sentence, is_welfare_context
+        from ..chat.model_welfare import is_self_reflection_sentence, is_welfare_context
 
         all_refs = list(contexts or [])
         if verified_facts:

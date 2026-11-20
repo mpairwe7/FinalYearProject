@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from app import portal_copilot as pc
+from app.connectors import portal_copilot as pc
 from app.config.flags import flags
 from app.main import app
 from app.middleware.rate_limiter import limiter

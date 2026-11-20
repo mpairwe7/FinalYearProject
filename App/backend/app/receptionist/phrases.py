@@ -6,7 +6,7 @@ timeout lines, and the confirmation spoken when the call changes language.
 ``brain.py`` and ``clarify.py`` read from it by ``room.state.locale``.
 
 REVIEW STATUS: the Luganda and Swahili strings are drafts. They were written
-from the project's existing, reviewed copy where it existed (``glossary.py``,
+from the project's existing, reviewed copy where it existed (``tax/glossary.py``,
 the ``lib/i18n`` dictionaries, ``text_signals`` courtesy replies) and have
 **not yet been checked by a native speaker**. Do not demo them before that
 review — see ``App/docs/runbooks/voice-receptionist-demo.md``. A missing key in a

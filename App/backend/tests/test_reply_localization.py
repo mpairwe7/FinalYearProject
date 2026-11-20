@@ -45,22 +45,22 @@ class LocalizeReplyTest(unittest.TestCase):
 
     def test_translated_text_replaces_the_english(self) -> None:
         luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
-        with mock.patch("app.sunbird.translate_from_english", return_value=luganda):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value=luganda):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), luganda)
 
     def test_translation_failure_serves_english_rather_than_an_error(self) -> None:
-        with mock.patch("app.sunbird.translate_from_english", side_effect=RuntimeError("boom")):
+        with mock.patch("app.providers.sunbird.translate_from_english", side_effect=RuntimeError("boom")):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_empty_translation_serves_english(self) -> None:
         for bad in (None, "", "   "):
             with self.subTest(returned=repr(bad)):
-                with mock.patch("app.sunbird.translate_from_english", return_value=bad):
+                with mock.patch("app.providers.sunbird.translate_from_english", return_value=bad):
                     self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_collapsed_translation_is_rejected(self) -> None:
         """A one-word MT response must not replace a full answer."""
-        with mock.patch("app.sunbird.translate_from_english", return_value="Yee"):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value="Yee"):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_a_translation_that_loops_serves_english(self) -> None:
@@ -68,10 +68,10 @@ class LocalizeReplyTest(unittest.TestCase):
         english = "Contact URA on 0800 117 000 or 0800 217 000 about VAT at 18%."
         whole = "Tuukirira URA ku 0800 117 000 oba 0800 217 000 ku VAT ebitundu 18 ku buli kikumi."
         looping = "Tuukirira URA ku 0800 117 000 oba 0" + "[" * 16 + "(" * 312 + " ku VAT ebitundu 18 ku buli kikumi."
-        with mock.patch("app.sunbird.translate_from_english", return_value=whole):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value=whole):
             self.assertEqual(pipeline.localize_reply(english, "lg"), whole)  # every other guard passes it
         mt.cache.clear()
-        with mock.patch("app.sunbird.translate_from_english", return_value=looping):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value=looping):
             self.assertEqual(pipeline.localize_reply(english, "lg"), english)
 
     def test_only_a_loop_the_english_lacks_counts(self) -> None:
@@ -82,20 +82,20 @@ class LocalizeReplyTest(unittest.TestCase):
         self.assertFalse(mt.looped("Call 0800 217 000.", "Kuba ku 0800 217 000."))
 
     def test_blank_reply_is_not_sent_for_translation(self) -> None:
-        with mock.patch("app.sunbird.translate_from_english") as translate:
+        with mock.patch("app.providers.sunbird.translate_from_english") as translate:
             self.assertEqual(pipeline.localize_reply("", "lg"), "")
             translate.assert_not_called()
 
     def test_swahili_translation_with_prefix_percentage_survives(self) -> None:
         """'asilimia 18' in Swahili must survive figures_survived check against '18%'."""
         swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia 18 kwa bidhaa."
-        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value=swahili):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "sw"), swahili)
 
     def test_swahili_word_percentage_survives(self) -> None:
         """'asilimia kumi na nane' in Swahili must survive figures_survived check against '18%'."""
         swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia kumi na nane kwa bidhaa."
-        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+        with mock.patch("app.providers.sunbird.translate_from_english", return_value=swahili):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "sw"), swahili)
 
 
@@ -122,7 +122,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             swapped = text.replace("18", "81").replace("150,000,000", "105,000,000")
             return f"Omusolo gwa VAT mu Uganda guli {swapped} ku bintu ebiguzibwa."
 
-        with mock.patch("app.sunbird.translate_from_english", side_effect=_transposing):
+        with mock.patch("app.providers.sunbird.translate_from_english", side_effect=_transposing):
             out = pipeline.localize_reply(self.ENGLISH, "lg")
         self.assertNotEqual(out, self.ENGLISH)
         self.assertIn("18%", out)
@@ -134,7 +134,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
         def _echoing(text: str, locale: str) -> str:
             return f"Omusolo gwa VAT guli {text} ne {text} ku bintu ebiguzibwa."
 
-        with mock.patch("app.sunbird.translate_from_english", side_effect=_echoing):
+        with mock.patch("app.providers.sunbird.translate_from_english", side_effect=_echoing):
             out = pipeline.localize_reply(self.ENGLISH, "lg")
         self.assertNotIn("NMBR", out)
 
@@ -153,7 +153,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
                 return "Omusolo gwa VAT mu Uganda guli ebitundu ku buli kikumi."
             return luganda
 
-        with mock.patch("app.sunbird.translate_from_english", side_effect=_drops_sentinels):
+        with mock.patch("app.providers.sunbird.translate_from_english", side_effect=_drops_sentinels):
             self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), luganda)
 
     def test_the_kill_switch_restores_the_unprotected_path(self):
@@ -165,7 +165,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             return "Ekkomo ly'okwewandiisa VAT liri obukadde 150 buli mwaka."
 
         with mock.patch.object(mt, "MT_PROTECT_FIGURES", False), mock.patch(
-            "app.sunbird.translate_from_english", side_effect=_record
+            "app.providers.sunbird.translate_from_english", side_effect=_record
         ):
             pipeline.localize_reply(self.THRESHOLD, "lg")
         self.assertEqual(len(seen), 1)
@@ -181,7 +181,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             seen.append(text)
             return "Genda mu ofiisi ya URA yonna oba okube essimu."
 
-        with mock.patch("app.sunbird.translate_from_english", side_effect=_record):
+        with mock.patch("app.providers.sunbird.translate_from_english", side_effect=_record):
             pipeline.localize_reply(english, "lg")
         self.assertEqual(seen, [english])
 

@@ -10,4 +10,4 @@ Canonical eval files live in `Data/eval/` (capital D):
 - `coverage_domains.yaml` — domain registry: corpus sources, per-domain floor,
   domain-owner review record
 - `publications_fixture.txt` — offline ingest for the prototype
-- `prototype_seed.json` — sample CMS overrides, inbox, ticket, outbox, thumbs-down (`python -m app.seed_prototype`)
+- `prototype_seed.json` — sample CMS overrides, inbox, ticket, outbox, thumbs-down (`python -m app.db.seed_prototype`)

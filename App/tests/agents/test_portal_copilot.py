@@ -1,4 +1,4 @@
-"""Comprehensive backend integration, security & privacy test suite for Phase 42 (`portal_copilot.py`).
+"""Comprehensive backend integration, security & privacy test suite for Phase 42 (`connectors/portal_copilot.py`).
 
 Exercises all 8 verification gates from `App/docs/plans/ura-portal-copilot-and-tasks-plan.md`:
 1. Tier 1 Autonomous Read & Inline Form Elicitation (`/v1/chat` + `portal_task_submission`)
@@ -17,11 +17,11 @@ from typing import Any
 
 import pytest
 from app.auth.jwt_auth import make_dev_token
-from app.documents import diagnose_portal_screenshot
+from app.processing.documents import diagnose_portal_screenshot
 from app.config.flags import flags
 from app.main import app
 from app.middleware.rate_limiter import limiter
-from app.portal_copilot import clear_portal_task_cache
+from app.connectors.portal_copilot import clear_portal_task_cache
 from app.rag.pipeline import ChatModel
 from fastapi.testclient import TestClient
 
@@ -477,7 +477,7 @@ def test_9_qa_hardening_temporal_ttl_intent_capsule_validators_and_multiturn_mem
 
     from app.db import database as db
     from app.mcp import mrtr
-    from app.portal_copilot import (
+    from app.connectors.portal_copilot import (
         PortalTaskValidationError,
         classify_portal_task,
         evaluate_turn,
@@ -557,7 +557,7 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify October 2026 QA/Auditor hardening: WYSIWYS ASI09 digest, zero-LLM `prepare`, high-value friction, auditor RBAC, and confirm_tokens fail-closed."""
-    from app import confirm_tokens
+    from app.security import confirm_tokens
 
     headers = {"X-Session-ID": "sess-qa-10"}
 
@@ -731,7 +731,7 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     assert "already been executed or declined" in r_prep_locked.json()["detail"]
 
     # 9. Multi-task liability calculation & strict select option validation (QA-07 + CodeRabbit)
-    from app.portal_copilot import (
+    from app.connectors.portal_copilot import (
         classify_portal_task,
         compute_estimated_liability_ugx,
         validate_task_fields,

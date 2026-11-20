@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import sunbird
+from app.providers import sunbird
 
 
 class _Resp:

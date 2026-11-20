@@ -409,7 +409,7 @@ class TestConversationContextUserIsolation:
         assert len(auth_turns) == 0
 
     def test_ws_chat_session_anonymous_resume_rejected(self, seeded):
-        from app.chat_ws_v2 import WsChatSession
+        from app.chat.chat_ws_v2 import WsChatSession
 
         session = WsChatSession(
             session_id="ws-anon",
@@ -422,8 +422,8 @@ class TestConversationContextUserIsolation:
         assert session.history == []
 
     def test_ws_chat_session_owner_resume_accepted(self, seeded, monkeypatch):
-        from app.chat_ws_v2 import WsChatSession
-        import app.chat_ws_v2 as chat_ws_mod
+        from app.chat.chat_ws_v2 import WsChatSession
+        import app.chat.chat_ws_v2 as chat_ws_mod
 
         monkeypatch.setattr(chat_ws_mod, "db", seeded)
         session = WsChatSession(
@@ -443,8 +443,8 @@ class TestConversationContextUserIsolation:
         assert len(session.history) > 0
 
     def test_ws_chat_session_non_owner_resume_rejected(self, seeded, monkeypatch):
-        from app.chat_ws_v2 import WsChatSession
-        import app.chat_ws_v2 as chat_ws_mod
+        from app.chat.chat_ws_v2 import WsChatSession
+        import app.chat.chat_ws_v2 as chat_ws_mod
 
         monkeypatch.setattr(chat_ws_mod, "db", seeded)
         session = WsChatSession(

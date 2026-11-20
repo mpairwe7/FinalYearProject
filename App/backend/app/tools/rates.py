@@ -6,7 +6,7 @@ the statutory basis and sources for that figure.  It never guesses, and
 a rate a given year's law does not define is an error rather than a
 fallback to an adjacent year.
 
-The lookups are additionally gated on :mod:`app.authority`, so a
+The lookups are additionally gated on :mod:`app.security.authority`, so a
 production deployment whose authority manifest has gone stale stops
 quoting rates instead of serving figures nobody can vouch for.
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
-from ..authority import authority_required, get_authority_status
+from ..security.authority import authority_required, get_authority_status
 from ..tax.tables import (
     RateTable,
     RateTableError,

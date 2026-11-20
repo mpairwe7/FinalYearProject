@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 
-from .. import documents
+from ..processing import documents
 from ..observability.analytics import metrics
 from ..auth import AuthContext, optional_user
 from ..middleware.rate_limiter import DOCUMENT_RATE_LIMIT, limiter
@@ -183,7 +183,7 @@ def document_report(
     else:
         # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
         # on a runtime without fpdf2.
-        from ..pdf_export import generate_document_report_pdf
+        from ..processing.pdf_export import generate_document_report_pdf
 
         started = time.perf_counter()
         pdf_bytes = generate_document_report_pdf(record.to_report_payload())

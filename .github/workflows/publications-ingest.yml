@@ -36,5 +36,5 @@ jobs:
             echo "::warning::URA_PUBLICATIONS_URL is unset, so this run checked nothing."
             exit 0
           fi
-          python -m app.publications
+          python -m app.ingestion.publications
           echo "Re-index remains manual: python -m app.vectorstore.index_lifecycle --rebuild"
