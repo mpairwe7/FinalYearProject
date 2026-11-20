@@ -7406,9 +7406,9 @@ class ChatModel:
             candidates = []
             asked = _plain_clearance_documents_question(query)
             if asked:
-                # The rows that answer it, the answer language first. The retrieval query can be
-                # an English rendering of a Luganda or Kiswahili message, so the turn's locale
-                # decides when it has a row of its own.
+                # The rows that answer it, the answer language first. A caller tries the retrieval
+                # query and then the binding query, which for a Luganda or Kiswahili turn is the
+                # English form the routers read, so the turn's locale decides when it has a row.
                 asked = _DOCUMENTS_WORD_BY_LOCALE.get((locale or "").lower(), asked)
                 for tag in ("documents_point_of_entry", "customs_valuation", "advance_tax_transport"):
                     for entry in self._faq_index.get(tag, []):
