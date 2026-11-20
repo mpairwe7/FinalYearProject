@@ -59,7 +59,7 @@ def test_seed_loads_overrides_reminders_and_ticket(mem_db) -> None:
 
 
 def test_the_quality_audit_demo_fills_every_tab_and_needs_review(mem_db) -> None:
-    from app import audit_reviews, quality_audit, service_ratings
+    from app.quality import audit_reviews, quality_audit, service_ratings
 
     seed()
     conv = quality_audit.ai_chat_timeline("proto-conv-went-wrong")

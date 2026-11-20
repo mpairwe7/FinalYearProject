@@ -71,7 +71,7 @@ omit = [
     "*/backend/app/main.py",
     "*/backend/app/rag/generator.py",
     "*/backend/app/ingestion/indexer.py",
-    "*/backend/app/evaluation.py",
+    "*/backend/app/quality/evaluation.py",
     "*/backend/app/rag/cache.py",
     "*/backend/app/rag/corrective_rag.py",
     "*/backend/app/speech/speech_service.py",

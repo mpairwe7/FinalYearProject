@@ -10,7 +10,7 @@ import pytest
 
 from app.db import database as db
 from app.research import ephemeral_pdf_sandbox as sbx
-from app import scenario_planner as sp
+from app.tax import scenario_planner as sp
 from app.research import web_fx
 from app.research import web_research as wr
 from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id

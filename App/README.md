@@ -47,8 +47,8 @@ App/
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
-│   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
-│   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
+│   │   ├── tax/scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
+│   │   ├── tax/calculator_router.py # Single-calculator fast path & multi-turn figure carryover
 │   │   ├── research/web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │   ├── research/ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
@@ -1395,7 +1395,7 @@ empty.
 
 **Phase 10 — Continuous evaluation (Ragas-compatible)**
 
-- New `backend/app/evaluation.py` — `run_evaluation()` collects
+- New `backend/app/quality/evaluation.py` — `run_evaluation()` collects
   samples via the existing `db.export_review_feedback()` stream and
   computes faithfulness / answer_relevancy / context_precision.
   Uses the real Ragas library when `ragas` + `datasets` are
@@ -1404,7 +1404,7 @@ empty.
   existing `INDEX_API_KEY` Bearer token.  Writes each metric into
   the in-process Prometheus store (`ura_eval_metric{name=...}`) so
   Grafana can chart evaluation scores alongside request metrics.
-- CLI entry point — `python -m App.backend.app.evaluation`.  Emits
+- CLI entry point — `python -m App.backend.app.quality.evaluation`.  Emits
   JSON + a Prometheus text-exposition file and exits non-zero on
   regression so CI jobs can gate on it.
 

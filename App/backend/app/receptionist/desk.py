@@ -999,7 +999,7 @@ async def wrapup(
 
     satisfaction_recorded = False
     if satisfaction is not None:
-        from .. import service_ratings
+        from ..quality import service_ratings
 
         status, score = satisfaction
         try:

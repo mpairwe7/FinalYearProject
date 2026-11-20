@@ -1187,7 +1187,7 @@ def init_module_schemas() -> None:
     from their ``init_db``.
     """
     try:
-        from .. import audit_reviews, service_ratings
+        from ..quality import audit_reviews, service_ratings
         from ..tickets import officer_chat
 
         officer_chat.init_schema()
@@ -1202,14 +1202,14 @@ def module_retention(now: float | None = None) -> dict[str, int]:
     deleted: dict[str, int] = {}
     try:
         from ..tickets import officer_chat
-        from .. import service_ratings
+        from ..quality import service_ratings
 
         deleted["ticket_messages"] = officer_chat.purge_orphans()
         deleted["service_ratings"] = service_ratings.purge_expired(_FEEDBACK_TTL_DAYS, now=now)
     except Exception:
         logger.exception("TTL cleanup failed for officer chat threads / service ratings")
     try:
-        from .. import audit_reviews
+        from ..quality import audit_reviews
 
         # After the ratings and feedback purges: a decision outlives no item.
         deleted["audit_reviews"] = audit_reviews.purge(now=now)
@@ -1455,7 +1455,7 @@ def get_journey_funnel(days: int = 30, abandon_after_s: float = 86400.0) -> dict
     restart. Aggregated in SQL, so the result is bounded by journeys x
     statuses x steps however many sessions exist. A session still ``active``
     whose last update is older than *abandon_after_s* is marked ``stale``
-    (abandoned). ``app.journey_analytics.build_journey_funnel`` turns this
+    (abandoned). ``app.quality.journey_analytics.build_journey_funnel`` turns this
     into the per-journey view.
     """
     conn = _get_connection()
@@ -4661,7 +4661,7 @@ def export_user_data(
     if external_id:
         try:
             from ..tickets import officer_chat
-            from .. import service_ratings
+            from ..quality import service_ratings
 
             # By the subject's id, not the ``tickets`` above: those are read
             # only while the subject still has logged conversations.
@@ -4737,7 +4737,7 @@ def delete_user_cascade(
         # reaches tickets raised before user_id was stamped on the row.
         try:
             from ..tickets import officer_chat
-            from .. import service_ratings
+            from ..quality import service_ratings
 
             ticket_ids = [r["id"] for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
             counts["ticket_messages"] = officer_chat.delete_for_tickets(ticket_ids)

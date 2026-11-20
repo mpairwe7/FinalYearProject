@@ -30,7 +30,7 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-from .db import database as db
+from ..db import database as db
 
 #: The most rated answers one period reads. A period beyond it is reported as
 #: truncated (``truncated: true``) rather than summarised from a silent sample.

@@ -52,7 +52,8 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` || yes |
 | 3 | `research/` | `web_research`, `web_search_providers`, `web_fx`, `egress`, `doh_resolver`, `ephemeral_pdf_sandbox` | yes |
 | 4 | `tickets/` | `escalation_policy`, `escalation_notify`, `officer_handoff`, `officer_chat`, `officer_hours`, `ticket_events`, `ticket_ws`, `hitl_routing` | yes |
-| later | `quality/`, and `tax/` for the calculator modules | the service-quality modules; `calculator_router` and `scenario_planner` | no |
+| 5 | `quality/` | `quality_audit`, `service_ratings`, `audit_reviews`, `evaluation`, `discrepancy_detector`, `journey_analytics` | yes |
+| 6 | `tax/` (it existed) | `calculator_router`, `scenario_planner` | yes |
 
 **What stays flat, and why.**
 
@@ -63,6 +64,10 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
   file, and the next image build re-embeds the corpus for 35 to 40 minutes.
 - `number_words`. Speech uses it, and so do the calculator, memory, entailment
   and the MCP validators.
+- The rest. The chat helpers (`chat_ws_v2`, `turn_pipeline`, `conversational`
+  and others), the connector and portal modules, the two offline modules and the
+  operational gates were sized and left: each group is two or three files, or
+  has no one job a package name would state.
 - `documents.py` and the modules beside it. A package cannot take the name of a
   module that still exists, so moving them means renaming `documents`, and the
   codemod would then rename it in 24 importing files.
@@ -81,7 +86,9 @@ so merging them would change how a reported number is reproduced.
 ## Consequences
 
 - Speech and voice code is found in `app/speech/`, live web research in
-  `app/research/`, and handoff to officers in `app/tickets/`. Imports read `from .speech import speech_service`; a
+  `app/research/`, handoff to officers in `app/tickets/`, service quality in
+  `app/quality/`, and the calculators beside the rate tables in `app/tax/`.
+  Forty-seven modules stay flat, down from 79. Imports read `from .speech import speech_service`; a
   caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new

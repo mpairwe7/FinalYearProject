@@ -7,7 +7,7 @@ from pathlib import Path
 from app.mcp import get_client, reset_client
 from app.mcp.tool_rag import ToolRAGSelector
 from app.memory.resolution_ledger import _WORKFLOW_DOMAINS, workflow_domain
-from app.scenario_planner import build_verified_facts, plan_tools
+from app.tax.scenario_planner import build_verified_facts, plan_tools
 from app.tools import ToolRegistry
 from app.tools.mda_interdependence import MDA_SERVICE_CATALOG
 from app.workflows.loader import load_workflow
@@ -259,7 +259,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     import os
     import time
 
-    from app.calculator_router import plan_calculation
+    from app.tax.calculator_router import plan_calculation
     from app.vectorstore.corpus_sync import _NON_REPLACING_FAMILIES
     from app.research.web_research import infer_doc_family
 
@@ -496,7 +496,7 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
     assert s3.is_complete is True
     # 8. Form numbers (Form DT-10307, Form DT-3008, HS code 8703) must NOT be misparsed as UGX amounts,
     #    and custom instalment_months ("10 monthly instalments") must be respected.
-    from app.calculator_router import extract_amounts
+    from app.tax.calculator_router import extract_amounts
 
     assert extract_amounts("Under Form DT-10307, I have UGX 10,000,000 in undeclared tax")[0][0] == 10_000_000.0
     assert extract_amounts("Using Form DT-3008 for my UGX 250,000 passport PRN refund")[0][0] == 250_000.0

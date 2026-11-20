@@ -49,7 +49,7 @@ os.environ.setdefault("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
 from app import mt  # noqa: E402
 from app.speech import orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
-from app.calculator_router import (  # noqa: E402
+from app.tax.calculator_router import (  # noqa: E402
     extract_amounts,
     format_calc_reply,
     plan_calculation,

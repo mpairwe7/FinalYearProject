@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .tax.tables import RateTable
+    from .tables import RateTable
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     section_spans += [m.span("tin") for pattern in _LABELLED_TIN_RES for m in pattern.finditer(text or "")]
 
     # 1. Vernacular scale-prefixed amounts (including multi-scale compounds like "milioni 3 na elfu 500", "obukadde busatu n'emitwalo ataano")
-    from .number_words import _SCALE_NOUN_RE, parse_vernacular_scale_amount_at
+    from ..number_words import _SCALE_NOUN_RE, parse_vernacular_scale_amount_at
 
     for m in _SCALE_NOUN_RE.finditer(text or ""):
         if any(s <= m.start() and m.end() <= e for s, e in seen_spans):
@@ -579,7 +579,7 @@ def slot_question(slot: str) -> str:
 
 def _redis_store() -> Any:
     try:
-        from .mcp.client import _shared_store
+        from ..mcp.client import _shared_store
     except Exception:
         return None
     try:
@@ -650,7 +650,7 @@ def clear_calculation(conversation_id: str) -> None:
     with _calc_lock:
         _calc_memory.pop(conversation_id, None)
     try:
-        from .memory.case_facts import clear_case_facts
+        from ..memory.case_facts import clear_case_facts
 
         clear_case_facts(conversation_id)
     except Exception:
@@ -886,7 +886,7 @@ def prefill_plan_from_case_facts(plan: CalcPlan, facts: Any) -> CalcPlan:
                 missing = [m for m in missing if m != "monthly_gross"]
                 assumptions.append(f"monthly gross salary of UGX {float(sal.amount):,.0f} from conversation context")
             else:
-                from .tools import ToolRegistry
+                from ..tools import ToolRegistry
 
                 fx_args: dict[str, Any] = {"amount": float(sal.amount), "currency": sal.currency}
                 if getattr(facts, "exchange_rate_ugx", None) is not None:
@@ -908,7 +908,7 @@ def prefill_plan_from_case_facts(plan: CalcPlan, facts: Any) -> CalcPlan:
         claim = getattr(facts, "residency_claim", None)
 
         if any(x is not None for x in (days_in_ug, perm_home, gov_abroad, avg_days)):
-            from .tools import ToolRegistry
+            from ..tools import ToolRegistry
 
             res_out = ToolRegistry.call(
                 "determine_residency",
@@ -1352,7 +1352,7 @@ def _unverified_note(table: RateTable, keys: list[str], *, main: str = "") -> st
 
 def _named_unverified_caveat(keys: list[str]) -> str:
     """The caveat naming each unconfirmed figure a reply uses."""
-    from .tools.rates import display_name
+    from ..tools.rates import display_name
 
     return ("_These figures have not been confirmed against a gazetted schedule: "
             + "; ".join(display_name(k) for k in keys)
@@ -1378,7 +1378,7 @@ def reply_has_unconfirmed_figures(reply: str) -> bool:
 
 
 def _after_latest_table(fy: str) -> bool:
-    from .tax import tables
+    from . import tables
 
     try:
         return fy == tables.latest_fiscal_year() and tables.coverage() == "after_latest"

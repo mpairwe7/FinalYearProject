@@ -176,7 +176,7 @@ class TestOfficerActions(unittest.IsolatedAsyncioTestCase):
     # --- The caller's satisfaction, recorded by the officer at wrap-up ----------
 
     def _satisfaction(self, call_id: str):
-        from app import service_ratings
+        from app.quality import service_ratings
 
         return service_ratings.find("call_officer_csat", call_id=call_id)
 

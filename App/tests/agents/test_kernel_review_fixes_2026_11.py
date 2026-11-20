@@ -219,7 +219,7 @@ def test_the_graph_binds_kernel_tools_only_from_what_the_question_states(tool, q
 
 
 def test_an_unverified_figure_keeps_its_warning_in_lookups_and_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import calculator_router
+    from app.tax import calculator_router
     from app.tools import ToolRegistry
     from app.workflows import registry
 
@@ -610,7 +610,7 @@ def _rate_model():
 
 
 def test_a_question_naming_a_year_is_answered_from_that_years_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
     from app.tax import tables
 
     reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="vat_registration_threshold_annual"),
@@ -625,7 +625,7 @@ def test_a_question_naming_a_year_is_answered_from_that_years_table(monkeypatch:
 
 
 def test_a_named_year_gets_no_rollover_caveat(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
     from app.tax import tables
 
     monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
@@ -639,7 +639,7 @@ def test_a_named_year_gets_no_rollover_caveat(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_no_literal_rate_stands_in_for_a_missing_entry() -> None:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
     from app.tax import tables
 
     reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="commercial_import_withholding_tax"), tables.get_table("FY2025-26"))
@@ -905,7 +905,7 @@ def _with(table, **changes):
 
 
 def test_summaries_and_aliases_name_unverified_figures() -> None:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
     from app.tax import tables
 
     fy27 = tables.get_table("FY2026-27")

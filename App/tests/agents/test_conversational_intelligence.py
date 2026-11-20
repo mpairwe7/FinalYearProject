@@ -346,7 +346,7 @@ class TestConversationalIntelligenceEngine:
         assert coerced_bantu["rate"] == 0.18
 
         # 6. TIN/PRN/BRN identifier spans excluded from UGX amount extraction & ChatResponse.connectors_used
-        from app.calculator_router import extract_amounts
+        from app.tax.calculator_router import extract_amounts
         from app.connector_intent import detect_connector_intent, missing_arguments
         from app.api.models import ChatResponse
         from app.speech.speech_normalization import _format_ugx_amount
@@ -387,7 +387,7 @@ class TestConversationalIntelligenceEngine:
         assert detect_crisis("I do not want to die") is False
         assert detect_crisis("Sinjagala kufa") is False
         assert detect_crisis("Sitaki kufa") is False
-        from app.calculator_router import plan_rate_lookup
+        from app.tax.calculator_router import plan_rate_lookup
 
         paye_rate_plan = plan_rate_lookup("How is PAYE tax calculated?")
         assert paye_rate_plan is not None and paye_rate_plan.summary == "paye"

@@ -341,7 +341,7 @@ def _bind_kernel_tool(tool_name: str, query: str, original: str) -> dict[str, ob
     a penalty needs one cue, exactly one amount and, for the time-dependent rules,
     a stated number of months.
     """
-    from ...calculator_router import extract_amounts, plan_rate_lookup
+    from ...tax.calculator_router import extract_amounts, plan_rate_lookup
     from ...kernel import functions
 
     texts = [q for q in (query, original) if q]
@@ -412,7 +412,7 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
 
     # 2. Structured calculation parameter extraction
     try:
-        from ...calculator_router import plan_calculation
+        from ...tax.calculator_router import plan_calculation
 
         calc_plan = plan_calculation(query)
         if (calc_plan is None or calc_plan.missing) and state.query and state.query != query:
@@ -428,7 +428,7 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     # 3. Structured rate lookup parameter extraction
     if tool_name == "lookup_rate":
         try:
-            from ...calculator_router import plan_rate_lookup
+            from ...tax.calculator_router import plan_rate_lookup
 
             rate_plan = plan_rate_lookup(query)
             if (rate_plan is None or not rate_plan.tax_type) and state.query and state.query != query:
@@ -455,7 +455,7 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
         "calculate_presumptive_tax",
     ):
         try:
-            from ...calculator_router import extract_amounts
+            from ...tax.calculator_router import extract_amounts
 
             # Only an unambiguous figure binds. The first number in the question
             # was once taken, so "In 2026, VAT on 500,000" computed VAT on 2026.

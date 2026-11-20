@@ -11,7 +11,7 @@ import pytest
 
 from app.db import database as db
 from app.db import postgres as pg
-from app.calculator_router import _SCENARIO_PLANNER_BYPASS_RE
+from app.tax.calculator_router import _SCENARIO_PLANNER_BYPASS_RE
 from app.config.flags import _REGISTRY, flags
 
 

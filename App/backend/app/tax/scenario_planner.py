@@ -39,8 +39,8 @@ from .calculator_router import (
     has_money_amount,
     plan_calculation,
 )
-from .memory.case_facts import CaseFacts, extract_case_facts
-from .guardrails.premise import check_fact_contradictions
+from ..memory.case_facts import CaseFacts, extract_case_facts
+from ..guardrails.premise import check_fact_contradictions
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def plan_digest(specs: list[ToolCallSpec]) -> str:
 
 def _default_mcp_caller(tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
     """Execute *tool_name* through the in-process MCP client (`get_client().call_tool`)."""
-    from .mcp import get_client
+    from ..mcp import get_client
 
     call = get_client().call_tool(tool_name, dict(params), user_role="public")
     if call and isinstance(call.result, dict):
@@ -209,7 +209,7 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         return []
 
     # 1. Foreign currency conversion for salary if not UGX
-    from .config.flags import flags
+    from ..config.flags import flags
 
     live_fx_enabled = flags.is_enabled("live_web_research")
     sal = facts.monthly_salary
@@ -1155,7 +1155,7 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
 
 def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpec]:
     """Plan convert_currency for any non-UGX monetary amount in *facts.amounts*."""
-    from .config.flags import flags
+    from ..config.flags import flags
 
     live_fx_enabled = flags.is_enabled("live_web_research")
     specs: list[ToolCallSpec] = []
@@ -1257,7 +1257,7 @@ _SCENARIO_EXCLUSIVE_TOOLS: frozenset[str] = frozenset(
 def should_defer_to_scenario_planner(question: str, facts: CaseFacts | None = None) -> bool:
     """Return True if *question* triggers multi-tool or specialized statutory/MDA planner rules (`MOD-GAP-02`).
 
-    Used by ``calculator_router.py`` so single-calculator / single-rate fast paths
+    Used by ``tax/calculator_router.py`` so single-calculator / single-rate fast paths
     never hijack multi-tool, Cross-MDA, Voluntary Disclosure, or EFRIS 5% refund queries.
     """
     text = (question or "").strip()
@@ -1286,8 +1286,8 @@ def build_verified_facts(
     it left a block ending "present these exact computed figures" with the PAYE
     line simply absent, and the model filled that silence from memory.
     """
-    from .agents.loop_control import Admission, ToolCallBudget
-    from .observability.tracing import trace_plan
+    from ..agents.loop_control import Admission, ToolCallBudget
+    from ..observability.tracing import trace_plan
 
     text = (question or "").strip()
     if not text:
@@ -1340,7 +1340,7 @@ def build_verified_facts(
             if label not in run.not_computed:
                 run.not_computed.append(label)
         try:
-            from .observability.analytics import metrics
+            from ..observability.analytics import metrics
 
             metrics.inc("plan_steps_total", labels={"outcome": outcome})
         except Exception:  # noqa: BLE001 - telemetry must never fail a turn
@@ -1391,8 +1391,8 @@ def build_verified_facts(
             bullet_lines.append(line)
             try:
                 from decimal import Decimal
-                from .tax.money import apply_bands
-                from .tax.tables import get_table
+                from .money import apply_bands
+                from .tables import get_table
 
                 tbl = get_table()
                 for b_label, b_key in (("Resident", "paye_bands_resident"), ("Non-resident", "paye_bands_non_resident")):
@@ -1542,8 +1542,8 @@ def build_verified_facts(
                     _add_needed(f"exchange rate ({salary_currency} to UGX) on payment date")
                 try:
                     from decimal import Decimal
-                    from .tax.money import apply_bands
-                    from .tax.tables import get_table
+                    from .money import apply_bands
+                    from .tables import get_table
 
                     tbl = get_table()
                     res_b = tbl["paye_bands_resident"]

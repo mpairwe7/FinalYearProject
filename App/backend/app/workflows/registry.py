@@ -330,7 +330,7 @@ def resolve_workflow_side_question(user_input: str) -> str:
     if not q:
         return ""
     try:
-        from ..calculator_router import plan_rate_lookup
+        from ..tax.calculator_router import plan_rate_lookup
         from ..mcp import get_client
 
         rate_plan = plan_rate_lookup(q)
@@ -399,7 +399,7 @@ def delegate_workflow_slot_calculation(
     if not flags.is_enabled("workflow_specialist_bridge"):
         return None, None
     try:
-        from ..calculator_router import extract_amounts, plan_calculation
+        from ..tax.calculator_router import extract_amounts, plan_calculation
         from ..mcp import get_client
 
         target_slot = (slot_name or "").strip().lower()

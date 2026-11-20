@@ -647,7 +647,7 @@ retrieved text is read, so nothing on a web page can add a step.
 | Stage | Module | What it decides |
 | --- | --- | --- |
 | Route | `agents/supervisor.py` | Escalate, specialist, tools or retrieval. The route binds REST and SSE alike. |
-| Tool plan | `scenario_planner.py` | Which calculators run. Once per turn, under `ToolCallBudget` and a deadline. |
+| Tool plan | `tax/scenario_planner.py` | Which calculators run. Once per turn, under `ToolCallBudget` and a deadline. |
 | Live check | `research/web_research.py` | Whether the answer needs the present. Nine triggers over the question and retrieval. |
 | Search | `research/web_search_providers.py` | Tavily, Brave, SearXNG with failover. Closed vocabulary only. |
 

@@ -12,7 +12,7 @@ import pytest
 from app.research import egress, web_fx
 from app.config import flags as flags_mod
 from app.memory.case_facts import extract_case_facts
-from app.scenario_planner import build_verified_facts, plan_tools
+from app.tax.scenario_planner import build_verified_facts, plan_tools
 from app.tools import ToolRegistry
 
 

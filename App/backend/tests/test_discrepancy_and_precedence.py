@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
-from app.discrepancy_detector import (
+from app.quality.discrepancy_detector import (
     detect_discrepancy,
     format_discrepancy_acknowledgement,
 )

@@ -30,7 +30,7 @@ import uuid
 from typing import Any
 
 from ..db import database as db
-from .. import service_ratings
+from ..quality import service_ratings
 
 #: Who can write a message in the thread.
 SENDERS: tuple[str, ...] = ("taxpayer", "officer", "system")

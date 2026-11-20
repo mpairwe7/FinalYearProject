@@ -100,7 +100,7 @@ def test_two_floors_for_one_efris_penalty_fail_the_kernel() -> None:
 
 
 def _render(key: str, fy: str) -> str:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
 
     reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type=key), tables.get_table(fy))
     return reply
@@ -134,7 +134,7 @@ def test_templates_state_the_years_figures(key: str, fy: str, present: list[str]
 
 
 def test_no_template_for_a_table_figure_writes_its_own_amount() -> None:
-    src = (ROOT / "App/backend/app/calculator_router.py").read_text(encoding="utf-8")
+    src = (ROOT / "App/backend/app/tax/calculator_router.py").read_text(encoding="utf-8")
     keys = set(TABLES["FY2025-26"]["rates"]) | set(TABLES["FY2026-27"]["rates"])
     found = []
     for node in ast.walk(ast.parse(src)):

@@ -32,7 +32,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from ..calculator_router import (
+from ..tax.calculator_router import (
     _CALC_VERB_RE,
     _LEGAL_INQUIRY_RE,
     INTENT_TOOLS,

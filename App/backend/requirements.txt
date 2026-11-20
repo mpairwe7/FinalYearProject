@@ -16,7 +16,7 @@ redis>=5.0.0
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.3.1
 
-# Continuous evaluation — the harness in App/backend/app/evaluation.py
+# Continuous evaluation — the harness in App/backend/app/quality/evaluation.py
 # uses these when installed and falls back to heuristic metrics otherwise.
 # They are intentionally NOT required for the core API to run.
 # ragas>=0.2.0
