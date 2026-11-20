@@ -1119,7 +1119,7 @@ def _tool_schema_tokens(
     """
     if not tools:
         return 0
-    from ..tool_budget import TOOLS_BLOCK_OVERHEAD_TOKENS  # noqa: PLC0415
+    from .tool_budget import TOOLS_BLOCK_OVERHEAD_TOKENS  # noqa: PLC0415
 
     blob = "\n".join(_json.dumps(tool, ensure_ascii=False) for tool in tools)
     return _count_text_tokens(blob, base_url=base_url, model=model) + TOOLS_BLOCK_OVERHEAD_TOKENS
@@ -2368,7 +2368,7 @@ def translate_text(
     # exemplars in a language this file cannot verify would be worse than
     # having none. Pairs without an exemplar simply fall back to the
     # instruction, which is where every pair was before this.
-    from ..glossary import get_translation_glossary_hints
+    from ..tax.glossary import get_translation_glossary_hints
 
     shots = _MT_FEWSHOT.get((source_lang, target_lang))
     example = ""
@@ -3076,7 +3076,7 @@ def _fit_tools_to_window(
     """
     if not tool_specs or LLM_BACKEND != "vllm":
         return tool_specs
-    from ..tool_budget import fit_tool_specs, tool_names  # noqa: PLC0415
+    from .tool_budget import fit_tool_specs, tool_names  # noqa: PLC0415
 
     served = _call_served_context_window(base_url)
     window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
@@ -3197,8 +3197,8 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
 
 
     # Import here to avoid a circular import (tools -> retriever -> ...)
-    from ..connector_intent import missing_arguments  # noqa: PLC0415
-    from ..connector_outcome import (  # noqa: PLC0415
+    from ..connectors.connector_intent import missing_arguments  # noqa: PLC0415
+    from ..connectors.connector_outcome import (  # noqa: PLC0415
         FOUND,
         REPORTED_SEPARATELY,
         argument_label,

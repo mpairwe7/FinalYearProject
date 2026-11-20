@@ -68,7 +68,7 @@ from app.mcp.tool_rag import ToolRAGSelector  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402
 from app.tickets.officer_handoff import prune_required_details  # noqa: E402
-from app.portal_copilot import (  # noqa: E402
+from app.connectors.portal_copilot import (  # noqa: E402
     PORTAL_TASK_CATALOG,
     analyze_portal_context,
     build_portal_task_card,

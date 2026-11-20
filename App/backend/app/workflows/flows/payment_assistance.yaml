@@ -74,7 +74,7 @@ steps:
       Never share your password, PIN, one-time code, or full card details in chat.
     slot: ""
     validator: text
-    # Ids in app/verified_resources.py — every link there was checked live.
+    # Ids in app/connectors/verified_resources.py — every link there was checked live.
     portal_action: make_payment
     resources:
       - payment_status

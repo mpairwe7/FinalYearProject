@@ -70,7 +70,7 @@ class ReceptionistLexicon:
 
         # 3. Statutory glossary terms
         try:
-            from ..glossary import URA_STATUTORY_GLOSSARY
+            from ..tax.glossary import URA_STATUTORY_GLOSSARY
 
             for term in URA_STATUTORY_GLOSSARY:
                 term_clean = term.lower().strip()

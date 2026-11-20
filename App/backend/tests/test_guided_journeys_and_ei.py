@@ -37,7 +37,7 @@ from app.chat.turn_guidance import (
     guided_mode_action,
     turns_from_history,
 )
-from app.verified_resources import is_authoritative_ura_url
+from app.connectors.verified_resources import is_authoritative_ura_url
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry, WorkflowSession, compute_workflow_progress
 

@@ -1,4 +1,4 @@
-"""Tool schemas must fit the served context window (``app.tool_budget``).
+"""Tool schemas must fit the served context window (``app.rag.tool_budget``).
 
 The failure this guards: a turn that selected a connector carried the whole
 local tool registry, ~7,100 tokens of schemas against a 4,096-token window,
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from app.tool_budget import (
+from app.rag.tool_budget import (
     SLIM_DESCRIPTION_CHARS,
     TOOLS_BLOCK_OVERHEAD_TOKENS,
     fit_tool_specs,

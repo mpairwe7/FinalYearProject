@@ -1730,7 +1730,7 @@ def diagnose_portal_screenshot(
         portal_category = "e_services"
 
     # 2. Identify issues & error states (including the 8 URA statutory error families from portal_copilot)
-    from ..portal_copilot import classify_portal_task, diagnose_ura_error, extract_task_entities
+    from ..connectors.portal_copilot import classify_portal_task, diagnose_ura_error, extract_task_entities
 
     err_diag = diagnose_ura_error(text)
     issues_detected: list[str] = []

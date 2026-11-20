@@ -56,7 +56,7 @@ from app.tax.calculator_router import (  # noqa: E402
     format_calc_reply,
     plan_calculation,
 )
-from app.connector_intent import detect_connector_intent, missing_arguments  # noqa: E402
+from app.connectors.connector_intent import detect_connector_intent, missing_arguments  # noqa: E402
 from app.chat.conversational import handle_conversational_turn  # noqa: E402
 from app.processing.documents import diagnose_portal_screenshot  # noqa: E402
 from app.tickets.escalation_policy import (  # noqa: E402
@@ -75,7 +75,7 @@ from app.mcp.validation import (  # noqa: E402
 from app.memory.resolution_ledger import DOMAIN_OBJECTIVES, objective_for  # noqa: E402
 from app.number_words import ach_words, decimal_words, nyn_words  # noqa: E402
 from app.tickets.officer_handoff import prune_required_details  # noqa: E402
-from app.portal_copilot import (  # noqa: E402
+from app.connectors.portal_copilot import (  # noqa: E402
     PORTAL_TASK_CATALOG,
     analyze_portal_context,
     build_portal_task_card,

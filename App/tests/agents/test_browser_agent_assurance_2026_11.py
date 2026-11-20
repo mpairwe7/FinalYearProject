@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 from app.db import database as db
-from app import portal_copilot as pc
+from app.connectors import portal_copilot as pc
 from app.audit.ledger import get_ledger, reset_ledger
 from app.config.flags import flags
 from app.main import app

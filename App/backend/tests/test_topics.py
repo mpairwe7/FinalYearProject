@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.topics import (
+from app.memory.topics import (
     classify_topic,
     is_followup,
     is_topic_reset,

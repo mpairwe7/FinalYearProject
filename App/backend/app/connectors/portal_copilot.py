@@ -27,10 +27,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .db import database as db
-from .mcp import mrtr
-from .tools import ToolRegistry
-from .tools.portal_navigator_data import (
+from ..db import database as db
+from ..mcp import mrtr
+from ..tools import ToolRegistry
+from ..tools.portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
     export_companion_manifest,
     get_portal_dom_recipe,
@@ -1272,10 +1272,10 @@ def _dom_text(value: Any, max_len: int) -> str:
     somewhere else does not get that address passed on to the taxpayer or to
     whatever runs the card.
     """
-    from .guardrails.fences import fence_spotlight_body
-    from .guardrails.input_checks import scan_retrieved_text
-    from .guardrails.output_checks import neutralize_untrusted_links
-    from .vision.ocr import strip_hidden_control_and_bidi
+    from ..guardrails.fences import fence_spotlight_body
+    from ..guardrails.input_checks import scan_retrieved_text
+    from ..guardrails.output_checks import neutralize_untrusted_links
+    from ..vision.ocr import strip_hidden_control_and_bidi
 
     raw = strip_hidden_control_and_bidi(str(value or ""))[:max_len]
     cleaned, _ = scan_retrieved_text(raw)
@@ -1936,7 +1936,7 @@ def _date_error(value: str, *, must_be_past: bool) -> str:
         return "must be a real date written as YYYY-MM-DD."
     if parsed.year < 1900:
         return "must be 1900 or later."
-    from .tax.tables import kampala_today
+    from ..tax.tables import kampala_today
 
     # Kampala's date: the server's runs a day behind from 00:00 to 03:00 EAT.
     if must_be_past and parsed >= kampala_today():
@@ -2106,7 +2106,7 @@ def linked_account_tin(*, session_id: str | None, user_id: str | None, tenant_id
     if not user_id or not session_id:
         return ""
     try:
-        from .mcp.connector_accounts import get_all_linked_accounts
+        from ..mcp.connector_accounts import get_all_linked_accounts
 
         owner = db.conversation_state_key(session_id, user_id=user_id, tenant_id=tenant_id or "default")
         linked = get_all_linked_accounts(owner)
@@ -2183,9 +2183,9 @@ def _ensure_connector_tools_registered() -> None:
         return
     if ToolRegistry.get("payment_generate_prn") is None:
         try:
-            from .tools import plugins as _plugins  # noqa: F401
-            from .tools import ura_account as _ura_account  # noqa: F401
-            from .tools import ura_actions as _ura_actions  # noqa: F401
+            from ..tools import plugins as _plugins  # noqa: F401
+            from ..tools import ura_account as _ura_account  # noqa: F401
+            from ..tools import ura_actions as _ura_actions  # noqa: F401
         except Exception:
             logger.debug("Optional connector tools could not be imported", exc_info=True)
 
@@ -2640,7 +2640,7 @@ HIGH_VALUE_LIABILITY_THRESHOLD_UGX = 50_000_000
 def _record_copilot_card_metric(card: Mapping[str, Any], tier: str) -> None:
     """Emit bounded Prometheus counter for generated Portal Co-Pilot cards."""
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "portal_copilot_cards_total",
@@ -2655,7 +2655,7 @@ def _record_copilot_decision_metric(
 ) -> None:
     """Emit bounded Prometheus counter and latency histogram for Portal Co-Pilot HITL decisions."""
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "portal_copilot_decisions_total",

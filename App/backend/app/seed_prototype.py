@@ -49,7 +49,7 @@ def load_seed(path: Path | None = None) -> dict[str, Any]:
 
 
 def seed(path: Path | None = None) -> dict[str, int]:
-    from . import cms
+    from .db import cms
     from .db import database as db
     from .reminders import Reminder
     from .notify import dispatch

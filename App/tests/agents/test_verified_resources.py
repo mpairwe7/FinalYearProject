@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.verified_resources import (
+from app.connectors.verified_resources import (
     CURRENT_FISCAL_YEAR,
     get_verified_resources,
     is_authoritative_ura_url,

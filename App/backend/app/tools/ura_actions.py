@@ -82,7 +82,7 @@ class UraActionProposalTool(Tool):
             "idempotency_key": idempotency_key,
             "requires_confirmation": True,
         }
-        from ..ura_account_mock import account_mode
+        from ..connectors.ura_account_mock import account_mode
 
         if account_mode() == "mock":
             if submit:

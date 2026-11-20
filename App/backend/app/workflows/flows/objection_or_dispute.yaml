@@ -88,7 +88,7 @@ steps:
       Keep every acknowledgement and follow-up reference for the case.
     slot: ""
     validator: text
-    # Ids in app/verified_resources.py — every link there was checked live.
+    # Ids in app/connectors/verified_resources.py — every link there was checked live.
     resources:
       - object_to_assessment
       - adr_form

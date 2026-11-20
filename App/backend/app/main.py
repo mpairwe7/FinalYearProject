@@ -1348,7 +1348,7 @@ def execute_portal_task_decision(
     ctx: AuthContext = Depends(optional_user),
 ) -> PortalTaskDecisionResponse:
     """Verify HMAC-signed `request_state` and execute or decline a confirmed URA portal task."""
-    from . import portal_copilot as pc_mod
+    from .connectors import portal_copilot as pc_mod
     from .config.flags import flags
 
     if not flags.is_enabled("portal_copilot", subject=ctx.user_id or None):
@@ -3471,7 +3471,7 @@ def put_override_endpoint(
     body: dict,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    from . import cms
+    from .db import cms
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
@@ -3606,7 +3606,7 @@ def verify_discrepancy_endpoint(
     try:
         # Optional 1-Click Answer Override
         if body.get("create_override"):
-            from . import cms
+            from .db import cms
 
             override_query = str(body.get("override_query") or "").strip()
             if not override_query and report.get("conversation_id"):

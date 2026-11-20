@@ -349,7 +349,7 @@ def test_phase5_and_phase6_xlsx_zip_bomb_audit_doc_portal_dts_and_dom_scrubbing(
     from bs4 import BeautifulSoup
 
     from app.research.ephemeral_pdf_sandbox import PdfRejected, _validate_xlsx_zip_container
-    from app.portal_copilot import (
+    from app.connectors.portal_copilot import (
         classify_portal_task,
         compute_estimated_liability_ugx,
         evaluate_turn,

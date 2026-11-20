@@ -33,7 +33,7 @@ from app.tax.money import to_decimal
 from app.tenancy import qdrant_payload_filter, rls_set_local_sql
 from app.tools import ToolRegistry
 from app.tools.ura_account import account_api_status
-from app.ura_account_mock import account_mode
+from app.connectors.ura_account_mock import account_mode
 
 
 # ===========================================================================
