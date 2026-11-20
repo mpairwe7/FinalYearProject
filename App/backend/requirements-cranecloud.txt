@@ -10,9 +10,9 @@
 # To run the local-GPU stack instead, use App/backend/requirements.txt.
 
 # Core API
-fastapi>=0.141.1,<0.142
-uvicorn[standard]>=0.52.4,<0.53
-pydantic>=2.13.4,<2.14
+fastapi>=0.162.5,<0.163
+uvicorn[standard]>=0.54.0,<0.55
+pydantic>=2.14.3,<2.15
 
 # Rate limiting + cache (Redis optional, falls back to in-process)
 slowapi>=0.1.10
