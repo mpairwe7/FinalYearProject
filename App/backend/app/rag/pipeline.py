@@ -9242,6 +9242,7 @@ class ChatModel:
         thread_id: str,
         locale: str,
         user_id: str | None = None,
+        has_attachment: bool = False,
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
@@ -9257,6 +9258,13 @@ class ChatModel:
         Whatever answers, a question that named Uganda *and* another country
         gets a scope caveat appended, so the half URA cannot speak to is never
         left unmarked.
+
+        With a document attached (*has_attachment*) a path may answer but may
+        not ask. A question that carries its own figures still gets the exact
+        answer, and one about another country's taxes is still declined. The
+        paths that ask for a missing detail are skipped: the detail may be in
+        the document, and the turn goes on to the answer that reads it
+        (ADR-0068).
         """
         if flags.is_enabled("langgraph") and flags.is_enabled("agentic_mode"):
             return None
@@ -9267,17 +9275,28 @@ class ChatModel:
             or self._maybe_handle_local_government_tax(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_tin_clarification(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
+            or (
+                not has_attachment
+                and self._maybe_handle_tin_clarification(
+                    message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
+                )
             )
             or self._maybe_handle_calculator(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
+                message=message,
+                rewritten=rewritten,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+                elicit=not has_attachment,
             )
             or self._maybe_handle_calc_followup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_bare_amount(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            or (
+                not has_attachment
+                and self._maybe_handle_bare_amount(
+                    message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                )
             )
             or self._maybe_handle_situational_advisory(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
@@ -9289,7 +9308,7 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
-        return self._add_comparison_scope_caveat(result, message=message, rewritten=rewritten)
+        return self._add_comparison_scope_caveat(result or None, message=message, rewritten=rewritten)
 
     @staticmethod
     def _add_comparison_scope_caveat(
@@ -10268,6 +10287,7 @@ class ChatModel:
         thread_id: str,
         locale: str,
         user_id: str | None = None,
+        elicit: bool = True,
     ) -> dict[str, Any] | None:
         """Deterministic tax-calculator fast path (REST and streaming parity).
 
@@ -10294,6 +10314,11 @@ class ChatModel:
         )
         if facts is not None:
             plan = prefill_plan_from_case_facts(plan, facts)
+
+        if plan.missing and not elicit:
+            # The caller has a document that may hold the missing figure. Asking for it,
+            # or opening a guided flow that does, would be the wrong reply.
+            return None
 
         if not plan.missing:
             try:
@@ -11857,6 +11882,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        has_attachment=bool(attachments),
                     )
                 if connector_intent is None and not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11865,6 +11891,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        has_attachment=bool(attachments),
                     )
                 if connector_intent is None and not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11873,6 +11900,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        has_attachment=bool(attachments),
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
@@ -14022,6 +14050,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                has_attachment=bool(attachments),
             )
         )
         if connector_intent is None and not calc_result and core_msg_s != message:
@@ -14031,6 +14060,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                has_attachment=bool(attachments),
             )
         if connector_intent is None and not calc_result and router_message != message:
             calc_result = self._maybe_handle_fast_paths(
@@ -14039,6 +14069,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                has_attachment=bool(attachments),
             )
         if calc_result:
             if distress and calc_result.get("reply"):

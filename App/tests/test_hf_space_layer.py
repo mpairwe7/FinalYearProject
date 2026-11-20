@@ -75,7 +75,7 @@ PATCHED_LINES = _patched_lines()
 
 def test_the_patch_was_read() -> None:
     # Guards the parametrized test below, which would pass by running nothing.
-    assert len(PATCHED_LINES) >= 8
+    assert len(PATCHED_LINES) >= 5
 
 
 def test_the_cpu_reranker_is_the_repositorys_and_the_space_turns_it_on() -> None:
@@ -86,6 +86,14 @@ def test_the_cpu_reranker_is_the_repositorys_and_the_space_turns_it_on() -> None
     assert re.search(r"^\s*SPARSE_CPU_RERANKER=true\b", DOCKERFILE.read_text(encoding="utf-8"), re.M)
     retriever = (ROOT / "App" / "backend" / "app" / "rag" / "retriever.py").read_text(encoding="utf-8")
     assert "class _CpuLexicalReranker" in retriever
+
+
+def test_what_an_attachment_turn_skips_is_decided_in_the_pipeline() -> None:
+    """The layer once guarded three calls in `generate()` with `not attachments`. That skipped the
+    decline for another country's taxes, and never reached the streaming path (G698)."""
+    assert "not attachments" not in "".join(_patch_strings().values())
+    pipeline = (ROOT / "App" / "backend" / "app" / "rag" / "pipeline.py").read_text(encoding="utf-8")
+    assert "has_attachment=bool(attachments)" in pipeline
 
 
 def test_the_gemini_speech_fallback_is_the_repositorys_and_the_space_turns_it_on() -> None:

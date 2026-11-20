@@ -53,7 +53,7 @@ Option 1, one part at a time, each in its own pull request.
 | Part | Was in the script | Now | Landed |
 | --- | --- | --- | --- |
 | 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `RERANK_ENABLED` and `SPARSE_CPU_RERANKER` are both true. `_rerank` scores it like any reranker, and it reads the retriever's current BM25 encoder on every call | yes |
-| 2 | Attachment turns skip the calculator fast paths | the pipeline, on both the REST and the streaming path, with the foreign-jurisdiction decline kept | no |
+| 2 | On the REST path, a turn with an attachment skipped every fast path | `_maybe_handle_fast_paths(has_attachment=...)` in `rag/pipeline.py`, passed at all six call sites on both paths: a fast path may answer but may not ask | yes |
 | 3 | The Gemini speech fallback | `_gemini_audio_transcribe` in `speech/speech_service.py`, the chain's last tier, on when `STT_FALLBACK_BACKEND=gemini`. Traced, under the cloud deadline, and a response with no content is not silence | yes |
 
 `SPARSE_CPU_RERANKER` is off unless set, so an image that cannot load a
@@ -77,9 +77,26 @@ lost a section of the script on an image that lacks the code replacing it.
   to an image from before this change, that image has no CPU reranker and
   serves fused order without reranking, as any torch-free image did before the
   layer existed.
-- The script still patches four files: the pipeline, the offline index, the PDF
-  export and the gateway. Part 2 removes one more section; the rest stay until
-  someone moves them too.
+- The script still patches four files: the pipeline (graph-fusion gating and
+  the identifiers read from an attachment), the offline index, the PDF export
+  and the gateway. They stay until someone moves them too.
+- **Part 2 sets one rule for a turn that carries a document, on both paths: a
+  fast path may answer but may not ask.** The owner left the choice open, to be
+  made without cost to the experience or to quality.
+  - A question that carries its own figures still gets the exact calculator
+    answer, and a rate question the rate table's. On the web app, which uses
+    the streaming path, nothing is slower or less exact than it was.
+  - A question about another country's taxes is always declined. On the REST
+    path it was not, because the script skipped the dispatcher that holds the
+    decline.
+  - The paths that ask are skipped: the calculator's request for a missing
+    figure and the guided flow it opens, the individual-or-organisation
+    question, and the bare-amount menu. The figure may be in the document, and
+    the turn goes on to the answer that reads it. On the web app this is new;
+    the REST path already behaved so.
+  - The alternatives were to skip every fast path on both routes, which gives
+    up an exact instant answer the question fully specifies, or to skip none,
+    which brings back the request for a figure the taxpayer has just uploaded.
 - **Part 3 changes three things in the speech fallback** (G698).
   - Each call is traced with `tracing.llm_call` and reports the provider's own
     token counts, as every model client must.
@@ -113,5 +130,11 @@ lost a section of the script on an image that lacks the code replacing it.
   the module, with five more for part 3. Each of three breaks fails one: the
   pool without the turn's context, the call outside the deadline, and no
   content returned as silence.
+- `App/backend/tests/test_attachment_turn_fast_paths.py` holds part 2: the
+  decline, the exact answer and the rate answer survive an attachment; a
+  missing figure and the TIN question are not asked for; no guided flow is
+  opened; and every call to the dispatcher on both paths passes the flag. With
+  the calculator's guard removed two tests fail, and with the flag dropped from
+  one streaming call, one.
 - After the merge the Space is checked on the new image: `/ready` reports the
   reranker, the build log shows the script applied, and a live answer is read.
