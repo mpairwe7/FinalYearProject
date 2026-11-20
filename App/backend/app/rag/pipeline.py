@@ -48,7 +48,7 @@ from ..db import database as db
 from .. import documents as documents_module
 from . import generator as generator_module
 from .. import mt
-from .. import officer_hours
+from ..tickets import officer_hours
 from ..agents import AgentRoute, supervisor
 from ..agents.critic import RevisionBudget, evaluate
 from ..observability.analytics import metrics
@@ -56,7 +56,7 @@ from ..connector_intent import ConnectorIntent, detect_connector_intent
 from ..connector_outcome import classify_all as classify_connector_outcomes
 from ..connector_outcome import compose as compose_connector_reply
 from ..connector_outcome import connectors_used as _outcome_connectors_used
-from ..escalation_notify import notify_ticket_created, team_for_topic
+from ..tickets.escalation_notify import notify_ticket_created, team_for_topic
 from ..agents.patterns.ach import (
     _FAREWELL_PHRASES as _ACH_FAREWELL_PHRASES,
     _GRATITUDE_PHRASES as _ACH_GRATITUDE_PHRASES,
@@ -3496,7 +3496,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     on_screen = full_reply
 
             if ticket_id and flags.is_enabled("cxp_business_hours", subject=user_id or None):
-                from ..escalation_policy import (
+                from ..tickets.escalation_policy import (
                     after_hours_escalation_notice,
                     evaluate_cxp_schedule,
                 )
@@ -8607,7 +8607,7 @@ class ChatModel:
             # The escalation assessment that raises a new ticket (a deadline
             # today) applies here too; the rest of enrich_handoff (topic,
             # envelope, schedule) belongs to a new ticket and is not repeated.
-            from ..officer_handoff import assessed_priority
+            from ..tickets.officer_handoff import assessed_priority
 
             reuse_priority = priority
             try:
@@ -8640,7 +8640,7 @@ class ChatModel:
                 # Whether a person can pick this up now (G196): with the ticket, never before it.
                 handoff["officer_hours"] = officer_hours.status()
                 if flags.is_enabled("cxp_business_hours", subject=user_id or None):
-                    from ..escalation_policy import evaluate_cxp_schedule
+                    from ..tickets.escalation_policy import evaluate_cxp_schedule
 
                     sched = evaluate_cxp_schedule(check_presence=True, tenant_id=effective_tenant)
                     handoff["cxp_schedule"] = sched.to_dict()
@@ -8650,8 +8650,8 @@ class ChatModel:
 
         # One handoff for every path: how the taxpayer feels and what is at
         # stake set the priority, and what they already gave is not asked
-        # again (Phase 38; both behind flags, see app.officer_handoff).
-        from ..officer_handoff import enrich_handoff
+        # again (Phase 38; both behind flags, see app.tickets.officer_handoff).
+        from ..tickets.officer_handoff import enrich_handoff
 
         # The workflow engine keys a conversation's state by its owner. A chat
         # turn has the verified key in context; "Talk to an officer" arrives
@@ -8730,7 +8730,7 @@ class ChatModel:
             logger.warning("escalation notification dispatch failed", exc_info=True)
         try:
             # Straight to any staff watching the queue, on every replica.
-            from ..ticket_events import build_event, publish  # noqa: PLC0415
+            from ..tickets.ticket_events import build_event, publish  # noqa: PLC0415
 
             publish(build_event(ticket))
         except Exception:
@@ -11379,7 +11379,7 @@ class ChatModel:
                 # no case and no audit row (ADR-0046).
                 raise_if_turn_cancelled("localize")
             if result.get("ticket_id") and flags.is_enabled("cxp_business_hours", subject=user_id or None):
-                from ..escalation_policy import (
+                from ..tickets.escalation_policy import (
                     after_hours_escalation_notice,
                     evaluate_cxp_schedule,
                 )

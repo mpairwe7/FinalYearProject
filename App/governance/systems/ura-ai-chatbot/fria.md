@@ -67,7 +67,7 @@ Rights are cited from the Constitution of Uganda, 1995. Harm IDs are from the
 - An officer can take over any call or chat, and the AI then goes silent
   (ADR-0055).
 - The escalation policy offers a person and sets how fast one should answer
-  ([escalation_policy.py](../../../backend/app/escalation_policy.py)).
+  ([tickets/escalation_policy.py](../../../backend/app/tickets/escalation_policy.py)).
 - Tool actions with effects wait for the taxpayer's approval (ADR-0022).
 - An admin can switch the call receptionist off from the ops console. The change
   reaches every process that shares the database, which on the HF Space is the

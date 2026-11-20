@@ -38,7 +38,7 @@ from app.ingestion.docling_intelligence import (
     stitch_cross_page_markdown_tables,
     strip_document_furniture,
 )
-from app.hitl_routing import assess_document_for_human_review
+from app.tickets.hitl_routing import assess_document_for_human_review
 from app.ingestion.pdf_corpus import export_pdf_chunks_to_jsonl, ingest_pdf_jsonls
 from app.vision.glyph_fusion import (
     VectorGlyph,

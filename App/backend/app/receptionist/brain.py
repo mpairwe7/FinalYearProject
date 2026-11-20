@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from ..db import database as db
-from .. import officer_hours
+from ..tickets import officer_hours
 from ..observability.analytics import record_chat_turn
 from ..config.flags import flags
 from ..resilience import TurnCancelled, raise_if_turn_cancelled, set_turn_cancel
@@ -2664,7 +2664,7 @@ class UraReceptionistBrain(LLMService):
         # officer is online, do not place the caller on a dead hold queue — log the
         # priority callback immediately, announce CXP hours, and keep the AI active.
         if flags.is_enabled("cxp_business_hours", subject=self.room.state.user_id or None):
-            from ..escalation_policy import evaluate_cxp_schedule
+            from ..tickets.escalation_policy import evaluate_cxp_schedule
 
             sched = evaluate_cxp_schedule(check_presence=True, tenant_id=self.room.state.tenant_id)
             if sched.after_hours:

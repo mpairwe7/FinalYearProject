@@ -644,7 +644,7 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
 | `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer, and between reassurances while an officer has them on hold; `0` turns them off |
-| `CXP_TIMEZONE` | `Africa/Kampala` | Time zone of the officers' working hours (`app/officer_hours.py`) |
+| `CXP_TIMEZONE` | `Africa/Kampala` | Time zone of the officers' working hours (`app/tickets/officer_hours.py`) |
 | `CXP_OPEN_HOUR` / `CXP_CLOSE_HOUR` | `7` / `23` | Whole hours the desk opens and closes (the CXP desk closes at 11 PM). A close at or before the open runs past midnight; `0`/`24` never closes |
 | `CXP_WORKING_DAYS` | every day | Days a shift starts on, e.g. `mon,tue,wed,thu,fri` |
 | `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |

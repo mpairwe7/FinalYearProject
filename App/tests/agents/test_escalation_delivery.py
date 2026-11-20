@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.escalation_notify import (
+from app.tickets.escalation_notify import (
     PRIORITY_ORDER,
     build_payload,
     meets_priority,
@@ -103,7 +103,7 @@ class TestDispatch:
         monkeypatch.setenv("ESCALATION_WEBHOOK_URL", "https://ops.example/hook")
         sent: list[dict] = []
         monkeypatch.setattr(
-            "app.escalation_notify._post", lambda payload, url: sent.append(payload)
+            "app.tickets.escalation_notify._post", lambda payload, url: sent.append(payload)
         )
         assert notify_ticket_created(ticket, blocking=True) is True
         assert sent and sent[0]["id"] == "tkt-1"
@@ -122,7 +122,7 @@ class TestDispatch:
         def _boom(payload, url):
             raise RuntimeError("connection refused")
 
-        monkeypatch.setattr("app.escalation_notify._post", _boom)
+        monkeypatch.setattr("app.tickets.escalation_notify._post", _boom)
         assert notify_ticket_created(ticket, blocking=True) is True
 
     def test_a_transport_error_is_swallowed_by_post_itself(self, ticket, monkeypatch):

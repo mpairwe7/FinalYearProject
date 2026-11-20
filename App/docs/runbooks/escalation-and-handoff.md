@@ -40,9 +40,9 @@ gap rows G156–G164 in
 
 | Flag (default off) | When on |
 | --- | --- |
-| `eq_stakes_escalation` | `app/escalation_policy.assess_escalation` weighs affect, stakes (enforcement, a deadline today, a large amount), effort and confidence. **In the conversation:** "Talk to an officer" is offered — first in the list when urgent, after the answer otherwise. **On every ticket** (auto-escalation or the taxpayer's own button): priority and the response target come from the strongest reading of the last three messages, so the button's empty message does not erase what was said before it. It only offers; the taxpayer decides. |
-| `structured_text_handoff` | `app/officer_handoff.enrich_handoff` (called once, in `ChatModel._maybe_create_ticket`) attaches a `HandoffEnvelope` v2.1 to the ticket and prunes the details to ask for against what the taxpayer has already given. The button's placeholder hand-off (`topic: general`, nothing to ask) takes its topic — and so its **team** — and its details from the conversation. |
-| `cxp_business_hours` | Phase 40 (`G174`): `app/escalation_policy.evaluate_cxp_schedule` and `business_hours_elapsed_seconds` enforce the timezone-aware URA CXP operating window (`07:00–23:00 EAT` in `Africa/Kampala`, with live-officer presence override). When CXP is closed and no officer is online, `POST /v1/escalate`, `EscalateToHumanTool`, auto-escalated chat turns, and `UraReceptionistBrain._transfer` (`after_hours_callback`) queue the case for priority morning review/callback, set `sla_clock: "cxp_business_hours"`, and return 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) after-hours disclosures (`after_hours_escalation_notice`, `after_hours_escalation_message`). |
+| `eq_stakes_escalation` | `app/tickets/escalation_policy.assess_escalation` weighs affect, stakes (enforcement, a deadline today, a large amount), effort and confidence. **In the conversation:** "Talk to an officer" is offered — first in the list when urgent, after the answer otherwise. **On every ticket** (auto-escalation or the taxpayer's own button): priority and the response target come from the strongest reading of the last three messages, so the button's empty message does not erase what was said before it. It only offers; the taxpayer decides. |
+| `structured_text_handoff` | `app/tickets/officer_handoff.enrich_handoff` (called once, in `ChatModel._maybe_create_ticket`) attaches a `HandoffEnvelope` v2.1 to the ticket and prunes the details to ask for against what the taxpayer has already given. The button's placeholder hand-off (`topic: general`, nothing to ask) takes its topic — and so its **team** — and its details from the conversation. |
+| `cxp_business_hours` | Phase 40 (`G174`): `app/tickets/escalation_policy.evaluate_cxp_schedule` and `business_hours_elapsed_seconds` enforce the timezone-aware URA CXP operating window (`07:00–23:00 EAT` in `Africa/Kampala`, with live-officer presence override). When CXP is closed and no officer is online, `POST /v1/escalate`, `EscalateToHumanTool`, auto-escalated chat turns, and `UraReceptionistBrain._transfer` (`after_hours_callback`) queue the case for priority morning review/callback, set `sla_clock: "cxp_business_hours"`, and return 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) after-hours disclosures (`after_hours_escalation_notice`, `after_hours_escalation_message`). |
 | `continuous_relationship_memory` (existing) | Web chat opens and moves the taxpayer's resolution case per tax domain (one case per domain; objective is a fixed phrase). Needs the taxpayer's `personalization` consent. |
 
 The flags are independent. `structured_text_handoff` without
@@ -52,7 +52,7 @@ The flags are independent. `structured_text_handoff` without
 
 The AI answers all night; officers work the desk's hours — `CXP_TIMEZONE`,
 `CXP_OPEN_HOUR`/`CXP_CLOSE_HOUR` (default 07:00–23:00 `Africa/Kampala`),
-`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES` (`app/officer_hours.py`; the call
+`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES` (`app/tickets/officer_hours.py`; the call
 receptionist uses the same settings). Outside them:
 
 * **Every escalation** — the taxpayer's button, auto-escalation, the

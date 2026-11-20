@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-from .text_signals import (
+from ..text_signals import (
     detect_crisis,
     detect_high_stakes,
     detect_user_distress,
@@ -264,8 +264,8 @@ def evaluate_cxp_schedule(
     live_online = False
     if check_presence:
         try:
-            from .receptionist.presence import count_active_officers  # noqa: PLC0415
-            from .tenancy import tenant_enabled  # noqa: PLC0415
+            from ..receptionist.presence import count_active_officers  # noqa: PLC0415
+            from ..tenancy import tenant_enabled  # noqa: PLC0415
 
             scope = (tenant_id or "default") if tenant_enabled() else None
             live_online = count_active_officers(tenant_id=scope) > 0

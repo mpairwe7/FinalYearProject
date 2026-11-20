@@ -119,7 +119,7 @@ class WorkflowLoopTests(unittest.TestCase):
 
 class InternalKeysTests(unittest.TestCase):
     def test_engine_state_is_never_what_the_taxpayer_gave(self) -> None:
-        from app.officer_handoff import given_slot_names
+        from app.tickets.officer_handoff import given_slot_names
 
         session: dict[str, Any] = {"slots": {"tax_type": "vat", "_tangent_count": 1, "_invalid_count": 2}}
         self.assertEqual(given_slot_names(session), ["tax_type"])

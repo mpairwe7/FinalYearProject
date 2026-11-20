@@ -26,7 +26,7 @@ import contextvars
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .. import officer_hours
+from ..tickets import officer_hours
 from . import Tool, ToolRegistry, ToolSchema
 
 if TYPE_CHECKING:
@@ -192,7 +192,7 @@ class EscalateToHumanTool(Tool):
         close_time_eat = ""
         use_cxp_bh = flags.is_enabled("cxp_business_hours")
         if use_cxp_bh:
-            from ..escalation_policy import evaluate_cxp_schedule  # noqa: PLC0415
+            from ..tickets.escalation_policy import evaluate_cxp_schedule  # noqa: PLC0415
 
             sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
             after_hours = sched.after_hours
@@ -226,13 +226,13 @@ class EscalateToHumanTool(Tool):
     def _announce(ticket: dict[str, Any]) -> None:
         """Tell staff. A ticket nobody hears about is a queue entry, not a handoff."""
         try:
-            from ..escalation_notify import notify_ticket_created  # noqa: PLC0415
+            from ..tickets.escalation_notify import notify_ticket_created  # noqa: PLC0415
 
             notify_ticket_created(ticket)
         except Exception:
             logger.warning("escalation notification dispatch failed", exc_info=True)
         try:
-            from ..ticket_events import build_event, publish  # noqa: PLC0415
+            from ..tickets.ticket_events import build_event, publish  # noqa: PLC0415
 
             publish(build_event(ticket))
         except Exception:

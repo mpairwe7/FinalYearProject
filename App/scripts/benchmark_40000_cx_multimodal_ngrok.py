@@ -45,7 +45,7 @@ from app.speech import orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
 from app.calculator_router import extract_amounts, plan_calculation  # noqa: E402
 from app.conversational import handle_conversational_turn  # noqa: E402
-from app.escalation_policy import (  # noqa: E402
+from app.tickets.escalation_policy import (  # noqa: E402
     after_hours_escalation_message,
     after_hours_escalation_notice,
     assess_escalation,
@@ -54,7 +54,7 @@ from app.escalation_policy import (  # noqa: E402
 from app.memory.language_state import resolve_turn_locale  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402
-from app.officer_handoff import prune_required_details  # noqa: E402
+from app.tickets.officer_handoff import prune_required_details  # noqa: E402
 from app.rag.query import (  # noqa: E402
     canonicalize_tax_terms,
     detect_language,

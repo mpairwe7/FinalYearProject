@@ -30,7 +30,7 @@ import re
 import time
 from typing import Any
 
-from ..escalation_notify import known_teams
+from ..tickets.escalation_notify import known_teams
 from ..tenancy import tenant_enabled
 from . import livekit, presence
 from .config import (

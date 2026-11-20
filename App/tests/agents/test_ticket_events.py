@@ -24,14 +24,14 @@ import time
 
 import pytest
 
-from app.ticket_events import (
+from app.tickets.ticket_events import (
     QUEUE_MAXSIZE,
     TicketEventHub,
     _offer,
     build_event,
     hub,
 )
-from app.ticket_ws import filter_ticket_event
+from app.tickets.ticket_ws import filter_ticket_event
 
 TICKET = {
     "id": "tkt-1",
@@ -164,7 +164,7 @@ class TestHubFanOut:
 
 class TestPublishIsBestEffort:
     def test_publish_never_raises_without_a_backend(self, monkeypatch):
-        from app import ticket_events
+        from app.tickets import ticket_events
 
         # SQLite: no cross-replica channel, and that is correct — a
         # single node has no other replicas to tell.
@@ -172,7 +172,7 @@ class TestPublishIsBestEffort:
         ticket_events.publish(build_event(TICKET))
 
     def test_a_broken_channel_does_not_take_out_the_request(self, monkeypatch):
-        from app import ticket_events
+        from app.tickets import ticket_events
 
         def _boom():
             raise RuntimeError("pool gone")
@@ -185,7 +185,7 @@ class TestPublishIsBestEffort:
 
 class TestStaffOnlyAccess:
     def test_only_staff_roles_may_watch(self):
-        from app.ticket_ws import STAFF_ROLES
+        from app.tickets.ticket_ws import STAFF_ROLES
 
         assert "ura_staff" in STAFF_ROLES
         assert "ura_admin" in STAFF_ROLES
@@ -203,7 +203,7 @@ class TestCrossReplicaDelivery:
 
     def test_an_event_published_here_reaches_a_listener_there(self):
         import app.db.database as db
-        from app.ticket_events import listen_for_events, publish
+        from app.tickets.ticket_events import listen_for_events, publish
 
         db.init_db()
         received: list[dict] = []

@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sse_starlette.sse import EventSourceResponse
 from starlette.websockets import WebSocket
 
-from .. import documents, officer_hours
+from .. import documents
+from ..tickets import officer_hours
 from ..observability.analytics import metrics, record_chat_turn
 from ..auth import AuthContext, optional_user
 from ..db import database as db

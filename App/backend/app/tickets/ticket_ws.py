@@ -71,8 +71,8 @@ def filter_ticket_event(
 
 async def ticket_stream_ws(websocket: WebSocket) -> None:
     """Serve one staff subscriber."""
-    from .chat_ws_v2 import _resolve_ws_principal
-    from .auth import JWTAuthError
+    from ..chat_ws_v2 import _resolve_ws_principal
+    from ..auth import JWTAuthError
 
     try:
         _user_id, tenant_id, role, _purposes = _resolve_ws_principal(websocket, required=True)
@@ -90,7 +90,7 @@ async def ticket_stream_ws(websocket: WebSocket) -> None:
         await websocket.close(code=4403, reason="staff access required")
         return
 
-    from .ws_concurrency import is_ws_origin_allowed
+    from ..ws_concurrency import is_ws_origin_allowed
 
     origin = websocket.headers.get("origin")
     if not is_ws_origin_allowed(origin):
@@ -98,7 +98,7 @@ async def ticket_stream_ws(websocket: WebSocket) -> None:
         return
 
     team = websocket.query_params.get("team", "").strip()
-    from .tenancy import tenant_enabled
+    from ..tenancy import tenant_enabled
 
     tenant_scope = (tenant_id or "default") if tenant_enabled() else None
 

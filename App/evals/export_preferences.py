@@ -170,7 +170,7 @@ def export_pairs(path: Path, *, tenant_id: str | None = None) -> int:
                     "ticket_id": ticket.get("id"),
                 }
             )
-    from app import officer_chat
+    from app.tickets import officer_chat
 
     page_size = 500
     offset = 0

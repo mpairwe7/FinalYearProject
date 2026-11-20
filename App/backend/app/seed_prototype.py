@@ -140,7 +140,8 @@ _DEMO_TURNS = (
 def seed_quality_audit(uid: str) -> int:
     """Demo rows for every stream of the quality audit; returns 1 when written, 0 when already there."""
     from .db import database as db
-    from . import officer_chat, service_ratings
+    from .tickets import officer_chat
+    from . import service_ratings
     from .receptionist.store import create_call, get_call, update_call
 
     if db.query_one("SELECT 1 AS ok FROM feedback WHERE message_id = ? LIMIT 1", ("proto-qa-1",)):

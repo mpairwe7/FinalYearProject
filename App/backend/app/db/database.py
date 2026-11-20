@@ -1187,7 +1187,8 @@ def init_module_schemas() -> None:
     from their ``init_db``.
     """
     try:
-        from .. import audit_reviews, officer_chat, service_ratings
+        from .. import audit_reviews, service_ratings
+        from ..tickets import officer_chat
 
         officer_chat.init_schema()
         service_ratings.init_schema()
@@ -1200,7 +1201,8 @@ def module_retention(now: float | None = None) -> dict[str, int]:
     """Retention for module-owned tables, after the ticket purge has run."""
     deleted: dict[str, int] = {}
     try:
-        from .. import officer_chat, service_ratings
+        from ..tickets import officer_chat
+        from .. import service_ratings
 
         deleted["ticket_messages"] = officer_chat.purge_orphans()
         deleted["service_ratings"] = service_ratings.purge_expired(_FEEDBACK_TTL_DAYS, now=now)
@@ -2625,7 +2627,7 @@ def mark_reply_delivered(ticket_id: str) -> bool:
 
 
 #: First-response and next-reply clocks use the same public-sector day — 24
-#: hours of officers' working time (app.officer_hours): the clock stops while
+#: hours of officers' working time (app.tickets.officer_hours): the clock stops while
 #: the desk is closed, as a service desk's business-hours SLA calendar does (G197).
 SLA_BREACH_SECONDS = 24 * 3600
 PRESENCE_TTL_SECONDS = 45
@@ -2648,7 +2650,7 @@ def compose_sla_stats(
     a handoff raised at 23:15 has not waited for anyone until the desk opens.
     The medians stay wall-clock — they are what the taxpayer waited.
     """
-    from .. import officer_hours
+    from ..tickets import officer_hours
 
     now = now if now is not None else time.time()
     hours = officer_hours.officer_hours()
@@ -2713,7 +2715,7 @@ def compose_sla_stats(
     use_bh = False
     schedule_paused = False
     try:
-        from ..escalation_policy import business_hours_elapsed_seconds, evaluate_cxp_schedule
+        from ..tickets.escalation_policy import business_hours_elapsed_seconds, evaluate_cxp_schedule
         from ..config.flags import flags
 
         if flags.is_enabled("cxp_business_hours"):
@@ -4658,7 +4660,8 @@ def export_user_data(
     service_ratings_rows: list[dict[str, Any]] = []
     if external_id:
         try:
-            from .. import officer_chat, service_ratings
+            from ..tickets import officer_chat
+            from .. import service_ratings
 
             # By the subject's id, not the ``tickets`` above: those are read
             # only while the subject still has logged conversations.
@@ -4733,7 +4736,8 @@ def delete_user_cascade(
         # tickets whose conversation has already been purged, the second
         # reaches tickets raised before user_id was stamped on the row.
         try:
-            from .. import officer_chat, service_ratings
+            from ..tickets import officer_chat
+            from .. import service_ratings
 
             ticket_ids = [r["id"] for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
             counts["ticket_messages"] = officer_chat.delete_for_tickets(ticket_ids)

@@ -11,7 +11,7 @@ channel built a ``HandoffEnvelope`` (v2.1); text never did.
 :func:`enrich_handoff` runs once, at that choke point, behind two flags:
 
 * ``eq_stakes_escalation`` — the escalation assessment
-  (:mod:`app.escalation_policy`) sets the ticket's priority and SLA and
+  (:mod:`app.tickets.escalation_policy`) sets the ticket's priority and SLA and
   rides on the handoff as codes the officer can read;
 * ``structured_text_handoff`` — the envelope, with the details to ask for
   pruned against what the taxpayer already gave in this conversation.
@@ -35,7 +35,7 @@ from .escalation_policy import (
     evaluate_cxp_schedule,
     higher_priority,
 )
-from .config.flags import flags
+from ..config.flags import flags
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -115,7 +115,7 @@ def workflow_session(state_key: str, *, tenant_id: str = "default") -> Mapping[s
     if not state_key:
         return {}
     try:
-        from .db import database as db  # noqa: PLC0415
+        from ..db import database as db  # noqa: PLC0415
 
         return db.get_workflow_session(state_key, tenant_id) or {}
     except Exception:
@@ -132,7 +132,7 @@ def given_slot_names(session: Mapping[str, Any], *, tenant_id: str = "default", 
     }
     if user_id:
         try:
-            from .memory import get_memory_service  # noqa: PLC0415
+            from ..memory import get_memory_service  # noqa: PLC0415
 
             banked = get_memory_service().resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id)
             names.update(k for k in banked if not str(k).startswith("_"))
@@ -155,7 +155,7 @@ def _handoff_domain(user_query: str, history: Sequence[str], session: Mapping[st
     The button's own message ("The taxpayer asked to speak to a URA officer.")
     names nothing; read alone, every such case was a "General tax enquiry".
     """
-    from .memory.resolution_ledger import infer_domain_tag, workflow_domain  # noqa: PLC0415
+    from ..memory.resolution_ledger import infer_domain_tag, workflow_domain  # noqa: PLC0415
 
     workflow_id = str(session.get("workflow_id") or "")
     if workflow_id:
@@ -240,7 +240,7 @@ def enrich_handoff(
         if assessment is not None:
             handoff["escalation"] = assessment.to_dict()
             handoff["priority"] = higher_priority(str(handoff.get("priority") or "normal"), effective)
-            from .observability.analytics import metrics  # noqa: PLC0415
+            from ..observability.analytics import metrics  # noqa: PLC0415
 
             metrics.inc(
                 "cx_escalation_tier_total",
@@ -255,8 +255,8 @@ def enrich_handoff(
 
     try:
         if flags.is_enabled("structured_text_handoff", subject=subject):
-            from .memory import get_memory_service  # noqa: PLC0415
-            from .memory.resolution_ledger import objective_for  # noqa: PLC0415
+            from ..memory import get_memory_service  # noqa: PLC0415
+            from ..memory.resolution_ledger import objective_for  # noqa: PLC0415
 
             session = workflow_session(workflow_state_key, tenant_id=tenant_id or "default")
             if (

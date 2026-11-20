@@ -2536,7 +2536,7 @@ def analyze_document(
         user_id=user_id or "",
     )
     try:
-        from .hitl_routing import assess_document_for_human_review
+        from .tickets.hitl_routing import assess_document_for_human_review
         hitl_assessment = assess_document_for_human_review(record)
         record.meta["hitl_requires_review"] = hitl_assessment.requires_review
         record.meta["hitl_reasons"] = hitl_assessment.reasons

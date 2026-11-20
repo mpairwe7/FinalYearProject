@@ -414,7 +414,7 @@ class TransferInputTests(LiveCallCase):
         self.assertEqual(self.room.state.mode, "bridged")
 
     async def test_a_known_team_is_accepted(self):
-        from app.escalation_notify import known_teams
+        from app.tickets.escalation_notify import known_teams
 
         await self.bridge("okello")
 
@@ -1841,7 +1841,7 @@ class ScheduleTenancyTests(unittest.TestCase):
         self.addCleanup(presence.upsert_presence, self.officer, status="offline")
 
     def online(self, tenant_id: str) -> bool:
-        from app.escalation_policy import evaluate_cxp_schedule
+        from app.tickets.escalation_policy import evaluate_cxp_schedule
 
         with patch("app.tenancy.tenant_enabled", return_value=True):
             return evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id).live_officer_online

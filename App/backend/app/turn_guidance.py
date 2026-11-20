@@ -17,7 +17,7 @@ the dozen exits (workflow, calculator, FAQ, generated, …) behave alike:
 * **Offer a person when distress persists.** One upset message is handled by
   tone. The same upset across consecutive turns means the answers are not
   landing, and another rephrasing is the wrong move. With
-  ``eq_stakes_escalation`` on, the decision is :mod:`app.escalation_policy`'s,
+  ``eq_stakes_escalation`` on, the decision is :mod:`app.tickets.escalation_policy`'s,
   which also weighs what is at stake (a frozen account, a deadline today) —
   an offer it marks ``priority`` is put first.
 
@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .escalation_policy import TIER_PRIORITY, assess_escalation
+from .tickets.escalation_policy import TIER_PRIORITY, assess_escalation
 from .config.flags import flags
 from .text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
 from .workflows.journey_copilot import infer_taxpayer_objective

@@ -99,12 +99,12 @@ hub = TicketEventHub()
 
 def _pg_pool() -> Any | None:
     """The Postgres pool when that backend is active, else ``None``."""
-    from .db import database as db
+    from ..db import database as db
 
     if db.ANALYTICS_BACKEND != "postgres":
         return None
     try:
-        from .db import postgres as pg
+        from ..db import postgres as pg
     except Exception:  # pragma: no cover - import guarded at dispatch
         return None
     return pg._get_pool()

@@ -17,7 +17,7 @@ import pytest
 from app.auth.dependencies import resolve_role
 from app.rag.context_manager import RollingContextManager, extract_conversation_entities
 from app.rag.entailment import numeric_contradiction
-from app.escalation_notify import team_for_topic
+from app.tickets.escalation_notify import team_for_topic
 from app.config.flags import flags
 from app.guardrails.input_checks import InputGuard, MAX_INPUT_LENGTH
 from app.guardrails.normalize import _canonicalize_text
