@@ -264,7 +264,7 @@ in the image.
 
 ```bash
 docker build -f App/Dockerfile.gpu -t ura-chatbot-api:gpu .
-docker run --gpus all -p 8000:8000 --env-file .env ura-chatbot-api:gpu
+docker run --gpus all -p 8000:8000 --env-file App/.env ura-chatbot-api:gpu
 ```
 
 It is a separate Dockerfile rather than folded into the base one because

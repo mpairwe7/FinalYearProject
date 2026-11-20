@@ -11,10 +11,10 @@ retrieval on Crane Cloud and the HF Space whenever their baked-in Qdrant
 collection is sparse-only (the CPU-only images ship no torch to compute dense
 vectors locally) — see ``App/docs/CLOUDFLARE_FALLBACKS.md``.
 
-Prerequisites (load the gitignored .env into the process env first so both this
+Prerequisites (from the repository root, load the gitignored App/.env into the process env first so both this
 script *and* wrangler see the credentials, without printing them):
 
-    set -a; . .env; set +a            # exports CLOUDFLARE_*, CF_AIG_*, VECTORIZE_INDEX
+    set -a; . App/.env; set +a        # exports CLOUDFLARE_*, CF_AIG_*, VECTORIZE_INDEX
     wrangler --version                # v3 (Node 20) on PATH, authed via CLOUDFLARE_API_TOKEN
 
 Usage:
@@ -246,7 +246,7 @@ def main() -> None:
 
     if not cfg.is_vectorize_configured():
         sys.exit(
-            "Cloudflare/Vectorize not configured. Run `set -a; . .env; set +a` with "
+            "Cloudflare/Vectorize not configured. Run `set -a; . App/.env; set +a` from the repository root with "
             "CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN, "
             "VECTORIZE_INDEX first."
         )

@@ -461,7 +461,7 @@ jobs:
           WORKERS: "1"
         run: |
           # The api service lists no SPEECH_ENABLED or LLM_ENABLED, so only its env_file passes them in.
-          printf 'SPEECH_ENABLED=false\nLLM_ENABLED=false\n' > .env
+          printf 'SPEECH_ENABLED=false\nLLM_ENABLED=false\n' > App/.env
           docker compose build api || {
             echo "::error::failed to build the api image under test"
             exit 1

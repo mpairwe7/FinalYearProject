@@ -105,7 +105,7 @@ services:
       - FLAG_MODEL_TIERING=true
       - FLAG_QUERY_REWRITE=true
     env_file:
-      - ../.env
+      - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -11,7 +11,7 @@ Covers the full stack: **FastAPI API**, **Next.js frontend**, **Qdrant vector DB
 | Docker Engine + Compose v2 | 24.0+ / 2.24.4+ |
 | Domain name (A/AAAA record) | e.g. `ura-chatbot.example.com` |
 | TLS certificate | Let's Encrypt or organisational CA |
-| `.env` file | Copy from `App/.env.example`, fill secrets |
+| `App/.env` file | Copy from `App/.env.example`, fill secrets |
 | Trivy | Latest (scans run via `App/security/trivy.yaml` config) |
 
 Secrets that **must** be set before first deploy:

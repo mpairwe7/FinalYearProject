@@ -119,7 +119,7 @@ services:
       - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
       - FLAG_SPECULATIVE_PREFETCH=true
     env_file:
-      - ../.env
+      - .env
     init: true
     security_opt:
       - no-new-privileges:true

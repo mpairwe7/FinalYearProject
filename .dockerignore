@@ -6,9 +6,10 @@ __pycache__
 *.db
 *.sqlite
 
-# Environment
-.env
-.env.*
+# Environment. A pattern here is anchored at the context root, and the working file is
+# App/.env: `.env` alone left it inside every build context that starts at the repository root.
+**/.env
+**/.env.*
 *.log
 
 # IDEs

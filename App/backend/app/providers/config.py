@@ -17,10 +17,15 @@ import os
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .._root import CODE_ROOT
+
+#: The local settings file, `App/.env`. Named from the code root, so it is found from any working directory.
+ENV_FILE = CODE_ROOT / ".env"
+
 
 class CloudSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=None if os.getenv("APP_ENV") == "testing" or "PYTEST_CURRENT_TEST" in os.environ else ".env",
+        env_file=None if os.getenv("APP_ENV") == "testing" or "PYTEST_CURRENT_TEST" in os.environ else ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

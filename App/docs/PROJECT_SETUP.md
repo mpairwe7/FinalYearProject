@@ -87,7 +87,7 @@ This installs 4-layer defence-in-depth secret scanning (see [.github/SECURITY.md
 
 ```bash
 # Copy example environment file
-cp App/.env.example .env
+cp App/.env.example App/.env
 
 # Edit with your credentials
 nano .env

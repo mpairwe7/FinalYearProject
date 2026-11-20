@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -103,7 +104,7 @@ def _resolved_full_stack(tmp_path: Path) -> dict:
     """The model Compose builds from the pair, read beside an empty `.env` so no real setting is loaded."""
     tree = tmp_path / "App"
     tree.mkdir()
-    (tmp_path / ".env").write_text("")
+    (tree / ".env").write_text("")
     for path in (BASE, FULL):
         shutil.copy(path, tree / path.name)
     done = _compose("-f", str(tree / BASE.name), "-f", str(tree / FULL.name), "config", "--no-interpolate", "--format", "json")
@@ -134,3 +135,27 @@ def test_the_full_stack_resolves_to_the_hardened_variant(tmp_path: Path) -> None
     # `!reset` drops the base's GPU reservation and host alias, which this variant never had.
     assert "deploy" not in api
     assert "extra_hosts" not in api
+
+
+def test_every_compose_file_reads_the_settings_file_inside_app() -> None:
+    """The working settings file is `App/.env`. An `env_file` that climbs out of `App/` names the
+    repository root, where the file no longer is, and Compose refuses to start without it."""
+    climbing = []
+    for path in sorted(APP.rglob("docker-compose*.yml")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if re.match(r"\s*-\s*\.\./.*\.env\b", line) or re.match(r"\s*env_file:\s*\.\./", line):
+                climbing.append(f"{path.relative_to(APP)}: {line.strip()}")
+    assert climbing == []
+
+
+def test_a_build_from_the_repository_root_cannot_take_the_settings_file() -> None:
+    """A `.dockerignore` pattern is anchored at the context root. `.env` alone excluded only a
+    root-level file, which would have left `App/.env` inside the context of the API image."""
+    patterns = (APP.parent / ".dockerignore").read_text(encoding="utf-8").split()
+    assert "**/.env" in patterns and "**/.env.*" in patterns
+
+
+def test_the_backend_reads_app_env_from_any_working_directory() -> None:
+    from app.providers.config import ENV_FILE
+
+    assert ENV_FILE == APP / ".env"
