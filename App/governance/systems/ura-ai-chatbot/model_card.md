@@ -281,7 +281,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 
 ### Delta Sync Protocol
 
-The sync engine (`offline_sync.py`) uses hash-based chunk diffing:
+The sync engine (`offline/offline_sync.py`) uses hash-based chunk diffing:
 1. Client sends `{version, chunk_hashes: {id: sha256}}`
 2. Server computes diff: changed + deleted chunks
 3. Client downloads only changed chunks (~200 KB/day typical)

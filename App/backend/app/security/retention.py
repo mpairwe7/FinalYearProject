@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .db import database
-from .processing import documents
+from ..db import database
+from ..processing import documents
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 def run_retention_cleanup() -> dict[str, Any]:
     """Delete expired data and return non-sensitive per-store evidence."""
-    from .memory.service import get_memory_service
-    from .speech.voice_consent import cleanup_expired_voice_data
+    from ..memory.service import get_memory_service
+    from ..speech.voice_consent import cleanup_expired_voice_data
 
     jobs: dict[str, Callable[[], dict[str, Any]]] = {
         "database": database.cleanup_expired_data,

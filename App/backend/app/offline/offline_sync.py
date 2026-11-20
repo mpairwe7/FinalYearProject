@@ -28,7 +28,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ._root import PROJECT_ROOT as _PROJECT_ROOT
+from .._root import PROJECT_ROOT as _PROJECT_ROOT
 OFFLINE_BUNDLE_DIR = Path(
     os.getenv(
         "OFFLINE_BUNDLE_DIR",

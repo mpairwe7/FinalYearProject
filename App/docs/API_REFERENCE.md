@@ -3409,8 +3409,8 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 
 **New Backend Modules:**
 - `rag/offline_rag.py` — Production rewrite with versioned bundles, SHA-256 integrity, chunk hashes, ONNX embedder optimization
-- `offline_sync.py` — Delta sync engine with hash-based chunk diffing, sync event logging
-- `offline_bundle.py` — Bundle builder (FAISS + passages + embedder + manifest) + bundle manager for serving
+- `offline/offline_sync.py` — Delta sync engine with hash-based chunk diffing, sync event logging
+- `offline/offline_bundle.py` — Bundle builder (FAISS + passages + embedder + manifest) + bundle manager for serving
 
 **New Scripts:**
 - `App/scripts/quantize_models.py` — Automated GGUF/AWQ/GPTQ/ONNX quantization pipeline

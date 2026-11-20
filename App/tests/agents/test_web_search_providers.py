@@ -333,7 +333,7 @@ class TestFailover:
 
 class TestProcessorGovernance:
     def test_a_hosted_provider_is_an_external_processor(self, monkeypatch):
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
@@ -347,7 +347,7 @@ class TestProcessorGovernance:
     def test_a_provider_counts_once_configured_not_once_enabled(self, monkeypatch):
         # The flag can be turned on at runtime by a persisted override, long
         # after this gate ran, so the key is the material fact.
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         monkeypatch.delenv("FLAG_LIVE_WEB_RESEARCH", raising=False)
         monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
@@ -356,19 +356,19 @@ class TestProcessorGovernance:
 
     def test_a_self_hosted_searxng_is_still_an_external_processor(self, monkeypatch):
         # A metasearch engine: its documentation says the query goes to external services.
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
 
         assert "web search (searxng)" in pr._external_processor_names()
 
     def test_no_provider_adds_no_processor(self):
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         assert not any("web search" in name for name in pr._external_processor_names())
 
     def test_sovereign_mode_refuses_hosted_search_and_remote_searxng(self, monkeypatch):
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         monkeypatch.setenv("SOVEREIGN_MODE", "true")
         monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-test")
@@ -380,7 +380,7 @@ class TestProcessorGovernance:
         assert "SEARXNG_URL" in errors
 
     def test_sovereign_mode_accepts_a_local_searxng(self, monkeypatch):
-        from app import production_readiness as pr
+        from app.security import production_readiness as pr
 
         monkeypatch.setenv("SOVEREIGN_MODE", "true")
         monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")

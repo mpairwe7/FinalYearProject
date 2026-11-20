@@ -7,8 +7,8 @@ account API, an email/SMS network, or a cluster autoscaler.
 
 CLI::
 
-    PYTHONPATH=App/backend python3 -m app.production_readiness
-    PYTHONPATH=App/backend python3 -m app.production_readiness --as-production
+    PYTHONPATH=App/backend python3 -m app.security.production_readiness
+    PYTHONPATH=App/backend python3 -m app.security.production_readiness --as-production
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def sovereign_mode_errors() -> list[str]:
     if not is_sovereign_mode():
         return []
 
-    from .config.flags import flags
+    from ..config.flags import flags
 
     errors: list[str] = []
     if flags.is_enabled("cloudflare_fallback") or _truthy("FLAG_CLOUDFLARE_FALLBACK"):
@@ -213,7 +213,7 @@ def _document_errors() -> list[str]:
         errors.append("G13: MALWARE_SCAN_REQUIRED must be true in production.")
     if not _truthy("DOCUMENT_PARSE_ISOLATED"):
         errors.append("G13: DOCUMENT_PARSE_ISOLATED must be true in production.")
-    from .processing.document_worker import parse_mem_cap
+    from ..processing.document_worker import parse_mem_cap
 
     cap = parse_mem_cap(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES"))
     if cap is None or cap <= 0:
@@ -226,7 +226,7 @@ def _document_errors() -> list[str]:
 
 def _notify_errors() -> list[str]:
     if _truthy("NOTIFICATION_LIVE") or _truthy("NOTIFY_LIVE"):
-        from .notify import configured_providers
+        from ..notifications.notify import configured_providers
 
         provs = configured_providers()
         # Verify at least one real external delivery provider (email, sms, webhook) is configured
@@ -280,7 +280,7 @@ def _seed_errors() -> list[str]:
 def _receptionist_flag_on() -> bool:
     """The receptionist flag as the running service reads it, overrides included."""
     try:
-        from .config.flags import flags
+        from ..config.flags import flags
 
         return bool(flags.is_enabled("voice_receptionist"))
     except Exception:  # noqa: BLE001 - the report falls back to the environment
@@ -288,8 +288,8 @@ def _receptionist_flag_on() -> bool:
 
 
 def _receptionist_errors() -> list[str]:
-    from .receptionist.config import local_engine_errors
-    from .receptionist.livekit import production_errors
+    from ..receptionist.config import local_engine_errors
+    from ..receptionist.livekit import production_errors
 
     enabled = _receptionist_flag_on()
     return [*production_errors(enabled_override=enabled), *local_engine_errors(enabled_override=enabled)]
@@ -334,7 +334,7 @@ def _external_processor_names() -> list[str]:
     # vocabulary, but that is a reason to approve the transfer, not to skip it.
     # Counted once configured, not once enabled: the flag can be turned on at
     # runtime by a persisted override, long after this gate last ran.
-    from .research.web_search_providers import external_provider_names
+    from ..research.web_search_providers import external_provider_names
 
     providers.extend(f"web search ({name})" for name in external_provider_names())
     return providers
@@ -361,7 +361,7 @@ def _cross_border_errors() -> list[str]:
 
 def _mcp_security_errors() -> list[str]:
     """Validate optional remote MCP server URLs and MRTR state secret in production."""
-    from .mcp.transport import URL_ENV_PREFIX, remote_url_problem
+    from ..mcp.transport import URL_ENV_PREFIX, remote_url_problem
 
     errors: list[str] = []
     state_secret = (os.getenv("MCP_REQUEST_STATE_SECRET") or "").strip()
@@ -426,8 +426,8 @@ def gap_gate_errors(*, include_receptionist: bool = True) -> list[str]:
 
 def _kernel_layer_errors() -> list[str]:
     """ADR-0033 phase 3: the Neo4j graph backend (G506) and the semantic layer (G507)."""
-    from .graph.neo4j_store import production_errors as graph_backend_errors
-    from .semantic_layer.config import production_errors as semantic_layer_errors
+    from ..graph.neo4j_store import production_errors as graph_backend_errors
+    from ..semantic_layer.config import production_errors as semantic_layer_errors
 
     return graph_backend_errors() + semantic_layer_errors()
 
@@ -482,9 +482,9 @@ def _live_research_status() -> dict[str, Any]:
     check", which is safe; refusing to start would turn a missing key into an
     outage of every other answer.
     """
-    from .config.flags import flags
-    from .research.web_research import corpus_sync_permitted
-    from .research.web_search_providers import active_providers, sanctioned_provider_configured
+    from ..config.flags import flags
+    from ..research.web_research import corpus_sync_permitted
+    from ..research.web_search_providers import active_providers, sanctioned_provider_configured
 
     return {
         "enabled": flags.is_enabled("live_web_research"),
@@ -496,11 +496,11 @@ def _live_research_status() -> dict[str, Any]:
 
 def architecture_integrity_status() -> dict[str, Any]:
     """Verify October 2026 architectural invariants (ADR-0012): storage parity, ASI10 manifest, portal pack, and ExpRAG."""
-    from .config.flags import flags
-    from .memory.procedural import ProceduralMemory
-    from .storage_protocol import verify_storage_backend_parity
-    from .tools.portal_navigator_data import get_portal_knowledge_provenance
-    from .chat.turn_pipeline import CANONICAL_BEHAVIORAL_MANIFEST
+    from ..config.flags import flags
+    from ..memory.procedural import ProceduralMemory
+    from ..db.storage_protocol import verify_storage_backend_parity
+    from ..tools.portal_navigator_data import get_portal_knowledge_provenance
+    from ..chat.turn_pipeline import CANONICAL_BEHAVIORAL_MANIFEST
 
     parity = verify_storage_backend_parity()
     portal_prov = get_portal_knowledge_provenance()

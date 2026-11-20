@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ._root import APP_DATA_ROOT
+from .._root import APP_DATA_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +49,10 @@ def load_seed(path: Path | None = None) -> dict[str, Any]:
 
 
 def seed(path: Path | None = None) -> dict[str, int]:
-    from .db import cms
-    from .db import database as db
-    from .reminders import Reminder
-    from .notify import dispatch
+    from . import cms
+    from . import database as db
+    from ..notifications.reminders import Reminder
+    from ..notifications.notify import dispatch
 
     payload = load_seed(path)
     user_spec = payload.get("user") or {}
@@ -139,10 +139,10 @@ _DEMO_TURNS = (
 
 def seed_quality_audit(uid: str) -> int:
     """Demo rows for every stream of the quality audit; returns 1 when written, 0 when already there."""
-    from .db import database as db
-    from .tickets import officer_chat
-    from .quality import service_ratings
-    from .receptionist.store import create_call, get_call, update_call
+    from . import database as db
+    from ..tickets import officer_chat
+    from ..quality import service_ratings
+    from ..receptionist.store import create_call, get_call, update_call
 
     if db.query_one("SELECT 1 AS ok FROM feedback WHERE message_id = ? LIMIT 1", ("proto-qa-1",)):
         return 0

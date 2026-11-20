@@ -5,12 +5,12 @@ Decision log: `App/docs/traceability/prototype-production-gates-2026-08-18.md`.
 
 Prototype features stay on for `APP_ENV=development`. They **do not**
 become live URA integrations when you flip the environment. Production
-startup (`_validate_production_env` + `app.production_readiness`)
+startup (`_validate_production_env` + `app.security.production_readiness`)
 fail-closes the unsafe defaults so a go-live cannot ship mock balances,
 fixture news, or unacked RLS.
 
 ```bash
-PYTHONPATH=App/backend python3 -m app.production_readiness --as-production
+PYTHONPATH=App/backend python3 -m app.security.production_readiness --as-production
 python3 App/scripts/validate_env.py --env production
 ```
 

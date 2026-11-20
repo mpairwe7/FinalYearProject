@@ -60,7 +60,7 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | 6 | `tax/` (it existed) | `calculator_router`, `scenario_planner` | yes |
 | 7 | `processing/`, `chat/`, `quality/` | `documents`, `document_worker`, `ocr_service`; `chat_ws_v2`, `chat_title`, `conversational`, `model_welfare`, `turn_guidance`, `turn_pipeline`; `artifact_export` | yes |
 | 8 | `connectors/`, `memory/`, `rag/`, `tax/`, `db/` | `connector_intent`, `connector_outcome`, `portal_copilot`, `ura_account_mock`, `verified_resources`; `topics`; `tool_budget`; `glossary`; `cms` | yes |
-| 9 | `security/`, `notifications/`, `offline/`, `ingestion/`, `db/` | `authority`, `production_readiness`, `retention`, `ai_disclosure`, `confirm_tokens`; `notify`, `reminders`; `offline_bundle`, `offline_sync`; `crawl_gate`, `publications`; `storage_protocol`, `seed_prototype` | no |
+| 9 | `security/`, `notifications/`, `offline/`, `ingestion/`, `db/` | `authority`, `production_readiness`, `retention`, `ai_disclosure`, `confirm_tokens`; `notify`, `reminders`; `offline_bundle`, `offline_sync`; `crawl_gate`, `publications`; `storage_protocol`, `seed_prototype` | yes |
 | 10 | `providers/`, `processing/` | `sunbird`; `pdf_export` | no |
 
 **What stays flat, and why.** Thirteen modules, once phase 10 has landed.
@@ -109,7 +109,9 @@ so merging them would change how a reported number is reproduced.
   ten more: document handling is in `app/processing/`, and the chat turn outside
   retrieval is in `app/chat/`. Phase 8 moves nine: the portal and connector
   modules are in `app/connectors/`, and four join `memory/`, `rag/`, `tax/`
-  and `db/`. Imports read `from .speech import speech_service`; a
+  and `db/`. Phase 9 moves thirteen: the production gates are in
+  `app/security/`, taxpayer messages in `app/notifications/`, the offline
+  bundle in `app/offline/`, and four tools join `ingestion/` and `db/`. Imports read `from .speech import speech_service`; a
   caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new
@@ -140,6 +142,11 @@ so merging them would change how a reported number is reproduced.
   outside the dated records. Nine findings were already there before phase 1.
 - `app.main` imports, and no module is loaded under an old name.
 - No phase changes one of the seven dense cache key files.
+- A moved module that finds files beside itself is checked by hand, because
+  the codemod does not rewrite path arithmetic. Phase 9 moved
+  `storage_protocol`, which read `Path(__file__).resolve().parent` as the
+  `app` folder; one folder deeper, its tests failed until the line took a
+  second `.parent`.
 - The test files a phase changes pass locally; CI runs both full suites.
 - `App/tests/test_hf_space_layer.py` loads `speech_service.py` as the Space
   builds it and runs the inserted Gemini fallback. With a relative import put

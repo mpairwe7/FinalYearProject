@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 from app.rag import generator
-from app.production_readiness import gap_gate_errors
+from app.security.production_readiness import gap_gate_errors
 
 
 @pytest.fixture(autouse=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from app.config.flags import flags
-from app.production_readiness import (
+from app.security.production_readiness import (
     COMMERCIAL_KEY_ENV_VARS,
     assert_sovereign_mode,
     gap_gate_errors,

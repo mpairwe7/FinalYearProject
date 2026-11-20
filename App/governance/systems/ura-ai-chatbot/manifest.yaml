@@ -323,7 +323,7 @@ eu_ai_act:
     - requirement: "Art. 50(2) — AI-generated content marked"
       status: "partial"
       evidence: >
-        App/backend/app/ai_disclosure.py — every synthesised WAV carries a RIFF INFO chunk
+        App/backend/app/security/ai_disclosure.py — every synthesised WAV carries a RIFF INFO chunk
         with the IPTC digitalSourceType trainedAlgorithmicMedia (machine-readable metadata
         layer of the 2026 Code of Practice). Text replies name their model (ChatResponse.model).
       verified_by:
@@ -830,7 +830,7 @@ aibom_inventory:
       role: "Crawled ura.go.ug and parliament.go.ug pages in the retrieval corpus"
       source: "Publisher's live https site only, per App/ml/scripts/data_aug/crawl_policy.py; never an archive"
       provenance: "Each capture records final URL, HTTP status, raw SHA-256, fetch time and the publisher's dates. App/Data/crawl/crawl_state.json is the per-URL ledger and run record"
-      release_control: "app.crawl_gate verdict plus a reviewed pull request (ADR-0023)"
+      release_control: "app.ingestion.crawl_gate verdict plus a reviewed pull request (ADR-0023)"
       freshness_objective: "A complete crawl merged within 38 days (ura_crawl_last_full_run_timestamp_seconds); a page expires after 45 days unverified"
       pending: "Pages captured before ADR-0023 carry no provenance (source_kind unverified) until the first full crawl re-reads them"
       known_deviation: "robots.txt is read last on URA's hosts and cached beyond RFC 9309's 24-hour SHOULD, because requesting it first gets the caller's address dropped (G413, G414)"

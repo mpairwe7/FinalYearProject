@@ -2,7 +2,7 @@
 
 Reads the publisher's own index of its site, fetches what has become stale from
 the publisher, and records what it saw, from where and when. It proposes; it
-does not publish. The run leaves files on disk for :mod:`app.crawl_gate` to judge,
+does not publish. The run leaves files on disk for :mod:`app.ingestion.crawl_gate` to judge,
 and a person merges the result.
 
 Two rules decide what the crawl touches:

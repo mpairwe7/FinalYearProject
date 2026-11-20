@@ -59,7 +59,7 @@ class _StubMCPClient:
 
 class ConfirmTokenUnitTest(unittest.TestCase):
     def test_round_trip(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="call_0_0",
@@ -74,7 +74,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertEqual(payload["idempotency_key"], "ik_abc")
 
     def test_tampered_token_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c", tool_name="t", idempotency_key="k", session_id="s"
@@ -83,7 +83,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertIsNone(verify(tampered))
 
     def test_wrong_session_id_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c", tool_name="t", idempotency_key="k", session_id="s_legit"
@@ -92,7 +92,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
         self.assertIsNone(verify(token, expected_session_id="s_other"))
 
     def test_expired_token_rejected(self) -> None:
-        from app.confirm_tokens import sign, verify
+        from app.security.confirm_tokens import sign, verify
 
         token = sign(
             call_id="c",
@@ -105,7 +105,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
             self.assertIsNone(verify(token))
 
     def test_malformed_token_rejected(self) -> None:
-        from app.confirm_tokens import verify
+        from app.security.confirm_tokens import verify
 
         self.assertIsNone(verify("not.a.real.token"))
         self.assertIsNone(verify(""))

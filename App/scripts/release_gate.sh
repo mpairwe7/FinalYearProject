@@ -16,7 +16,7 @@ cd "$ROOT_DIR"
 
 printf 'Release gate: backend syntax\n'
 "$PYTHON_BIN" -m py_compile \
-  backend/app/authority.py \
+  backend/app/security/authority.py \
   backend/app/rag/claim_verifier.py \
   backend/app/mcp/policy.py \
   backend/app/mcp/client.py \
@@ -26,7 +26,7 @@ printf 'Release gate: backend syntax\n'
   backend/app/rag/pipeline.py \
   backend/app/main.py \
   backend/app/chat/chat_ws_v2.py \
-  backend/app/confirm_tokens.py \
+  backend/app/security/confirm_tokens.py \
   backend/app/rag/generator.py
 
 printf 'Release gate: backend tests\n'

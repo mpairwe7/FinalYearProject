@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.authority import authority_required, get_authority_status
+from app.security.authority import authority_required, get_authority_status
 from app.tools.rates import LookupRateTool
 
 

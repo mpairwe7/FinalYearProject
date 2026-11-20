@@ -32,7 +32,7 @@ def offline_status(
     if not flags.is_enabled("offline_rag"):
         return OfflineStatusResponse(available=False)
 
-    from ..offline_bundle import BundleManager
+    from ..offline.offline_bundle import BundleManager
 
     manager = BundleManager()
     info = manager.get_info()
@@ -70,7 +70,7 @@ def offline_sync(
             detail="Offline sync is disabled (FLAG_OFFLINE_SYNC=false)",
         )
 
-    from ..offline_sync import OfflineSyncEngine, SyncEvent
+    from ..offline.offline_sync import OfflineSyncEngine, SyncEvent
 
     engine = OfflineSyncEngine()
     if not engine.initialize():
@@ -119,7 +119,7 @@ def download_offline_bundle(
             detail="Offline bundle API is disabled (FLAG_OFFLINE_BUNDLE_API=false)",
         )
 
-    from ..offline_bundle import BundleManager
+    from ..offline.offline_bundle import BundleManager
 
     manager = BundleManager()
     bundle_path = manager.get_bundle_path()

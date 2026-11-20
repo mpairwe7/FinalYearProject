@@ -113,7 +113,7 @@ def _cached_parity_check(
 
 def verify_storage_backend_parity(app_dir: Path | None = None) -> dict[str, Any]:
     """Compare public top-level functions and call signatures in ``db/database.py`` and ``db/postgres.py`` via cached AST."""
-    base = app_dir if app_dir is not None else Path(__file__).resolve().parent
+    base = app_dir if app_dir is not None else Path(__file__).resolve().parent.parent
     db_path = (base / "db/database.py").resolve()
     pg_path = (base / "db/postgres.py").resolve()
     return dict(

@@ -39,7 +39,7 @@ jobs:
         working-directory: App/backend
         env:
           PYTHONPATH: .:${{ github.workspace }}/App
-        run: python -m app.crawl_gate slo --crawl-dir ../Data/crawl
+        run: python -m app.ingestion.crawl_gate slo --crawl-dir ../Data/crawl
       - name: No proposal is waiting too long
         env:
           GH_TOKEN: ${{ github.token }}

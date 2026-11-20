@@ -25,7 +25,7 @@ from app.providers import config as cloud_config
 def chain(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LLM_FALLBACK_BACKEND", "sunbird")
     monkeypatch.setattr(pipeline.flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
-    monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+    monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
     monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: True)
     monkeypatch.setattr("app.providers.budget.try_consume_neurons", lambda *_a, **_k: True)
     monkeypatch.setattr(sunbird, "is_available", lambda: True)
@@ -107,7 +107,7 @@ def relay(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CF_RELAY_BASE_URL", "https://relay.example")
     monkeypatch.setenv("CF_RELAY_SECRET", "s")  # pragma: allowlist secret
     monkeypatch.setattr(gateway, "is_sovereign_mode", lambda: False, raising=False)
-    monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+    monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
     cloud_config.get_cloud_settings.cache_clear()
     yield
     cloud_config.get_cloud_settings.cache_clear()
