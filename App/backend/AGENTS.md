@@ -48,7 +48,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
   PR otherwise, and a lookbehind, a lookahead or a `pos` argument does not satisfy it; use
   `linear_text` or a scan, and keep the old regex as the test oracle (ADR-0057).
 - Retrieval flags `hyde`, `graph_fusion`, `tool_rag` stay default off.
-- On a turn that carries a document, a fast path may answer but may not ask: `_maybe_handle_fast_paths(has_attachment=...)` keeps the jurisdiction decline and the exact answers, and skips the paths that ask for a detail the document may hold. Every call on both chat paths passes the flag (ADR-0068).
+- What a turn's document means for its instant paths is one value, `attachment_role(attachments, message, router_message)` in `rag/pipeline.py`, worked out once per route and passed to `_maybe_handle_fast_paths(attachment=...)`. Beside a readable document a path may answer but may not ask. When the message points at the document ("the PAYE in this payslip") no path answers and the turn goes to the answer that reads it. A document with no extracted text counts as none, so the taxpayer is still asked for the figure. Another country's tax is declined in every case. Do not add a fast path that reads `attachments` itself (ADR-0068 part 2).
 - Behaviour the HF Space needs goes in this package behind a setting, with tests, never into `HF_CPU_PATCH_B64` in `App/deploy/hf-space/Dockerfile`: no test or review reads that script, and it left two retrieval defects in production (ADR-0068).
 - Answers are generated in English and localized in **one** place
   (`localize_reply`). A new exit from `_generate_en` needs no translation call;

@@ -53,7 +53,7 @@ Option 1, one part at a time, each in its own pull request.
 | Part | Was in the script | Now | Landed |
 | --- | --- | --- | --- |
 | 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `RERANK_ENABLED` and `SPARSE_CPU_RERANKER` are both true. `_rerank` scores it like any reranker, and it reads the retriever's current BM25 encoder on every call | yes |
-| 2 | On the REST path, a turn with an attachment skipped every fast path | `_maybe_handle_fast_paths(has_attachment=...)` in `rag/pipeline.py`, passed at all six call sites on both paths: a fast path may answer but may not ask | yes |
+| 2 | On the REST path, a turn with an attachment skipped every fast path | `attachment_role(...)` and `_maybe_handle_fast_paths(attachment=...)` in `rag/pipeline.py`, passed at all six call sites on both paths: a fast path may answer but may not ask | yes |
 | 3 | The Gemini speech fallback | `_gemini_audio_transcribe` in `speech/speech_service.py`, the chain's last tier, on when `STT_FALLBACK_BACKEND=gemini`. Traced, under the cloud deadline, and a response with no content is not silence | yes |
 
 `SPARSE_CPU_RERANKER` is off unless set, so an image that cannot load a
@@ -97,6 +97,25 @@ lost a section of the script on an image that lacks the code replacing it.
   - The alternatives were to skip every fast path on both routes, which gives
     up an exact instant answer the question fully specifies, or to skip none,
     which brings back the request for a figure the taxpayer has just uploaded.
+  - An independent run of both routes, parent against head, passed that rule and
+    showed two places it fell short. Both are now part of it.
+    - A question that points at the document is not answered from a table.
+      "What is the VAT rate on this invoice?" got 18% from the rate table,
+      whatever the invoice says. When the message points at the document, no
+      fast path answers and the turn goes on to the answer that reads it.
+    - A document with no extracted text counts as no document. A scan that
+      could not be read cannot hold the missing figure, and skipping the
+      question left the taxpayer with nothing to answer.
+    The three cases are one value, `AttachmentRole` (`none`, `beside`,
+    `subject`), worked out once per route by `attachment_role`. The follow-up
+    to a calculation is held to it too, and no longer asks for the next figure
+    beside a document.
+  - Pointing at the document is read from the words ("this invoice", "the
+    attached notice", "ankara hii", "ekiwandiiko kino"). A question that
+    points at it in words the pattern lacks is answered as before this
+    refinement, from the table. A false match sends a turn to the slower
+    answer that reads the document. Neither is worse than what either route
+    did before part 2.
 - **Part 3 changes three things in the speech fallback** (G698).
   - Each call is traced with `tracing.llm_call` and reports the provider's own
     token counts, as every model client must.
@@ -142,3 +161,8 @@ lost a section of the script on an image that lacks the code replacing it.
   one streaming call, one.
 - After the merge the Space is checked on the new image: `/ready` reports the
   reranker, the build log shows the script applied, and a live answer is read.
+- Part 2 was run by a verifier who did not write it, on both routes at parent and
+  head, with each commit's layer script applied. Ten kinds of message behaved as
+  the rule says, and a turn with no attachment was byte-identical. The same run
+  found that `test_attachment_turn_fast_paths.py` passed only after another test
+  had created the database; it now creates its own.

@@ -93,7 +93,7 @@ def test_what_an_attachment_turn_skips_is_decided_in_the_pipeline() -> None:
     decline for another country's taxes, and never reached the streaming path (G698)."""
     assert "not attachments" not in "".join(_patch_strings().values())
     pipeline = (ROOT / "App" / "backend" / "app" / "rag" / "pipeline.py").read_text(encoding="utf-8")
-    assert "has_attachment=bool(attachments)" in pipeline
+    assert "attachment = attachment_role(attachments, message, router_message)" in pipeline
 
 
 def test_the_gemini_speech_fallback_is_the_repositorys_and_the_space_turns_it_on() -> None:

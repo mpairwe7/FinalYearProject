@@ -42,7 +42,7 @@ import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Generator, Iterable
 from pathlib import Path
-from typing import Any, Callable, Final
+from typing import Any, Callable, Final, Literal
 
 from ..db import database as db
 from .. import documents as documents_module
@@ -250,6 +250,36 @@ from ..workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn
 from ..workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
+
+
+#: What a turn's attachment means for its instant paths (ADR-0068 part 2).
+#:   "none"     no document with readable text: a path may answer and may ask.
+#:   "beside"   a readable document the message does not point at: a path may answer but may not
+#:              ask, because the missing detail may be in the document.
+#:   "subject"  the message points at the document ("the PAYE in this payslip"): only the answer
+#:              that reads the document can be right, so no instant path answers.
+AttachmentRole = Literal["none", "beside", "subject"]
+
+_POINTS_AT_DOCUMENT_RE = re.compile(
+    r"\b(?:this|that|these|those|my|our|attached|uploaded|enclosed)\s+(?:[\w'-]+\s+){0,2}?"
+    r"(?:invoice|receipt|pay\s?slip|statement|document|file|pdf|letter|notice|assessment|certificate|form|return|"
+    r"image|photo|picture|screenshot|scan|attachment|upload|bill|contract|agreement|report)s?\b"
+    r"|\b(?:attached|attachment|uploaded|enclosed)\b"
+    r"|\b(?:ankara|risiti|stakabadhi|hati|waraka|nyaraka|fomu|barua|picha|kiambatisho)\s+(?:hii|hiyo|hizi|hizo|yangu|zangu)\b"
+    r"|\b(?:ekiwandiiko|ebiwandiiko|lisiiti|risiiti|ebbaluwa|ekifaananyi|foomu)\s+(?:kino|ekyo|bino|ebyo|eno|eyo|kyange|yange)\b",
+    re.IGNORECASE,
+)
+
+
+def attachment_role(attachments: list[Any] | None, *messages: str) -> AttachmentRole:
+    """The role of a turn's attachments, from what was extracted and what the message says.
+
+    A scan with no extracted text cannot hold a missing figure, so it counts as no document:
+    the taxpayer is asked for the figure as usual.
+    """
+    if not any((getattr(doc, "text", "") or "").strip() for doc in attachments or ()):
+        return "none"
+    return "subject" if any(_POINTS_AT_DOCUMENT_RE.search(m or "") for m in messages) else "beside"
 
 # Turn context lives in the leaf module turn_context (ADR-0031); these are the
 # same ContextVar objects under their historical names.
@@ -9242,7 +9272,7 @@ class ChatModel:
         thread_id: str,
         locale: str,
         user_id: str | None = None,
-        has_attachment: bool = False,
+        attachment: AttachmentRole = "none",
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
@@ -9259,55 +9289,29 @@ class ChatModel:
         gets a scope caveat appended, so the half URA cannot speak to is never
         left unmarked.
 
-        With a document attached (*has_attachment*) a path may answer but may
-        not ask. A question that carries its own figures still gets the exact
-        answer, and one about another country's taxes is still declined. The
-        paths that ask for a missing detail are skipped: the detail may be in
-        the document, and the turn goes on to the answer that reads it
+        *attachment* is the role of the turn's document (:data:`AttachmentRole`). Beside
+        a readable document a path may answer but may not ask: a question that carries
+        its own figures still gets the exact answer, and the paths that ask for a missing
+        detail are skipped, because the detail may be in the document. When the message
+        points at the document, no path answers and the turn goes on to the answer that
+        reads it. A question about another country's taxes is declined either way
         (ADR-0068).
         """
         if flags.is_enabled("langgraph") and flags.is_enabled("agentic_mode"):
             return None
-        result = (
-            self._maybe_decline_out_of_jurisdiction(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+        may_ask = attachment == "none"
+        common = {"message": message, "rewritten": rewritten, "thread_id": thread_id, "locale": locale}
+        result = self._maybe_decline_out_of_jurisdiction(**common) or self._maybe_handle_local_government_tax(**common)
+        if not result and attachment != "subject":
+            result = (
+                (may_ask and self._maybe_handle_tin_clarification(**common, user_id=user_id))
+                or self._maybe_handle_calculator(**common, user_id=user_id, elicit=may_ask)
+                or self._maybe_handle_calc_followup(**common, elicit=may_ask)
+                or (may_ask and self._maybe_handle_bare_amount(**common))
+                or self._maybe_handle_situational_advisory(**common)
+                or self._maybe_handle_rate_lookup(**common)
+                or self._maybe_handle_education(**common)
             )
-            or self._maybe_handle_local_government_tax(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or (
-                not has_attachment
-                and self._maybe_handle_tin_clarification(
-                    message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
-                )
-            )
-            or self._maybe_handle_calculator(
-                message=message,
-                rewritten=rewritten,
-                thread_id=thread_id,
-                locale=locale,
-                user_id=user_id,
-                elicit=not has_attachment,
-            )
-            or self._maybe_handle_calc_followup(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or (
-                not has_attachment
-                and self._maybe_handle_bare_amount(
-                    message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-                )
-            )
-            or self._maybe_handle_situational_advisory(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_rate_lookup(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_education(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-        )
         return self._add_comparison_scope_caveat(result or None, message=message, rewritten=rewritten)
 
     @staticmethod
@@ -10431,6 +10435,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        elicit: bool = True,
     ) -> dict[str, Any] | None:
         """Replay the last calculator when the next turn is only a new amount.
 
@@ -10443,6 +10448,8 @@ class ChatModel:
         nxt = continue_calculation(saved, message) or continue_calculation(saved, rewritten)
         if nxt is None:
             return None
+        if not nxt["ready"] and not elicit:
+            return None  # the next detail may be in the document
         if not nxt["ready"]:
             remember_calculation(
                 _state_conversation_id(thread_id),
@@ -11906,6 +11913,7 @@ class ChatModel:
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
                 core_msg = strip_conversational_prefix(message) or message
+                attachment = attachment_role(attachments, message, router_message)
                 calc_result = None
                 if connector_intent is None and core_msg != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11914,7 +11922,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
-                        has_attachment=bool(attachments),
+                        attachment=attachment,
                     )
                 if connector_intent is None and not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11923,7 +11931,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
-                        has_attachment=bool(attachments),
+                        attachment=attachment,
                     )
                 if connector_intent is None and not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11932,7 +11940,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
-                        has_attachment=bool(attachments),
+                        attachment=attachment,
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
@@ -14073,6 +14081,7 @@ class ChatModel:
         # Same order generate() tries: the taxpayer's own words first (their
         # figures), then the English form the calculator patterns are written in.
         core_msg_s = strip_conversational_prefix(message) or message
+        attachment = attachment_role(attachments, message, router_message)
         calc_result = (
             None
             if connector_intent is not None
@@ -14082,7 +14091,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
-                has_attachment=bool(attachments),
+                attachment=attachment,
             )
         )
         if connector_intent is None and not calc_result and core_msg_s != message:
@@ -14092,7 +14101,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
-                has_attachment=bool(attachments),
+                attachment=attachment,
             )
         if connector_intent is None and not calc_result and router_message != message:
             calc_result = self._maybe_handle_fast_paths(
@@ -14101,7 +14110,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
-                has_attachment=bool(attachments),
+                attachment=attachment,
             )
         if calc_result:
             if distress and calc_result.get("reply"):
