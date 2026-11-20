@@ -367,7 +367,7 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertEqual(len(record.meta["ocr_page_numbers"]), 4)
 
     def test_pypdfium2_and_pdfplumber_extraction_pure_permissive(self):
-        from app.pdf_export import generate_tax_summary_pdf
+        from app.processing.pdf_export import generate_tax_summary_pdf
 
         # Generate a standard PDF with fpdf2 (pure Apache-2.0 / LGPL)
         calc_data = {
@@ -591,7 +591,7 @@ class ServiceInjectionTest(_RegistryIsolation):
 @unittest.skipUnless(_has("fpdf"), "fpdf2 not installed")
 class ReportPdfTest(_RegistryIsolation):
     def test_report_pdf_bytes(self):
-        from app.pdf_export import (
+        from app.processing.pdf_export import (
             generate_conversation_pdf,
             generate_document_report_pdf,
             generate_tax_summary_pdf,

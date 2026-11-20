@@ -609,8 +609,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sb, \
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sb, \
              mock.patch.object(gateway, "gemini_generate") as gg:
             out = pipeline._llm_cloud_fallback("vat rate?", [{"text": "VAT is 18%"}], None, "en")
         self.assertEqual(out, "VAT is 18%. [1]")
@@ -662,8 +662,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion", return_value="VAT is eighteen percent."):
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion", return_value="VAT is eighteen percent."):
             chunks = list(pipeline._stream_cloud_fallback("vat?", [{"text": "VAT"}], None, "en"))
         self.assertGreater(len(chunks), 1)
         self.assertEqual("".join(chunks).strip(), "VAT is eighteen percent.")
@@ -677,8 +677,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion", return_value="The Electronic") as gg, \
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion", return_value="The Electronic") as gg, \
              mock.patch.object(
                  gateway,
                  "workers_ai_chat",
@@ -776,8 +776,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion") as gg, \
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac:
             out = pipeline._llm_cloud_fallback(
                 "vat rate?",
@@ -798,8 +798,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion", return_value="Short") as gg, \
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion", return_value="Short") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac, \
              mock.patch.object(pipeline.time, "monotonic", side_effect=[100.0, 100.0, 200.0]):
             # Readings: the chain budget before Sunbird, Sunbird's own share (135 - 100 s left),
@@ -819,8 +819,8 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as gg:
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.chat_completion", return_value="VAT is 18%. [1]") as gg:
             out = pipeline._llm_cloud_fallback(
                 "vat rate?",
                 [{"text": "VAT is 18%"}],
@@ -1130,7 +1130,7 @@ class CloudLlmReadyTest(unittest.TestCase):
         _clear_keys()
         os.environ["LLM_FALLBACK_BACKEND"] = "sunbird"
         with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
-             mock.patch("app.sunbird.is_available", return_value=False):
+             mock.patch("app.providers.sunbird.is_available", return_value=False):
             self.assertFalse(pipeline._cloud_llm_ready())
 
     def test_true_for_configured_sunbird_without_cloudflare(self):
@@ -1140,7 +1140,7 @@ class CloudLlmReadyTest(unittest.TestCase):
         for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
             os.environ["LLM_FALLBACK_BACKEND"] = backend
             with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
-                 mock.patch("app.sunbird.is_available", return_value=True):
+                 mock.patch("app.providers.sunbird.is_available", return_value=True):
                 self.assertTrue(pipeline._cloud_llm_ready(), backend)
 
     def test_true_for_configured_workers_ai(self):
@@ -1482,8 +1482,8 @@ class LLMRoutingOrderTest(unittest.TestCase):
         for backend in ("sunbird", "gemini"):
             with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
                  mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": backend}), \
-                 mock.patch("app.sunbird.is_available", return_value=True), \
-                 mock.patch("app.sunbird.chat_completion", return_value="ans [1]") as sb, \
+                 mock.patch("app.providers.sunbird.is_available", return_value=True), \
+                 mock.patch("app.providers.sunbird.chat_completion", return_value="ans [1]") as sb, \
                  mock.patch.object(gateway, "gemini_generate") as gg, \
                  mock.patch.object(gateway, "workers_ai_chat") as wc:
                 out = pipeline._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
@@ -1608,7 +1608,7 @@ class TranslateRoutingOrderTest(unittest.TestCase):
         self.assertEqual(res.text, "Omusolo via CF")
 
     def test_sunbird_when_both_cloud_llms_empty(self):
-        from app import sunbird as real_sunbird
+        from app.providers import sunbird as real_sunbird
         from app.speech.speech_service import SpeechModel
         sm = self._sm()
         with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
@@ -1634,8 +1634,8 @@ class TranslationFallbackTest(unittest.TestCase):
         for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
             with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
                  mock.patch.dict(os.environ, {"TRANSLATE_FALLBACK_BACKEND": backend}), \
-                 mock.patch("app.sunbird.is_available", return_value=True), \
-                 mock.patch("app.sunbird.chat_completion", return_value="Omusolo gwa VAT") as chat, \
+                 mock.patch("app.providers.sunbird.is_available", return_value=True), \
+                 mock.patch("app.providers.sunbird.chat_completion", return_value="Omusolo gwa VAT") as chat, \
                  mock.patch.object(gateway, "gemini_generate") as gg:
                 out = SpeechModel._sunbird_llm_translate("VAT tax", "en", "lg")
             self.assertEqual(out, "Omusolo gwa VAT", backend)
@@ -1646,7 +1646,7 @@ class TranslationFallbackTest(unittest.TestCase):
         from app.speech.speech_service import SpeechModel
 
         with mock.patch("app.config.flags.flags.is_enabled", return_value=False), \
-             mock.patch("app.sunbird.chat_completion") as chat:
+             mock.patch("app.providers.sunbird.chat_completion") as chat:
             self.assertEqual(SpeechModel._sunbird_llm_translate("x", "en", "lg"), "")
         chat.assert_not_called()
 
@@ -1837,8 +1837,8 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.translate", return_value="SUNBIRD"):
             for src, tgt in (("lg", "en"), ("en", "lg")):
                 res = m._do_translate("hello", src, tgt)
                 self.assertEqual(res.backend, "sunbird_cloud", f"{src}->{tgt}")
@@ -1850,8 +1850,8 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
-             mock.patch("app.sunbird.is_available", return_value=True), \
-             mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
+             mock.patch("app.providers.sunbird.is_available", return_value=True), \
+             mock.patch("app.providers.sunbird.translate", return_value="SUNBIRD"):
             res = m._do_translate("hello", "en", "fr")
             self.assertEqual(res.backend, "sunbird_llm")
 
@@ -1861,7 +1861,7 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
-             mock.patch("app.sunbird.is_available", return_value=False):
+             mock.patch("app.providers.sunbird.is_available", return_value=False):
             res = m._do_translate("hello", "lg", "en")
             self.assertEqual(res.backend, "sunbird_llm")
             self.assertEqual(res.text, "SUNFLOWER")

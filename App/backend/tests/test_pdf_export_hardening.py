@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.models import ExportConversationRequest, ExportTaxSummaryRequest
-from app.pdf_export import generate_conversation_pdf, generate_tax_summary_pdf
+from app.processing.pdf_export import generate_conversation_pdf, generate_tax_summary_pdf
 
 
 def test_unicode_conversation_export_never_raises() -> None:

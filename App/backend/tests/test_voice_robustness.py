@@ -235,7 +235,7 @@ class TestCloudDeadline(unittest.TestCase):
         from collections import OrderedDict
 
         from app.speech import speech_service as ss
-        from app import sunbird
+        from app.providers import sunbird
 
         model = ss.SpeechModel.__new__(ss.SpeechModel)
         model.enabled = True
@@ -424,7 +424,7 @@ class TestSunbirdRetry(unittest.TestCase):
     def test_retries_transient_then_succeeds(self) -> None:
         import httpx
 
-        from app import sunbird
+        from app.providers import sunbird
 
         client = MagicMock()
         client.post.side_effect = [self._response(503), self._response(200)]
@@ -438,7 +438,7 @@ class TestSunbirdRetry(unittest.TestCase):
         slept.assert_called_once()
 
     def test_auth_failure_fails_over_without_retry(self) -> None:
-        from app import sunbird
+        from app.providers import sunbird
 
         primary = MagicMock()
         primary.post.return_value = self._response(401)
@@ -459,7 +459,7 @@ class TestSunbirdRetry(unittest.TestCase):
         slept.assert_not_called()
 
     def test_rewind_uploads_reseeks_streams(self) -> None:
-        from app.sunbird import _rewind_uploads
+        from app.providers.sunbird import _rewind_uploads
 
         stream = io.BytesIO(b"pcm-bytes")
         stream.read()  # consume, as a failed attempt would

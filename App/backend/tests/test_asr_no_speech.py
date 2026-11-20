@@ -78,8 +78,8 @@ class NoSpeechIsNotFailureTests(unittest.TestCase):
         """The case that reached users: Sunbird answered, with no words in it."""
         model = _Bare()
         with (
-            patch("app.sunbird.is_available", return_value=True),
-            patch("app.sunbird.speech_to_text", return_value={"text": "", "language": "eng"}),
+            patch("app.providers.sunbird.is_available", return_value=True),
+            patch("app.providers.sunbird.speech_to_text", return_value={"text": "", "language": "eng"}),
         ):
             result = _chain(model)
 
@@ -90,7 +90,7 @@ class NoSpeechIsNotFailureTests(unittest.TestCase):
     def test_nothing_reachable_still_reports_a_failure(self):
         """The opposite case has to keep failing loudly, or the fix hides outages."""
         model = _Bare()
-        with patch("app.sunbird.is_available", return_value=False):
+        with patch("app.providers.sunbird.is_available", return_value=False):
             result = _chain(model)
 
         self.assertEqual(result.text, "")
@@ -100,7 +100,7 @@ class NoSpeechIsNotFailureTests(unittest.TestCase):
     def test_a_local_backend_hearing_nothing_is_also_not_an_error(self):
         """Same rule for the offline tiers, so it does not depend on Sunbird."""
         model = _Bare(faster=TranscribeResult(text="", backend="faster_whisper"))
-        with patch("app.sunbird.is_available", return_value=False):
+        with patch("app.providers.sunbird.is_available", return_value=False):
             result = _chain(model)
 
         self.assertIsNone(result.error)

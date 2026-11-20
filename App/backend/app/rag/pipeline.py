@@ -981,7 +981,7 @@ def _llm_cloud_fallback(
     if _budget_exhausted():
         logger.warning("LLM fallback chain total budget exhausted before Sunbird attempt")
     elif backend == "sunbird" and cloud_models_allowed():
-        from .. import sunbird
+        from ..providers import sunbird
 
         # Sunbird's failover is bounded by the chain's budget, less a reserve for Workers
         # AI, so a slow primary account cannot also spend the fallback's time.
@@ -1120,7 +1120,7 @@ def _cloud_llm_ready() -> bool:
     if backend not in ("sunbird", "workers_ai"):
         return False
     if backend == "sunbird":
-        from .. import sunbird
+        from ..providers import sunbird
 
         if sunbird.is_available():
             return True
@@ -4224,7 +4224,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
         return generator_module.translate_text(text, source_lang="en", target_lang=locale)
 
     def _cloud() -> str | None:
-        from .. import sunbird
+        from ..providers import sunbird
 
         return sunbird.translate_from_english(text, locale)
 
@@ -4789,7 +4789,7 @@ def _judge_rescue(
     if not FAQ_JUDGE_ENABLED or not query.strip() or not cloud_models_allowed():
         return []
     try:
-        from .. import sunbird as _sunbird
+        from ..providers import sunbird as _sunbird
         from ..providers import breakers as _breakers
 
         if not _sunbird.is_available():

@@ -417,7 +417,7 @@ def resolve_edge_voice(language: str, voice: str | None = None) -> str:
 def _sunbird_has_native_voice(locale: str) -> bool:
     """True when Sunbird ships a native speaker for *locale*."""
     try:
-        from .. import sunbird
+        from ..providers import sunbird
 
         return bool(sunbird.TTS_VOICES.get(locale))
     except Exception:  # noqa: BLE001 — sunbird optional; absence means no voice
@@ -1230,7 +1230,7 @@ class SpeechModel:
 
         # ⑤ Sunbird cloud (fallback when all local backends unavailable)
         try:
-            from .. import sunbird
+            from ..providers import sunbird
             if sunbird.is_available():
                 import io as _io
                 import wave as _wave
@@ -1328,7 +1328,7 @@ class SpeechModel:
         stated language is refused, because ``gemini_allowed_for`` reads ``None`` as
         English and the clip could be Luganda.
         """
-        from .. import sunbird
+        from ..providers import sunbird
         from ..config.flags import flags
 
         multilingual_opt_in = (
@@ -1524,7 +1524,7 @@ class SpeechModel:
         or ``TTS_FALLBACK_BACKEND=gemini`` is configured. Automatically yields back to Sunbird
         once the Sunbird quota cooldown expires.
         """
-        from .. import sunbird
+        from ..providers import sunbird
         from ..config.flags import flags
 
         tts_fb = os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower()
@@ -2299,7 +2299,7 @@ class SpeechModel:
             """One attempt at Sunbird's native voice. None if unavailable."""
             t_sunbird = time.perf_counter()
             try:
-                from .. import sunbird
+                from ..providers import sunbird
 
                 if not sunbird.is_available():
                     return None
@@ -3015,7 +3015,7 @@ class SpeechModel:
 
         def _sunbird():
             try:
-                from .. import sunbird
+                from ..providers import sunbird
                 if sunbird.is_available():
                     # Same inline-map defect as the STT path had: this knew only
                     # en/lg and passed everything else through unmapped, so
@@ -3026,7 +3026,7 @@ class SpeechModel:
                     #
                     # Swahili now translates here too — verified 2026-08-19
                     # against the live API (see TRANSLATION_LANGUAGES in
-                    # sunbird.py). It used to decline and fall through to
+                    # providers/sunbird.py). It used to decline and fall through to
                     # Gemini/Workers AI/prompted on a stale claim that the
                     # translate endpoint didn't serve swa; it does.
                     src_code = sunbird.LOCALE_TO_SUNBIRD.get(source_lang, source_lang)
@@ -3068,11 +3068,11 @@ class SpeechModel:
         # languages a general model approximates rather than speaks.
         #
         # Swahili now leads with Sunbird too (see TRANSLATION_LANGUAGES in
-        # sunbird.py) — the earlier "their translate endpoint does not serve
+        # providers/sunbird.py) — the earlier "their translate endpoint does not serve
         # it" claim was verified false against the live API 2026-08-19.
         def _sunbird_translates(src: str, tgt: str) -> bool:
             try:
-                from .. import sunbird
+                from ..providers import sunbird
             except Exception:  # noqa: BLE001 — optional dependency
                 return False
             codes = {
@@ -3132,7 +3132,7 @@ class SpeechModel:
         if _translate_fallback_backend() != "sunbird":
             return ""
         try:
-            from .. import sunbird
+            from ..providers import sunbird
             from ..providers import breakers
         except Exception:
             return ""

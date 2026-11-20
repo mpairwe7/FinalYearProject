@@ -61,9 +61,9 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | 7 | `processing/`, `chat/`, `quality/` | `documents`, `document_worker`, `ocr_service`; `chat_ws_v2`, `chat_title`, `conversational`, `model_welfare`, `turn_guidance`, `turn_pipeline`; `artifact_export` | yes |
 | 8 | `connectors/`, `memory/`, `rag/`, `tax/`, `db/` | `connector_intent`, `connector_outcome`, `portal_copilot`, `ura_account_mock`, `verified_resources`; `topics`; `tool_budget`; `glossary`; `cms` | yes |
 | 9 | `security/`, `notifications/`, `offline/`, `ingestion/`, `db/` | `authority`, `production_readiness`, `retention`, `ai_disclosure`, `confirm_tokens`; `notify`, `reminders`; `offline_bundle`, `offline_sync`; `crawl_gate`, `publications`; `storage_protocol`, `seed_prototype` | yes |
-| 10 | `providers/`, `processing/` | `sunbird`; `pdf_export` | no |
+| 10 | `providers/`, `processing/` | `sunbird`; `pdf_export` | yes |
 
-**What stays flat, and why.** Thirteen modules, once phase 10 has landed.
+**What stays flat, and why.** Thirteen modules.
 
 - `main.py`.
 - `_root`, `freshness`, `malware_scan` and `mt`. The seven files whose hash is
@@ -111,7 +111,9 @@ so merging them would change how a reported number is reproduced.
   modules are in `app/connectors/`, and four join `memory/`, `rag/`, `tax/`
   and `db/`. Phase 9 moves thirteen: the production gates are in
   `app/security/`, taxpayer messages in `app/notifications/`, the offline
-  bundle in `app/offline/`, and four tools join `ingestion/` and `db/`. Imports read `from .speech import speech_service`; a
+  bundle in `app/offline/`, and four tools join `ingestion/` and `db/`. Phase 10
+  moves the last two: the Sunbird client is in `app/providers/` and PDF export
+  in `app/processing/`. Thirteen modules are flat. Imports read `from .speech import speech_service`; a
   caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new
@@ -124,16 +126,17 @@ so merging them would change how a reported number is reproduced.
 - The Space layer patches files inside the image by path
   (`HF_CPU_PATCH_B64` in `App/deploy/hf-space/Dockerfile`). The script is
   base64-encoded, so the codemod cannot reach it, and it also inserts code with
-  its own imports. Phase 1 updates it by hand, and phase 10 must do the same
-  for `pdf_export.py`. It looks for
+  its own imports. Phase 1 updated it by hand, and phase 10 did the same for
+  `pdf_export.py` through the phase driver. It looks for
   `speech/speech_service.py` first and the old path second, because a pinned
   image can predate the move, and the code it inserts imports absolutely, so it
   runs at either depth. Left as it was, the Space build would have failed on the
   missing file; with only the path fixed, `from . import sunbird` inside
   `speech/` would have failed at run time, behind the fallback's own
-  `try/except`. The script still names `pdf_export.py` and
-  `providers/gateway.py` by their current paths, so a phase that moves either
-  must update it too.
+  `try/except`. For `pdf_export.py` it now looks for
+  `processing/pdf_export.py` first and the old path second, the same way. It
+  still names `providers/gateway.py` by its current path, so a change that
+  moves that file must update the script too.
 
 ## Confirmation
 
@@ -146,7 +149,8 @@ so merging them would change how a reported number is reproduced.
   the codemod does not rewrite path arithmetic. Phase 9 moved
   `storage_protocol`, which read `Path(__file__).resolve().parent` as the
   `app` folder; one folder deeper, its tests failed until the line took a
-  second `.parent`.
+  second `.parent`. Phase 10 moved `pdf_export`, which looks for
+  `app/fonts` the same way, and its line took one too.
 - The test files a phase changes pass locally; CI runs both full suites.
 - `App/tests/test_hf_space_layer.py` loads `speech_service.py` as the Space
   builds it and runs the inserted Gemini fallback. With a relative import put

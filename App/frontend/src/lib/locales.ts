@@ -6,7 +6,7 @@
  * their own English/Luganda-only list independently).
  *
  * This mirrors what the backend already keys its per-locale support on:
- *   - app/sunbird.py LOCALE_TO_SUNBIRD (translation + native TTS voices)
+ *   - app/providers/sunbird.py LOCALE_TO_SUNBIRD (translation + native TTS voices)
  *   - app/rag/generator.py _select_adapter's fine-tuned LoRA allowlist
  *   - app/agents/patterns (locale-aware supervisor routing tables)
  * Adding a locale here without matching backend support would put a

@@ -417,7 +417,7 @@ def chat_completion(
     model call, with the provider's token usage. Raises on any failure,
     including an empty reply, so the caller's circuit breaker sees it.
     """
-    from .observability.tracing import llm_call
+    from ..observability.tracing import llm_call
 
     with llm_call("chat", SUNBIRD_LLM_MODEL, "sunbird") as call:
         resp = _post(
@@ -463,7 +463,7 @@ def translate_with_sunflower(
     *deadline* (``time.monotonic()``) bounds the call, account failover
     included. Raises on failure, like :func:`chat_completion`.
     """
-    from .rag.generator import strip_thought
+    from ..rag.generator import strip_thought
 
     src = _LANGUAGE_NAMES.get(source_lang, source_lang)
     tgt = _LANGUAGE_NAMES.get(target_lang, target_lang)

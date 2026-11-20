@@ -16,7 +16,7 @@ from unittest import mock
 import httpx
 import pytest
 from app.rag import pipeline
-from app import sunbird
+from app.providers import sunbird
 from app.providers import breakers, gateway, relay_client
 from app.providers import config as cloud_config
 

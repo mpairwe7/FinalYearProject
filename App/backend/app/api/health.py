@@ -61,7 +61,7 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # shipped unnoticed. An operator should not have to ask the assistant a
     # Luganda question to find out.
     from ..rag import generator
-    from .. import sunbird
+    from ..providers import sunbird
     from ..rag.query import language_detection_backend
 
     if sunbird.is_available():

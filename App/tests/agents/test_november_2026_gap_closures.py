@@ -695,7 +695,7 @@ def test_qa_audit_gemini_translate_budget_fixed_point_mt_cache_and_midparagraph_
     mt.cache.clear()
     with (
         mock.patch(
-            "app.sunbird.translate_to_english",
+            "app.providers.sunbird.translate_to_english",
             return_value="Can I use EFRIS without internet in Uganda?",
         ) as tr_mock,
         mock.patch("app.rag.query.RETRIEVAL_MT_BACKEND", "sunbird"),
