@@ -1649,6 +1649,12 @@ _CALCULATED_RE = re.compile(r"\b(?:calculated|computed)\b", re.IGNORECASE)
 _TAX_CUT_RE = re.compile(r"\bhow\s+much\s+(?:tax|cut)\b", re.IGNORECASE)
 _TAX_CUT_KEYWORD_RE = re.compile(r"\b(?:on|for|pay|charged|deducted|take)\b", re.IGNORECASE)
 _ALLOWED_RE = re.compile(r"\b(?:can|is|are|may)\b", re.IGNORECASE)
+#: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
+#: the same two words and asks for paperwork: after is/are, a word of need or "the process" is not
+#: an allowance. It was answered "the common external tariff is 25%" (G700).
+_NEED_AFTER_RE = re.compile(
+    r"\s+(?:required|needed|necessary|mandatory|the\s+(?:process|procedure|steps|requirements?))\b", re.IGNORECASE
+)
 _ALLOWED_KEYWORD_RE = re.compile(
     r"\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b", re.IGNORECASE
 )
@@ -1711,8 +1717,9 @@ def _asks_about_rates(text: str) -> bool:
     keywords = [m.start() for m in _RATE_KEYWORD_RE.finditer(text)]
     if _keyword_before_stop(sorted(starts), keywords, questions):
         return True
-    for start_re, keyword_re in ((_TAX_CUT_RE, _TAX_CUT_KEYWORD_RE), (_ALLOWED_RE, _ALLOWED_KEYWORD_RE)):
-        ends = [m.end() for m in start_re.finditer(text)]
+    tax_cut = [m.end() for m in _TAX_CUT_RE.finditer(text)]
+    allowed = [m.end() for m in _ALLOWED_RE.finditer(text) if not _NEED_AFTER_RE.match(text, m.end())]
+    for ends, keyword_re in ((tax_cut, _TAX_CUT_KEYWORD_RE), (allowed, _ALLOWED_KEYWORD_RE)):
         if ends and _keyword_before_stop(ends, [m.start() for m in keyword_re.finditer(text)], questions):
             return True
     return False
@@ -2286,19 +2293,6 @@ _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-#: A question that asks for paperwork. "What documents are required to clear an imported vehicle
-#: at customs?" reads as "what ... are required", which the rate test accepts for "what deductions
-#: are allowed", and "customs" then picked the tariff: it was answered "25%" (G700).
-_DOCUMENTS_ASK_RE = re.compile(
-    r"\b(documents?|paperwork|papers|forms?|checklists?|requirements?|nyaraka|ebiwandiiko|fomu)\b", re.IGNORECASE
-)
-_RATE_CUE_RE = re.compile(
-    r"\b(rates?|percent(?:age)?|how\s+much|thresholds?|bands?|penalt(?:y|ies)|fines?|dut(?:y|ies)|tariffs?|lev(?:y|ies)|fees?|"
-    r"kiwango|viwango|asilimia|omuwendo|ebitundu)\b|%",
-    re.IGNORECASE,
-)
-
-
 def plan_rate_lookup(message: str) -> RatePlan | None:
     """Map a rate QUESTION to the FY rate table, or None when not one.
 
@@ -2308,8 +2302,6 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     """
     text = (message or "").strip()
     if not text or extract_amounts(text):
-        return None
-    if _DOCUMENTS_ASK_RE.search(text) and not _RATE_CUE_RE.search(text):
         return None
     if is_explanation_question(text):
         if not (
