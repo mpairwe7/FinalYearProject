@@ -433,6 +433,20 @@ def test_dependabot_automerge_waits_for_required_checks():
             )
 
 
+def test_dependabot_automerge_never_takes_a_major():
+    """Three groups carry no update-types (vitest, next, hf-cluster), so a grouped pull request
+    can hold a major. The step exempted grouped pull requests through `package-group`, an output
+    fetch-metadata does not have, so the exemption never applied. It is gone, so that correcting
+    the name cannot switch it on."""
+    steps = _load(ROOT / ".github" / "workflows" / "dependabot-automerge.yml")["jobs"]["dependabot-automerge"]["steps"]
+    merging = [step for step in steps if "gh pr merge" in str(step.get("run", ""))]
+    assert merging
+    for step in merging:
+        condition = " ".join(str(step.get("if", "")).split())
+        assert "steps.metadata.outputs.update-type != 'version-update:semver-major'" in condition
+        assert "||" not in condition and "group" not in condition, f"{step.get('name')}: no exemption from the major rule"
+
+
 def test_crane_cloud_requirements_install_on_the_python_they_ship_with():
     """#633 raised numpy to >=2.5.4, which needs Python 3.12, in a file the
     production image and CI install on 3.11 — so neither could install it."""
@@ -704,6 +718,37 @@ def test_the_declared_python_floor_is_the_oldest_python_a_lock_targets():
         assert declared.contains(target), f"{lock} targets Python {target}, which requires-python excludes"
     floor = next(Version(spec.version) for spec in declared if spec.operator == ">=")
     assert floor == min(targets.values()), f"requires-python starts at {floor}, the oldest lock targets {min(targets.values())}"
+
+
+def test_dependabot_does_not_propose_what_cannot_install():
+    """Two pull requests could never go green. #790 wrote lingua-language-detector 2.2.0, which
+    needs Python 3.12, into the lock compiled for 3.11. #798 moved transformers and datasets,
+    which each need huggingface-hub 1.31 or newer, without the huggingface-hub the root list pins.
+    datasets 5.2.0 also needs pyarrow 24, a major above the pin."""
+    from fnmatch import fnmatch
+
+    from packaging.version import Version
+
+    updates = _load(ROOT / ".github" / "dependabot.yml")["updates"]
+    backend = next(u for u in updates if u["package-ecosystem"] == "pip" and u.get("directory") == "/App/backend")
+    lock = (ROOT / "App" / "backend" / "requirements-cranecloud.lock.txt").read_text(encoding="utf-8")
+    lock_python = Version(re.search(r"--python-version (\S+)", lock).group(1))
+    held = {"dependency-name": "lingua-language-detector", "versions": [">=2.2"]} in backend.get("ignore", [])
+    assert held == (lock_python < Version("3.12")), "the rule lasts exactly as long as the lock targets a Python below 3.12"
+
+    root = next(u for u in updates if u["package-ecosystem"] == "pip" and u.get("directory") == "/App")
+    names = ("transformers", "datasets", "huggingface-hub", "sentence-transformers", "pyarrow", "fastapi", "loguru")
+    first = {name: next(g for g, group in root["groups"].items() if any(fnmatch(name, p) for p in group["patterns"])) for name in names}
+    assert first == {
+        "transformers": "hf-cluster",
+        "datasets": "hf-cluster",
+        "huggingface-hub": "hf-cluster",
+        "sentence-transformers": "hf-cluster",
+        "pyarrow": "hf-cluster",
+        "fastapi": "fastapi-stack",
+        "loguru": "minor-and-patch",
+    }
+    assert "update-types" not in root["groups"]["hf-cluster"], "a huggingface-hub or pyarrow major must be able to move with them"
 
 
 def test_dependabot_does_not_propose_what_a_policy_test_rejects():
