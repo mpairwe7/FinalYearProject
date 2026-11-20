@@ -1649,15 +1649,43 @@ _CALCULATED_RE = re.compile(r"\b(?:calculated|computed)\b", re.IGNORECASE)
 _TAX_CUT_RE = re.compile(r"\bhow\s+much\s+(?:tax|cut)\b", re.IGNORECASE)
 _TAX_CUT_KEYWORD_RE = re.compile(r"\b(?:on|for|pay|charged|deducted|take)\b", re.IGNORECASE)
 _ALLOWED_RE = re.compile(r"\b(?:can|is|are|may)\b", re.IGNORECASE)
-#: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
-#: the same two words and asks for paperwork: after is/are, a word of need or "the process" is not
-#: an allowance. It was answered "the common external tariff is 25%" (G700).
-_NEED_AFTER_RE = re.compile(
-    r"\s+(?:required|needed|necessary|mandatory|the\s+(?:process|procedure|steps|requirements?))\b", re.IGNORECASE
-)
 _ALLOWED_KEYWORD_RE = re.compile(
     r"\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b", re.IGNORECASE
 )
+#: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
+#: the same two words and asks what is needed. It was answered "the common external tariff is
+#: 25%" (G700). The shape is a wh-word, a subject that is not a charge, is/are, then a word of need.
+#: "What duty is required to clear it?" names a charge and stays a rate question, and so does
+#: "Is necessary equipment exempt?", where no wh-word comes first.
+_NEED_AFTER_RE = re.compile(
+    r"\s+(?:required|needed|necessary|mandatory|the\s+(?:process|procedure|steps|requirements?))\b", re.IGNORECASE
+)
+_WH_RE = re.compile(r"\b(?:what|which|who)\b", re.IGNORECASE)
+_CHARGE_RE = re.compile(
+    r"\b(?:dut(?:y|ies)|tax(?:es)?|fees?|charges?|amounts?|money|costs?|rates?|percent(?:age)?|lev(?:y|ies)|"
+    r"ssente|sente|pesa|ushuru|kodi|o?musolo|meka|ngapi)\b",
+    re.IGNORECASE,
+)
+
+
+def _allowance_starts(text: str) -> list[int]:
+    """Ends of each can/is/are/may that can open an allowance question."""
+    starts = list(_ALLOWED_RE.finditer(text))
+    if not any(_NEED_AFTER_RE.match(text, m.end()) for m in starts):
+        return [m.end() for m in starts]
+    wh_ends = [m.end() for m in _WH_RE.finditer(text)]
+    charges = [m.start() for m in _CHARGE_RE.finditer(text)]
+    ends = []
+    for m in starts:
+        w = bisect.bisect_right(wh_ends, m.start())
+        if w and _NEED_AFTER_RE.match(text, m.end()):
+            c = bisect.bisect_left(charges, wh_ends[w - 1])
+            if c == len(charges) or charges[c] >= m.start():
+                continue  # "what <not a charge> is/are required": asks what is needed
+        ends.append(m.end())
+    return ends
+
+
 _SAME_LINE_PAIRS = tuple(
     (re.compile(first, re.IGNORECASE), re.compile(second, re.IGNORECASE))
     for first, second in (
@@ -1718,7 +1746,7 @@ def _asks_about_rates(text: str) -> bool:
     if _keyword_before_stop(sorted(starts), keywords, questions):
         return True
     tax_cut = [m.end() for m in _TAX_CUT_RE.finditer(text)]
-    allowed = [m.end() for m in _ALLOWED_RE.finditer(text) if not _NEED_AFTER_RE.match(text, m.end())]
+    allowed = _allowance_starts(text)
     for ends, keyword_re in ((tax_cut, _TAX_CUT_KEYWORD_RE), (allowed, _ALLOWED_KEYWORD_RE)):
         if ends and _keyword_before_stop(ends, [m.start() for m in keyword_re.finditer(text)], questions):
             return True

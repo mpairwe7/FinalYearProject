@@ -928,9 +928,29 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
             "What is needed to clear an imported vehicle at customs?",
             "What is the process to clear an imported vehicle at customs?",
             "What documents are needed to clear goods through customs?",
+            "What papers are needed to clear goods at customs?",
+            "Who is required to clear goods at customs?",
         ):
             with self.subTest(question=question):
                 self.assertIsNone(plan_rate_lookup(question))
+
+    def test_a_question_that_names_a_charge_is_still_a_rate_question(self) -> None:
+        """A second fix dropped every "is/are required". A second independent replay found that
+        "What duty is required to clear..." then lost its answer, with the paperwork question."""
+        from app.tax.calculator_router import plan_rate_lookup
+
+        for question, expected in (
+            ("What duty is required to clear an imported vehicle at customs?", "customs_duty_common"),
+            ("What taxes are required to clear a car at customs?", "customs_duty_common"),
+            ("Which duties are mandatory to clear a car at customs?", "customs_duty_common"),
+            ("Ssente meka are required to clear emmotoka at customs?", "customs_duty_common"),
+            ("Is the requirement to pay duty waived when I import a car as a diplomat?", "customs_diplomatic_exemption"),
+            ("Is necessary medical equipment exempt from import duty?", "customs_duty_common"),
+        ):
+            with self.subTest(question=question):
+                plan = plan_rate_lookup(question)
+                self.assertIsNotNone(plan)
+                self.assertEqual(plan.tax_type or plan.summary, expected)
 
     def test_an_allowance_question_is_still_a_rate_question(self) -> None:
         from app.tax.calculator_router import _asks_about_rates, plan_rate_lookup
