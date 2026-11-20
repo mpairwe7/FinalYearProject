@@ -78,4 +78,17 @@ def test_with_no_dense_hits_the_gate_reads_the_overlap_score_not_a_squashed_zero
 def test_the_torch_free_image_gets_it_only_when_switched_on(monkeypatch: pytest.MonkeyPatch, rerank: bool, cpu: bool, installed: bool) -> None:
     monkeypatch.setattr(retriever_module, "RERANK_ENABLED", rerank)
     monkeypatch.setattr(retriever_module, "SPARSE_CPU_RERANKER", cpu)
-    assert isinstance(_sparse_only_reranker(None), _CpuLexicalReranker) is installed
+    assert isinstance(_sparse_only_reranker(lambda: None), _CpuLexicalReranker) is installed
+
+
+def test_it_scores_against_the_encoder_the_retriever_holds_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An alias refresh replaces the retriever's BM25 encoder. Built around the old object, the
+    reranker would gate on the last index's word weights while the sparse leg used the new ones."""
+    used: list[str] = []
+    monkeypatch.setattr(retriever_module, "lexical_relevance", lambda _q, _hit, encoder: used.append(encoder) or 0.0)
+    holder = {"encoder": "first index"}
+    reranker = _CpuLexicalReranker(lambda: holder["encoder"])
+    reranker.predict([("What is the VAT rate?", VAT)])
+    holder["encoder"] = "rebound index"
+    reranker.predict([("What is the VAT rate?", VAT)])
+    assert used == ["first index", "rebound index"]

@@ -52,13 +52,18 @@ Option 1, one part at a time, each in its own pull request.
 
 | Part | Was in the script | Now | Landed |
 | --- | --- | --- | --- |
-| 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `SPARSE_CPU_RERANKER=true`. `_rerank` scores it like any reranker | yes |
+| 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `RERANK_ENABLED` and `SPARSE_CPU_RERANKER` are both true. `_rerank` scores it like any reranker, and it reads the retriever's current BM25 encoder on every call | yes |
 | 2 | Attachment turns skip the calculator fast paths | the pipeline, on both the REST and the streaming path, with the foreign-jurisdiction decline kept | no |
 | 3 | The Gemini speech fallback | `speech/speech_service.py`, behind `STT_FALLBACK_BACKEND=gemini` | no |
 
 `SPARSE_CPU_RERANKER` is off unless set, so an image that cannot load a
 cross-encoder reranks only where a deployment asks for it. The Space's
 Dockerfile already set it to `true`.
+
+The Space receives its Dockerfile only from the roll, which the image build
+dispatches after it has pushed the new image, and which rewrites the pin to that
+image before it uploads the file. So the Space never runs a Dockerfile that has
+lost a section of the script on an image that lacks the code replacing it.
 
 ## Consequences
 
