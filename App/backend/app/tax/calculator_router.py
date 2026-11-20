@@ -2286,6 +2286,19 @@ _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+#: A question that asks for paperwork. "What documents are required to clear an imported vehicle
+#: at customs?" reads as "what ... are required", which the rate test accepts for "what deductions
+#: are allowed", and "customs" then picked the tariff: it was answered "25%" (G700).
+_DOCUMENTS_ASK_RE = re.compile(
+    r"\b(documents?|paperwork|papers|forms?|checklists?|requirements?|nyaraka|ebiwandiiko|fomu)\b", re.IGNORECASE
+)
+_RATE_CUE_RE = re.compile(
+    r"\b(rates?|percent(?:age)?|how\s+much|thresholds?|bands?|penalt(?:y|ies)|fines?|dut(?:y|ies)|tariffs?|lev(?:y|ies)|fees?|"
+    r"kiwango|viwango|asilimia|omuwendo|ebitundu)\b|%",
+    re.IGNORECASE,
+)
+
+
 def plan_rate_lookup(message: str) -> RatePlan | None:
     """Map a rate QUESTION to the FY rate table, or None when not one.
 
@@ -2295,6 +2308,8 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     """
     text = (message or "").strip()
     if not text or extract_amounts(text):
+        return None
+    if _DOCUMENTS_ASK_RE.search(text) and not _RATE_CUE_RE.search(text):
         return None
     if is_explanation_question(text):
         if not (

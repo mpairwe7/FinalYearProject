@@ -907,3 +907,46 @@ class ExplanationVsCalculationRoutingTests(unittest.TestCase):
         self.assertTrue(
             any("183+ days" in a and "how many days" in a for a in filled_contract.assumptions)
         )
+
+
+class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
+    """"What documents are required to clear an imported vehicle at customs?" was answered
+    "The common external tariff for finished goods is 25%" on the live Space (G700)."""
+
+    def test_a_question_that_asks_for_paperwork_is_not_planned_as_a_rate(self) -> None:
+        from app.tax.calculator_router import plan_rate_lookup
+
+        for question in (
+            "What documents are required to clear an imported vehicle at customs?",
+            "What documents are needed for customs?",
+            "Which forms are required for withholding tax?",
+            "Nyaraka gani zinahitajika kwa forodha?",
+        ):
+            with self.subTest(question=question):
+                self.assertIsNone(plan_rate_lookup(question))
+
+    def test_a_rate_question_is_still_planned(self) -> None:
+        from app.tax.calculator_router import plan_rate_lookup
+
+        for question, tax_type in (
+            ("What is the import duty on a used car?", "customs_duty_common"),
+            ("What is the customs duty rate for finished goods?", "customs_duty_common"),
+            ("What is the VAT rate in Uganda?", "vat_standard"),
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(plan_rate_lookup(question).tax_type, tax_type)
+
+    def test_a_question_that_asks_for_both_keeps_its_rate_answer(self) -> None:
+        from app.tax.calculator_router import plan_rate_lookup
+
+        plan = plan_rate_lookup("What documents do I need and what is the stamp duty rate on a land transfer?")
+        self.assertIsNotNone(plan)
+
+    def test_the_paperwork_question_reaches_retrieval(self) -> None:
+        from app.rag import pipeline
+
+        question = "What documents are required to clear an imported vehicle at customs?"
+        result = pipeline.ChatModel()._maybe_handle_fast_paths(
+            message=question, rewritten=question, thread_id=f"t-{uuid.uuid4().hex[:8]}", locale="en"
+        )
+        self.assertIsNone(result)
