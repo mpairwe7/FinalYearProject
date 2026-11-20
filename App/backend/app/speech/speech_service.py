@@ -1406,6 +1406,11 @@ class SpeechModel:
                 cands = ask("gemini-2.5-flash", fallback_body).get("candidates") or []
             parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
             breakers.GEMINI_BREAKER.record_success()
+            if cands and cands[0].get("finishReason") == "MAX_TOKENS":
+                # Cut off at the output limit. The end of the recording is missing, and that is
+                # where the question usually is, so a partial transcript is not an answer.
+                logger.warning("Gemini audio transcription stopped at the output limit; not used")
+                return None
             if not parts:
                 # No candidate (a blocked prompt) or a candidate with no part: the model gave
                 # no answer. Returned as "" it would read as silence, and hide an outage.

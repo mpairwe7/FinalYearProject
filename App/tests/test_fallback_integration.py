@@ -214,3 +214,65 @@ class TestChatStreamEndpointFallback:
         assert "event: token" in body
         assert "cloud fallback" in body
         gg.assert_called_once()
+
+
+class _EveryOtherSpeechTierDown:
+    """A speech model with nothing but Gemini to reach, shaped as the transcription chain reads it."""
+
+    enabled = True
+    _asr = _lang_det = _whisper_peft = _whisper_salt = _accent_detector = _executor = None
+    _whisper_adapters: dict = {}  # noqa: RUF012 - read only, as in the real model
+    _breakers: dict = {}  # noqa: RUF012 - read only, as in the real model
+
+    def __init__(self) -> None:
+        from app.speech import speech_service
+
+        self._gemini_audio_transcribe = types.MethodType(speech_service.SpeechModel._gemini_audio_transcribe, self)
+
+    def _transcribe_whisper_peft(self, *_args, **_kwargs):
+        return None
+
+    def _transcribe_faster_whisper(self, *_args, **_kwargs):
+        return None
+
+    def _cf_whisper_transcribe(self, *_args, **_kwargs) -> str:
+        return ""
+
+    def _decode_audio_bytes(self, *_args, **_kwargs):
+        import numpy as np
+
+        return np.full(1600, 0.2)
+
+
+class TestSpeechTranscriptionFallback:
+    """Gemini, the last speech tier (ADR-0068 part 3), run through the whole transcription chain."""
+
+    def _transcribe(self, gemini_payload: dict):
+        from app.speech import speech_service
+
+        answer = types.SimpleNamespace(raise_for_status=lambda: None, json=lambda: gemini_payload)
+        settings = types.SimpleNamespace(gemini_api_key=types.SimpleNamespace(get_secret_value=lambda: "it-key"))
+        with mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "cloudflare_fallback"), \
+             mock.patch.object(speech_service, "cloud_models_allowed", return_value=True), \
+             mock.patch.object(gateway, "cloud_models_allowed", return_value=True), \
+             mock.patch.object(cloud_config, "is_gemini_configured", return_value=True), \
+             mock.patch.object(cloud_config, "get_cloud_settings", return_value=settings), \
+             mock.patch.object(budget, "try_consume_gemini_call", return_value=True), \
+             mock.patch("app.sunbird.is_available", return_value=False), \
+             mock.patch("httpx.post", return_value=answer):
+            breakers.GEMINI_BREAKER.record_success()
+            return speech_service.SpeechModel._transcribe_chain(_EveryOtherSpeechTierDown(), b"\x00\x00" * 1600, 16000, "en")
+
+    def test_speech_is_transcribed_once_every_other_tier_has_failed(self):
+        result = self._transcribe({"candidates": [{"content": {"parts": [{"text": "what is the vat rate"}]}}]})
+        assert (result.text, result.backend, result.error) == ("what is the vat rate", "gemini_audio", None)
+
+    def test_a_blocked_response_is_an_outage_not_silence(self):
+        result = self._transcribe({"promptFeedback": {"blockReason": "OTHER"}})
+        assert result.backend == "unavailable"
+        assert "All ASR backends failed" in (result.error or "")
+
+    def test_a_transcript_cut_off_at_the_output_limit_is_not_used(self):
+        cut_off = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "i want to ask about"}]}}]}
+        assert self._transcribe(cut_off).backend == "unavailable"

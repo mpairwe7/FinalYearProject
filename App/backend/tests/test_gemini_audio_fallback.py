@@ -246,6 +246,18 @@ class TestAnOutageStaysAnOutage:
         assert _transcribe("en") is None
         assert self._chain(np.full(1600, 0.2)).backend == "unavailable"
 
+    def test_a_transcript_cut_off_at_the_output_limit_is_not_used(self, gemini_audio, monkeypatch) -> None:
+        """A long recording can pass the 1,024-token output limit. The words after it are missing,
+        and the caller would have read the partial text as everything that was said."""
+
+        class _CutOff(_Answer):
+            def json(self) -> dict[str, Any]:
+                return {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "i want to ask about"}]}}]}
+
+        monkeypatch.setattr("httpx.post", lambda *_a, **_k: _CutOff())
+        assert _transcribe("en") is None
+        assert self._chain(np.full(1600, 0.2)).backend == "unavailable"
+
     def test_a_call_turn_sends_nothing_through_the_pool(self, gemini_audio, monkeypatch) -> None:
         """The cloud pool does not carry a turn's context. Run in it bare, the helper would read
         "cloud allowed" on a call turn and send the recording (providers.scope)."""
