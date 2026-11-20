@@ -198,6 +198,13 @@ updates:
     ignore:
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+      # Bun is the version in App/frontend/.bun-version, in CI and in both images, so a bump is a
+      # change to that file and both Dockerfiles together (#805).
+      - dependency-name: "oven/bun"
+      # The Python minor is the one the lock files are compiled for and CI audits on. 3.14 to 3.15
+      # is a new interpreter, not a patch, and it arrived inside the minor-and-patch group (#807).
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       minor-and-patch:
         patterns:
@@ -230,6 +237,13 @@ updates:
     ignore:
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+      # Bun is the version in App/frontend/.bun-version, in CI and in both images, so a bump is a
+      # change to that file and both Dockerfiles together (#805).
+      - dependency-name: "oven/bun"
+      # The Python minor is the one the lock files are compiled for and CI audits on. 3.14 to 3.15
+      # is a new interpreter, not a patch, and it arrived inside the minor-and-patch group (#807).
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       minor-and-patch:
         patterns:

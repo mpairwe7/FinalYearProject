@@ -690,6 +690,18 @@ def test_dependabot_does_not_propose_what_a_policy_test_rejects():
         if not any("FROM node:" in f.read_text(encoding="utf-8") for d in folders for f in (ROOT / d.lstrip("/")).glob("Dockerfile*")):
             continue
         assert {"dependency-name": "node", "update-types": ["version-update:semver-major"]} in update.get("ignore", []), folders
+    for update in updates:
+        if update["package-ecosystem"] != "docker":
+            continue
+        folders = [update["directory"]] if "directory" in update else update["directories"]
+        froms = " ".join(f.read_text(encoding="utf-8") for d in folders for f in (ROOT / d.lstrip("/")).glob("Dockerfile*"))
+        ignored = {rule["dependency-name"]: rule.get("update-types") for rule in update.get("ignore", [])}
+        if "FROM oven/bun:" in froms:
+            # The shipped Bun is `.bun-version`; one image bumped alone fails the runtime test (#805).
+            assert "oven/bun" in ignored and ignored["oven/bun"] is None, folders
+        if "FROM python:" in froms:
+            # The locks are compiled for one Python minor, and CI audits on it (#807).
+            assert "version-update:semver-minor" in (ignored.get("python") or []), folders
     bun = next(update for update in updates if update["package-ecosystem"] == "bun")
     groups = list(bun["groups"].items())
     first_for_vitest = next(name for name, group in groups if any(p in ("vitest", "*") for p in group["patterns"]))
