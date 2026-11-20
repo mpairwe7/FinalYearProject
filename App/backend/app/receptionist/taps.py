@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Any
 
-from ..speech_service import pcm16_to_wav
+from ..speech.speech_service import pcm16_to_wav
 from .config import get_partial_transcript_interval_s, live_partial_transcripts_enabled
 from .hub import hub
 from .store import create_turn

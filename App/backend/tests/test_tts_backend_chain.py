@@ -32,7 +32,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import speech_service as ss  # noqa: E402
+from app.speech import speech_service as ss  # noqa: E402
 
 
 def _wav(num_samples: int = 240, rate: int = 24000) -> bytes:

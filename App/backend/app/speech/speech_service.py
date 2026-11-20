@@ -52,14 +52,14 @@ from pathlib import Path
 from typing import Any
 
 # Ensure the folder holding `ml` is on sys.path so `ml.scripts.*` imports resolve.
-from ._root import CODE_ROOT as _PROJECT_ROOT_P
+from .._root import CODE_ROOT as _PROJECT_ROOT_P
 
 _PROJECT_ROOT = str(_PROJECT_ROOT_P)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from .providers.scope import cloud_models_allowed
-from .resilience import CircuitBreaker, admit
+from ..providers.scope import cloud_models_allowed
+from ..resilience import CircuitBreaker, admit
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +417,7 @@ def resolve_edge_voice(language: str, voice: str | None = None) -> str:
 def _sunbird_has_native_voice(locale: str) -> bool:
     """True when Sunbird ships a native speaker for *locale*."""
     try:
-        from . import sunbird
+        from .. import sunbird
 
         return bool(sunbird.TTS_VOICES.get(locale))
     except Exception:  # noqa: BLE001 — sunbird optional; absence means no voice
@@ -1033,7 +1033,7 @@ class SpeechModel:
             logger.debug("Accent detector init skipped", exc_info=True)
 
         # Sunbird/spark-tts-salt — verified end-to-end on GPU (see the module
-        # docstring in app.spark_tts_salt), enabled by default like
+        # docstring in app.speech.spark_tts_salt), enabled by default like
         # Whisper-SALT above. Still a practical no-op without an external
         # BiCodec checkout: spark_tts_salt.load() checks SPARK_TTS_REPO_DIR
         # and raises SparkTtsUnavailable immediately when it is unset, so
@@ -1078,8 +1078,8 @@ class SpeechModel:
         result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
         if result.text and result.text.strip():
             try:
-                from .memory.language_state import normalize_locale_tag
-                from .receptionist.language import lexical_hits
+                from ..memory.language_state import normalize_locale_tag
+                from ..receptionist.language import lexical_hits
 
                 norm_lang = normalize_locale_tag(result.language or language or "") or (language or "en")
                 hits = lexical_hits(result.text)
@@ -1230,7 +1230,7 @@ class SpeechModel:
 
         # ⑤ Sunbird cloud (fallback when all local backends unavailable)
         try:
-            from . import sunbird
+            from .. import sunbird
             if sunbird.is_available():
                 import io as _io
                 import wave as _wave
@@ -1297,16 +1297,16 @@ class SpeechModel:
         self, audio_bytes: bytes, sample_rate: int, language: str | None
     ) -> str:
         """Cloud STT via Cloudflare Workers AI Whisper (flag/budget/breaker-gated)."""
-        from .config.flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return ""
         if os.getenv("STT_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
             return ""
         try:
-            from .providers import breakers, budget
-            from .providers import config as cfg
-            from .providers import gateway as gw
+            from ..providers import breakers, budget
+            from ..providers import config as cfg
+            from ..providers import gateway as gw
         except Exception:
             return ""
         if not (
@@ -1341,16 +1341,16 @@ class SpeechModel:
         """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
         gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
         Returns None when disabled/unavailable so the caller falls through."""
-        from .config.flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return None
         if os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
             return None
         try:
-            from .providers import breakers, budget
-            from .providers import config as cfg
-            from .providers import gateway as gw
+            from ..providers import breakers, budget
+            from ..providers import config as cfg
+            from ..providers import gateway as gw
         except Exception:
             return None
         if not (cfg.is_cloudflare_configured() and breakers.CF_TTS_BREAKER.allow_request()):
@@ -1392,8 +1392,8 @@ class SpeechModel:
         or ``TTS_FALLBACK_BACKEND=gemini`` is configured. Automatically yields back to Sunbird
         once the Sunbird quota cooldown expires.
         """
-        from . import sunbird
-        from .config.flags import flags
+        from .. import sunbird
+        from ..config.flags import flags
 
         tts_fb = os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower()
         if tts_fb != "gemini" and not sunbird.both_accounts_quota_exhausted():
@@ -1401,9 +1401,9 @@ class SpeechModel:
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return None
         try:
-            from .providers import breakers, budget
-            from .providers import config as cfg
-            from .providers import gateway as gw
+            from ..providers import breakers, budget
+            from ..providers import config as cfg
+            from ..providers import gateway as gw
         except Exception:
             return None
         if not (
@@ -1903,7 +1903,7 @@ class SpeechModel:
         """
         result = self._synthesize_unmarked(text, voice=voice, language=language)
         if result.audio:
-            from .ai_disclosure import mark_wav
+            from ..ai_disclosure import mark_wav
 
             # A cache hit reports "<backend>+cache"; the generator is the backend
             # that made the audio, so the same phrase carries the same marker.
@@ -2167,7 +2167,7 @@ class SpeechModel:
             """One attempt at Sunbird's native voice. None if unavailable."""
             t_sunbird = time.perf_counter()
             try:
-                from . import sunbird
+                from .. import sunbird
 
                 if not sunbird.is_available():
                     return None
@@ -2257,7 +2257,7 @@ class SpeechModel:
         #    else — LOCAL before cloud, cloud before the generic chain that
         #    defaults to an English speaker. self._spark_tts is only non-None
         #    when SPARK_TTS_ENABLED=true and the external BiCodec checkout is
-        #    present (see app.spark_tts_salt's module docstring), so this is
+        #    present (see app.speech.spark_tts_salt's module docstring), so this is
         #    a no-op read on any deployment that has not opted in — the
         #    Sunbird-first behaviour from before this tier existed is exactly
         #    what such a deployment still gets.
@@ -2863,7 +2863,7 @@ class SpeechModel:
         (ADR-0037). Every cloud tier self-skips when its
         flags/keys are absent, so a local/GPU deploy still reaches the offline tiers.
         """
-        from .providers import routing
+        from ..providers import routing
 
         t0 = time.perf_counter()
 
@@ -2883,7 +2883,7 @@ class SpeechModel:
 
         def _sunbird():
             try:
-                from . import sunbird
+                from .. import sunbird
                 if sunbird.is_available():
                     # Same inline-map defect as the STT path had: this knew only
                     # en/lg and passed everything else through unmapped, so
@@ -2919,7 +2919,7 @@ class SpeechModel:
         def _prompted():
             if self._chat_model is not None:
                 try:
-                    from .rag import generator as generator_module
+                    from ..rag import generator as generator_module
                     reply = generator_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
                     if reply and reply.strip():
                         return _res(reply.strip(), "prompted_qwen3")
@@ -2940,7 +2940,7 @@ class SpeechModel:
         # it" claim was verified false against the live API 2026-08-19.
         def _sunbird_translates(src: str, tgt: str) -> bool:
             try:
-                from . import sunbird
+                from .. import sunbird
             except Exception:  # noqa: BLE001 — optional dependency
                 return False
             codes = {
@@ -2993,15 +2993,15 @@ class SpeechModel:
         as ``sunbird``). Shares the Sunbird generation breaker. Returns "" when
         disabled or unavailable, so the next tier still runs.
         """
-        from .config.flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if _translate_fallback_backend() != "sunbird":
             return ""
         try:
-            from . import sunbird
-            from .providers import breakers
+            from .. import sunbird
+            from ..providers import breakers
         except Exception:
             return ""
         if not (sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True)):
@@ -3023,16 +3023,16 @@ class SpeechModel:
         """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
         fallback after Sunflower. Flag/budget/breaker-gated; returns "" when disabled
         or unavailable so the Sunbird tier still runs."""
-        from .config.flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if _translate_fallback_backend() not in ("sunbird", "workers_ai"):
             return ""
         try:
-            from .providers import breakers, budget, routing
-            from .providers import config as cfg
-            from .providers import gateway as gw
+            from ..providers import breakers, budget, routing
+            from ..providers import config as cfg
+            from ..providers import gateway as gw
         except Exception:
             return ""
         if not (

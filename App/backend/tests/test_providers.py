@@ -1171,14 +1171,14 @@ class CfWhisperSTTTest(unittest.TestCase):
 
     @staticmethod
     def _speech_model():
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         return SpeechModel.__new__(SpeechModel)  # skip heavy __init__
 
     def test_transcribes_wav_when_configured(self):
         import numpy as np
 
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         sm = self._speech_model()
         with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
@@ -1219,7 +1219,7 @@ class CfWhisperSTTTest(unittest.TestCase):
         import numpy as np
 
         from app.providers import breakers
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         sm = self._speech_model()
         with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
@@ -1251,7 +1251,7 @@ class CfWorkersTtsTest(unittest.TestCase):
 
     @staticmethod
     def _speech_model():
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         return SpeechModel.__new__(SpeechModel)  # skip heavy __init__
 
@@ -1388,9 +1388,9 @@ class CfGatewayDispatchTest(unittest.TestCase):
     def test_cf_whisper_transcribe_passes_configured_model(self):
         import numpy as np
 
-        import app.speech_service as ss
+        import app.speech.speech_service as ss
         from app.providers import breakers
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         redis_shared.reset(enabled=False)  # force in-process counters
         budget._local_neurons.clear()
@@ -1582,14 +1582,14 @@ class TranslateRoutingOrderTest(unittest.TestCase):
 
     @staticmethod
     def _sm():
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
         sm = SpeechModel.__new__(SpeechModel)
         sm._chat_model = None
         sm._mt = None
         return sm
 
     def test_sunflower_first_when_the_translate_endpoint_is_unavailable(self):
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
         sm = self._sm()
         with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value="Omusolo"), \
              mock.patch.object(SpeechModel, "_cf_llama_translate") as cf:
@@ -1599,7 +1599,7 @@ class TranslateRoutingOrderTest(unittest.TestCase):
         cf.assert_not_called()
 
     def test_cf_llama_when_sunflower_empty(self):
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
         sm = self._sm()
         with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
              mock.patch.object(SpeechModel, "_cf_llama_translate", return_value="Omusolo via CF"):
@@ -1609,7 +1609,7 @@ class TranslateRoutingOrderTest(unittest.TestCase):
 
     def test_sunbird_when_both_cloud_llms_empty(self):
         from app import sunbird as real_sunbird
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
         sm = self._sm()
         with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
              mock.patch.object(SpeechModel, "_cf_llama_translate", return_value=""), \
@@ -1629,7 +1629,7 @@ class TranslationFallbackTest(unittest.TestCase):
         breakers.SUNBIRD_LLM_BREAKER.record_success()
 
     def test_sunflower_translates_when_configured(self):
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
             with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
@@ -1643,7 +1643,7 @@ class TranslationFallbackTest(unittest.TestCase):
             gg.assert_not_called()
 
     def test_sunflower_translation_disabled_when_flag_off(self):
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         with mock.patch("app.config.flags.flags.is_enabled", return_value=False), \
              mock.patch("app.sunbird.chat_completion") as chat:
@@ -1824,7 +1824,7 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
 
     def _bare_model(self):
         # _do_translate only needs _mt / _chat_model; skip the heavy __init__.
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         m = object.__new__(SpeechModel)
         m._mt = None
@@ -1832,7 +1832,7 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
         return m
 
     def test_luganda_prefers_the_translate_endpoint_over_sunflower(self):
-        from app import speech_service
+        from app.speech import speech_service
 
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
@@ -1845,7 +1845,7 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
                 self.assertEqual(res.text, "SUNBIRD")
 
     def test_a_pair_the_endpoint_does_not_serve_leads_with_sunflower(self):
-        from app import speech_service
+        from app.speech import speech_service
 
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
@@ -1856,7 +1856,7 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
             self.assertEqual(res.backend, "sunbird_llm")
 
     def test_luganda_falls_back_to_sunflower_when_the_endpoint_is_unavailable(self):
-        from app import speech_service
+        from app.speech import speech_service
 
         m = self._bare_model()
         with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \

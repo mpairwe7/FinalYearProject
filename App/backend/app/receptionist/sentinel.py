@@ -9,7 +9,7 @@ nothing to the audio path. What it does happens off to the side:
    a second set of VAD frames would read as the caller interrupting.
 2. When an utterance starts the router is told (``on_speech_started``): a
    new caller turn, unless a language switch is waiting on this one.
-3. When it ends, :meth:`app.speech_service.SpeechModel.identify_language`
+3. When it ends, :meth:`app.speech.speech_service.SpeechModel.identify_language`
    scores it (one encoder pass), and a short or unsure utterance is also
    decoded as text in the language it most likely is — explicit requests
    ("Tuyinza okwogera Oluganda?") and code-switching are read from the text.
@@ -32,7 +32,7 @@ import logging
 import time
 from typing import Any
 
-from ..speech_service import pcm16_to_wav
+from ..speech.speech_service import pcm16_to_wav
 from .config import get_barge_in_min_s, get_lid_method, get_turn_timeout_s, local_barge_in_enabled
 from .language import LanguageVote, fuse
 from .serializer import SetLanguageFrame

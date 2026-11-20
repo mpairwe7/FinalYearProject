@@ -3,7 +3,7 @@
 Covers:
 1. Feature flags registration, default-off safety, and variant logging (`config/flags.py`).
 2. Hybrid S2S + Regulated Cascaded Speech Router & Semantic Endpointing (`receptionist/hybrid_s2s.py`).
-3. Acoustic Prosody & Emotion Conditioning (`receptionist/prosody.py`) + Orpheus first-clause streaming (`orpheus_tts.py`).
+3. Acoustic Prosody & Emotion Conditioning (`receptionist/prosody.py`) + Orpheus first-clause streaming (`speech/orpheus_tts.py`).
 4. Spoken-Figure Round-Trip Verification & Dictation Pacing (`receptionist/spoken_figure_guard.py`).
 5. Intra-Utterance Uganda Code-Switching Normalizer (`receptionist/lexicon.py`).
 6. Multi-Agent Specialist DAG Chaining (`agents/supervisor.py`, `agents/graphs/main_graph.py`).
@@ -32,7 +32,7 @@ from app.memory import (
     build_resumption_prompt,
     get_memory_service,
 )
-from app.orpheus_tts import split_for_voice
+from app.speech.orpheus_tts import split_for_voice
 from app.receptionist.brain import UraReceptionistBrain
 from app.receptionist.carryover import call_to_web_carryover
 from app.receptionist.hybrid_s2s import (
@@ -186,7 +186,7 @@ def test_spoken_figure_guard_and_dictation_pauses():
         assert bad_res.status == "fallback_text_only"
 
         # Vernacular spoken-word realization from clean_text_for_speech passes
-        from app.speech_normalization import clean_text_for_speech
+        from app.speech.speech_normalization import clean_text_for_speech
 
         lg_source = "VAT ku UGX 2,000,000 guli 18% (UGX 360,000)."
         lg_spoken = clean_text_for_speech(lg_source, locale="lg")
@@ -532,7 +532,7 @@ def test_phase33_dynamic_turn_stop_and_bantu_acronym_phonetics():
     from types import SimpleNamespace
 
     from app.receptionist.turns import apply_dynamic_turn_timeout, effective_turn_timeout_s
-    from app.speech_normalization import phoneticize_bantu_acronyms
+    from app.speech.speech_normalization import phoneticize_bantu_acronyms
 
     state = CallState(call_id="c-p33", conversation_id="conv-p33", locale="lg")
     room = CallRoom(call_id="c-p33", state=state)
@@ -859,8 +859,8 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
 
     import httpx
     from app.rag import generator
-    from app import orpheus_tts, spark_tts_salt
-    from app import speech_service as ss
+    from app.speech import orpheus_tts, spark_tts_salt
+    from app.speech import speech_service as ss
 
     try:
         with monkeypatch.context() as defaults:
@@ -1417,8 +1417,9 @@ def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_c
 
 
 def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
-    from app import glossary, mt, orpheus_tts, spark_tts_salt, sunbird
-    from app import speech_service as ss
+    from app import glossary, mt, sunbird
+    from app.speech import orpheus_tts, spark_tts_salt
+    from app.speech import speech_service as ss
     from app.memory.language_state import normalize_locale_tag, resolve_turn_locale
     from app.number_words import ach_words, nyn_words
     from app.rag.query import SUPPORTED_LOCALES, detect_language, english_retrieval_query
@@ -1446,7 +1447,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     from app.receptionist.prosody import analyze_utterance_prosody, empathetic_opening_for
     from app.receptionist.review import classify_spoken_review
     from app.receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
-    from app.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
+    from app.speech.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
     from app.text_signals import (
         LOCALIZED_CONTACT_FOOTERS,
         get_farewell_reply,
@@ -1970,7 +1971,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
 
 
 def test_phase43_voice_picker_orpheus_speaker_forwarding_and_receptionist_parity(monkeypatch):
-    from app import orpheus_tts
+    from app.speech import orpheus_tts
     from app.receptionist.brain import _OFFER_DECLINE_RE, _REPEAT_PATTERNS
     from app.receptionist.clarify import classify_yes_no
 

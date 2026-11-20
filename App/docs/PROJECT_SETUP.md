@@ -703,12 +703,12 @@ FinalYearProject/
 │   │   │   ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   │   ├── observability/tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
 │   │   │   ├── observability/analytics.py # Prometheus-compatible metrics + middleware
-│   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
+│   │   │   ├── speech/speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
 │   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
 │   │   │   ├── voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
 │   │   │   ├── voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
 │   │   │   ├── voice_consent.py # Voice consent, audit log, retention policy
-│   │   │   ├── accent_detector.py # Prosodic accent classifier
+│   │   │   ├── speech/accent_detector.py # Prosodic accent classifier
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
 │   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
 │   │   │   ├── evaluation.py # RAG evaluation harness (8 metrics)
@@ -746,7 +746,7 @@ FinalYearProject/
 │   │   │   ├── voice_stream.py      # Streaming voice engine (VAD, VoiceSession, barge-in)
 │   │   │   ├── voice_ws.py         # WebSocket handler for streaming voice chat
 │   │   │   ├── voice_consent.py    # Voice consent, audit log, retention policy
-│   │   │   └── accent_detector.py  # Prosodic accent classifier (5 UG profiles)
+│   │   │   └── speech/accent_detector.py  # Prosodic accent classifier (5 UG profiles)
 │   │   ├── App/tests/          # Backend test suite
 │   │   └── requirements.txt
 │   └── frontend/           # Next.js 16 + React 19 UI
@@ -785,7 +785,7 @@ FinalYearProject/
 │   └── App/scripts/
 │       ├── lang_id.py            # EN/LG/SW detection (baked into Crane Cloud image)
 │       ├── eval_retrieval.py     # Retrieval ranking gate (Hit@k / MRR)
-│       ├── asr/, mt/, tts/       # infer_*.py: speech_service.py's local backend tier
+│       ├── asr/, mt/, tts/       # infer_*.py: speech/speech_service.py's local backend tier
 │       └── data_aug/             # Corpus chunking/cleaning used by App/backend's
 │                                  # PDF/crawl export tooling
 │

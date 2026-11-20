@@ -61,7 +61,7 @@ from App.backend.app.auth.dependencies import reset_verifier  # noqa: E402
 from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: E402
 from App.backend.app.config.flags import flags  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
-from App.backend.app.speech_service import (  # noqa: E402
+from App.backend.app.speech.speech_service import (  # noqa: E402
     SynthesizeResult,
     TranscribeResult,
     TranslateResult,

@@ -17,8 +17,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import speech_service
-from app.speech_service import SpeechModel, SynthesizeResult
+from app.speech import speech_service
+from app.speech.speech_service import SpeechModel, SynthesizeResult
 
 
 def _stub_model() -> SpeechModel:

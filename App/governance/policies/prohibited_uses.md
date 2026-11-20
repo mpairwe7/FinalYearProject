@@ -21,5 +21,5 @@ abuse at runtime.
 | (d) Predicting criminal offences from profiling | No. The system does no compliance, fraud or evasion scoring of taxpayers. | No such module exists in `App/backend/app`. |
 | (e) Untargeted scraping of facial images | No. The system collects no facial images. | Not applicable. |
 | (f) Emotion recognition in a workplace or school | No. Voice emotion inference, when switched on, runs on callers' audio only, never on officers. It may still be high risk, which is a different question. | [FRIA, open classification question](../systems/ura-ai-chatbot/fria.md#open-classification-question) |
-| (g) Biometric categorisation by race, beliefs, sexual orientation and the like | No. Accent detection picks a speech recognition adapter for Ugandan English or Luganda and infers nothing else. | [accent_detector.py](../../backend/app/accent_detector.py) |
+| (g) Biometric categorisation by race, beliefs, sexual orientation and the like | No. Accent detection picks a speech recognition adapter for Ugandan English or Luganda and infers nothing else. | [speech/accent_detector.py](../../backend/app/speech/accent_detector.py) |
 | (h) Real-time remote biometric identification for law enforcement | No. The system identifies no one by voice or face. | Not applicable. |

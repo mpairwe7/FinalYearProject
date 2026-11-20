@@ -20,7 +20,7 @@ from .. import officer_hours
 from ..observability.analytics import record_chat_turn
 from ..config.flags import flags
 from ..resilience import TurnCancelled, raise_if_turn_cancelled, set_turn_cancel
-from ..speech_normalization import clean_text_for_speech
+from ..speech.speech_normalization import clean_text_for_speech
 from ..text_signals import detect_crisis
 from .clarify import ClarifyGate, ClarifyState
 from .config import (

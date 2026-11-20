@@ -23,8 +23,8 @@ import httpx
 _BACKEND = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, _BACKEND)
 
-from app import orpheus_tts  # noqa: E402
-from app import speech_service as ss  # noqa: E402
+from app.speech import orpheus_tts  # noqa: E402
+from app.speech import speech_service as ss  # noqa: E402
 
 sys.path.insert(0, str(Path(_BACKEND) / "orpheus_sidecar"))
 

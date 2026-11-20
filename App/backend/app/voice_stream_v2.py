@@ -32,7 +32,7 @@ from .voice_stream import VADConfig, VoiceStreamEvent, _run_blocking, _split_sen
 
 if TYPE_CHECKING:
     from .rag.pipeline import ChatModel
-    from .speech_service import SpeechModel
+    from .speech.speech_service import SpeechModel
 
 logger = logging.getLogger(__name__)
 
@@ -540,7 +540,7 @@ class VoiceSessionV2:
         self, text: str, language: str,
     ) -> AsyncGenerator[VoiceStreamEvent, None]:
         """V2 token-level streaming TTS via CosyVoice2."""
-        from .speech_normalization import clean_text_for_speech
+        from .speech.speech_normalization import clean_text_for_speech
 
         text = clean_text_for_speech(text, language)
         audio_started = False

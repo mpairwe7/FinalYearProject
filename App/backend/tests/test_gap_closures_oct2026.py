@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from app.rag import cache, entailment, query, retriever
-from app import cms, mt, speech_normalization
+from app import cms, mt
+from app.speech import speech_normalization
 from app.ingestion import indexer
 from app.rag.claim_verifier import verify_claims
 from app.receptionist import lexicon

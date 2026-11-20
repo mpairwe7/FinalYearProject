@@ -4,7 +4,7 @@ that _transcribe_chain reaches this tier before the LoRA/Sherpa fallbacks.
 The model itself is real weights (~6GB, gated on HuggingFace) and is not
 loaded here — these tests cover the parts that do not need it: which ids get
 forced for which locale (see the long comment on SALT_LANGUAGE_TOKEN_IDS in
-speech_service.py for why lg/nyn/ach are forced despite decoding to
+speech/speech_service.py for why lg/nyn/ach are forced despite decoding to
 unrelated Whisper-base languages), and that the chain actually tries this
 tier first when it is loaded.
 """
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import speech_service as ss  # noqa: E402
+from app.speech import speech_service as ss  # noqa: E402
 
 
 class LanguageTokenMapTests(unittest.TestCase):

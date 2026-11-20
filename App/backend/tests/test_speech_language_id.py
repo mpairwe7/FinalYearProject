@@ -16,7 +16,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from app import speech_service as ss  # noqa: E402
+from app.speech import speech_service as ss  # noqa: E402
 from app.resilience import CircuitBreaker  # noqa: E402
 
 SOT = 50258

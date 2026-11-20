@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
-from app.speech_service import SpeechModel, _looks_like_mp3, raw_pcm_to_wav
+from app.speech.speech_service import SpeechModel, _looks_like_mp3, raw_pcm_to_wav
 
 
 def _tone(first_sample: int | None = None, peak: float = 0.25, offset: int = 0) -> np.ndarray:

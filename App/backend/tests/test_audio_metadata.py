@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.speech_service import (  # noqa: E402
+from app.speech.speech_service import (  # noqa: E402
     _audio_metadata,
     _input_duration_s,
     _mp3_metadata,
@@ -150,7 +150,7 @@ class TestTranscribeTimingFill(unittest.TestCase):
     """Cloud ASR backends returned null duration_s/rtf; the wrapper fills them."""
 
     def _model(self, chain_result):
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         model = SpeechModel.__new__(SpeechModel)
         model.enabled = True
@@ -158,7 +158,7 @@ class TestTranscribeTimingFill(unittest.TestCase):
         return model
 
     def test_fills_timing_a_cloud_backend_omitted(self):
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         model = self._model(TranscribeResult(text="hi", backend="sunbird_cloud"))
         out = model.transcribe(b"\x00\x00" * 16_000, sample_rate=16_000)
@@ -168,7 +168,7 @@ class TestTranscribeTimingFill(unittest.TestCase):
 
     def test_does_not_overwrite_a_local_backend(self):
         """whisper_peft/faster_whisper measure their own; keep their numbers."""
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         model = self._model(
             TranscribeResult(
@@ -180,7 +180,7 @@ class TestTranscribeTimingFill(unittest.TestCase):
 
     def test_silent_failure_still_reports_input_duration(self):
         """backend='unavailable' should still say how much audio was sent."""
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         model = self._model(TranscribeResult(text="", backend="unavailable"))
         out = model.transcribe(b"\x00\x00" * 32_000, sample_rate=16_000)

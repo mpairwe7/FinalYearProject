@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from ..speech_service import TranscribeResult, pcm16_to_wav
+from ..speech.speech_service import TranscribeResult, pcm16_to_wav
 from . import telemetry
 
 logger = logging.getLogger(__name__)

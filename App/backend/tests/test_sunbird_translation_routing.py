@@ -33,7 +33,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import sunbird  # noqa: E402
-from app.speech_service import SpeechModel  # noqa: E402
+from app.speech.speech_service import SpeechModel  # noqa: E402
 
 
 class TestTheLocaleTableCoversWhatWeClaimToSupport(unittest.TestCase):

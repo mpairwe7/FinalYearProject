@@ -86,7 +86,7 @@ class ReceptionistLexicon:
 
         # 4. Spoken acronyms
         try:
-            from ..speech_normalization import _ACRONYMS
+            from ..speech.speech_normalization import _ACRONYMS
 
             for pattern, spoken in _ACRONYMS:
                 pat = pattern.pattern.replace(r"\b", "").replace(r"\B", "")

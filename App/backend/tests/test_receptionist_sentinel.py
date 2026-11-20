@@ -15,7 +15,7 @@ pytest.importorskip("pipecat")
 from app.receptionist.language import PolicyConfig  # noqa: E402
 from app.receptionist.sentinel import LanguageSentinel  # noqa: E402
 from app.receptionist.serializer import SetLanguageFrame  # noqa: E402
-from app.speech_service import LanguageIdResult  # noqa: E402
+from app.speech.speech_service import LanguageIdResult  # noqa: E402
 from pipecat.audio.vad.vad_analyzer import VADState  # noqa: E402
 from pipecat.frames.frames import (  # noqa: E402
     BotStartedSpeakingFrame,

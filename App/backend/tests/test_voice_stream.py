@@ -192,7 +192,7 @@ class TestSentenceSplitting(unittest.TestCase):
 class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
     def _make_session(self):
         from app.voice_stream import VADConfig, VoiceSession
-        from app.speech_service import TranscribeResult, SynthesizeResult
+        from app.speech.speech_service import TranscribeResult, SynthesizeResult
 
         speech = MagicMock()
         speech.transcribe.return_value = TranscribeResult(
@@ -286,7 +286,7 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
     async def test_a_statutory_rate_question_goes_to_the_knowledge_base(self):
         """No hardcoded rates in voice mode: the figure comes from retrieval."""
         session, speech, chat = self._make_session()
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         speech.transcribe.return_value = TranscribeResult(
             text="What is the standard VAT rate in Uganda?",
@@ -309,7 +309,7 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_english_fallback_is_spoken_with_the_english_voice(self):
         """Luganda MT down: generate() localises itself and serves English if that fails too."""
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         session, speech, chat = self._make_session()
         speech.transcribe.return_value = TranscribeResult(

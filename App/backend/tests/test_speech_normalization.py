@@ -1,7 +1,7 @@
 """Unit tests for speech text normalization (tax domain TTS prep)."""
 
 import pytest
-from app.speech_normalization import clean_text_for_speech
+from app.speech.speech_normalization import clean_text_for_speech
 
 
 def test_strip_citations():
@@ -288,7 +288,7 @@ def test_the_aside_rules_run_in_linear_time():
     # every position in a run of spaces (20k spaces took ~1 s).
     import time
 
-    from app.speech_normalization import _FY_ASIDE_RE, _REPEATED_FIGURE_RE
+    from app.speech.speech_normalization import _FY_ASIDE_RE, _REPEATED_FIGURE_RE
 
     for text in (" " * 20000 + "(FY", "0" * 20000 + " (0"):
         start = time.perf_counter()
@@ -375,7 +375,7 @@ def test_digit_strings_that_are_not_amounts_are_left_alone(locale, raw):
 def test_the_number_rules_run_in_linear_time():
     import time
 
-    from app.speech_normalization import (
+    from app.speech.speech_normalization import (
         _BARE_NUMBER_RE,
         _ECHO_ASIDE_RE,
         _LG_PCT_RE,
@@ -479,7 +479,7 @@ def test_contact_numbers_ussd_emails_po_box_and_subdomain_urls_across_all_5_loca
 def test_contact_and_url_rules_run_in_linear_time():
     import time
 
-    from app.speech_normalization import (
+    from app.speech.speech_normalization import (
         _GENERAL_EMAIL_RE,
         _GENERIC_URL_DOMAIN_RE,
         _GOV_DOMAIN_RE,
@@ -524,7 +524,7 @@ def test_contact_and_url_rules_run_in_linear_time():
 
 def test_verbalize_digits_for_tts_and_inline_step_structuring_across_5_locales():
     """Verify dynamic locale digit verbalization, 2-7 phone formats, inline steps, and breadcrumbs."""
-    from app.speech_normalization import verbalize_digits_for_tts
+    from app.speech.speech_normalization import verbalize_digits_for_tts
 
     raw = (
         "To register: 1. Visit https://askura.ura.go.ug or https://singlewindow.go.ug "
@@ -587,7 +587,7 @@ def test_sec_citation_and_unicode_bullets_are_not_misread_as_steps():
 
 
 def test_call_receptionist_and_main_chat_acronym_and_language_pronunciation_parity():
-    from app.speech_normalization import apply_tts_engine_phonetics
+    from app.speech.speech_normalization import apply_tts_engine_phonetics
 
     greeting = (
         "Hi, thanks for contacting URA. Ask your question in English, Luganda, "
@@ -609,7 +609,7 @@ def test_call_receptionist_and_main_chat_acronym_and_language_pronunciation_pari
 
 
 def test_alternate_acholi_spellings_normalize_through_both_helpers():
-    from app.speech_normalization import apply_tts_engine_phonetics
+    from app.speech.speech_normalization import apply_tts_engine_phonetics
 
     raw = "Ask in Akyoli or Lwakyoli about TIN."
     cleaned = clean_text_for_speech(raw, locale="en")

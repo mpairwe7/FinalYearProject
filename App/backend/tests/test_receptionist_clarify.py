@@ -14,7 +14,7 @@ from app.receptionist.clarify import (
     ClarifyState,
     classify_yes_no,
 )
-from app.speech_service import WordConf
+from app.speech.speech_service import WordConf
 
 
 class TestClarifyGatePureLogic(unittest.TestCase):

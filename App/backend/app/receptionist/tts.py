@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from .. import orpheus_tts
+from ..speech import orpheus_tts
 from . import telemetry
 from .config import allow_edge_standin_lg, get_slow_pause_ms, get_tts_voice
 from .stt import report_speech_failure
@@ -107,7 +107,7 @@ class UraSpeechTTS(TTSService):
     sentences — and from the constructor argument otherwise.
 
     For a language Orpheus voices (Luganda by default, see
-    :mod:`app.orpheus_tts`) the sentence is *streamed*: the caller hears the
+    :mod:`app.speech.orpheus_tts`) the sentence is *streamed*: the caller hears the
     first frame ~350 ms after it is asked for instead of after the whole
     sentence renders. Pre-warmed lines come from the phrase cache instead,
     and a streamed sentence is added to it for next time.
@@ -266,7 +266,7 @@ class UraSpeechTTS(TTSService):
     async def _stream_orpheus(
         self, text: str, language: str, context_id: str, t0: float
     ) -> AsyncGenerator[Frame, None]:
-        from ..speech_normalization import (
+        from ..speech.speech_normalization import (
             apply_tts_engine_phonetics,
             clean_text_for_speech,
             verbalize_digits_for_tts,
@@ -305,7 +305,7 @@ class UraSpeechTTS(TTSService):
             self._remember(cache_put, text, language, b"".join(pieces))
 
     def _remember(self, cache_put: Any, text: str, language: str, pcm: bytes) -> None:
-        from ..speech_service import SynthesizeResult
+        from ..speech.speech_service import SynthesizeResult
 
         n = len(pcm) // 2
         cache_put(text, self.voice, language, SynthesizeResult(

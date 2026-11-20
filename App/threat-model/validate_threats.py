@@ -1349,10 +1349,10 @@ THREAT_REGISTRY: list[dict] = [
         "description": "Visual prompt injection in OCR/VLM uploads or unredacted 14-character Uganda National ID (NIN) exposure across tickets, transcripts, and TTS speech normalization (G243, G247, G248, G249, OWASP LLM01/LLM02/ASI01)",
         "owasp_llm": "LLM02",
         "mitre_atlas": "AML.T0024.001",
-        "mitigation": "strip_hidden_control_and_bidi, scan_retrieved_text, and <untrusted_user_document> wrapping on OCR/VLM paths; unified 13-15 char C[MFR] NIN redaction across guardrails.py, StreamingDLPFilter, Semgrep, and gitleaks; and localized spoken redaction labels in speech_normalization.py",
+        "mitigation": "strip_hidden_control_and_bidi, scan_retrieved_text, and <untrusted_user_document> wrapping on OCR/VLM paths; unified 13-15 char C[MFR] NIN redaction across guardrails.py, StreamingDLPFilter, Semgrep, and gitleaks; and localized spoken redaction labels in speech/speech_normalization.py",
         "evidence": [
             "App/backend/app/guardrails/",
-            "App/backend/app/speech_normalization.py",
+            "App/backend/app/speech/speech_normalization.py",
             "App/tests/agents/test_nin_redaction.py",
         ],
         "status": "mitigated",

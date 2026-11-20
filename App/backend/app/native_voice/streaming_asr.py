@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..speech_service import SpeechModel
+    from ..speech.speech_service import SpeechModel
 
 logger = logging.getLogger(__name__)
 

@@ -479,7 +479,7 @@ class SpeechServiceFailureTests(CallCase):
         self.brain.on_speech_failure.assert_awaited_once_with("stt")
 
     async def test_a_recognizer_that_works_reports_nothing(self):
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         class Working:
             def transcribe(self, *_args, **_kwargs):
@@ -526,7 +526,7 @@ class SpeechServiceFailureTests(CallCase):
         import numpy as np
 
         from app.receptionist.tts import UraSpeechTTS
-        from app.speech_service import SynthesizeResult
+        from app.speech.speech_service import SynthesizeResult
 
         class Working:
             def synthesize(self, *_args, **_kwargs):
@@ -878,7 +878,7 @@ class SmallReliabilityTests(unittest.IsolatedAsyncioTestCase):
 
         from app.receptionist.state import CallRoom, CallState
         from app.receptionist.tts import UraSpeechTTS
-        from app.speech_service import SynthesizeResult
+        from app.speech.speech_service import SynthesizeResult
 
         loop_thread = threading.current_thread()
         decoded_on_loop: list[bool] = []
@@ -1040,7 +1040,7 @@ class SpeechReviewTests(CallCase):
         return [frame async for frame in tts._voice(text, "ctx")]
 
     async def test_a_recognizer_that_answers_with_an_error_has_failed(self):
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         class AllBackendsDown:
             def transcribe(self, *_a, **_k):
@@ -1050,7 +1050,7 @@ class SpeechReviewTests(CallCase):
         self.brain.on_speech_failure.assert_awaited_once_with("stt")
 
     async def test_a_recognizer_that_heard_nothing_has_not_failed(self):
-        from app.speech_service import TranscribeResult
+        from app.speech.speech_service import TranscribeResult
 
         class Quiet:
             def transcribe(self, *_a, **_k):
@@ -1061,7 +1061,7 @@ class SpeechReviewTests(CallCase):
 
     @unittest.skipUnless(receptionist.is_available(), "streams through Pipecat's TTSService")
     async def test_an_orpheus_sentence_cut_short_is_not_a_voiced_line(self):
-        from app import orpheus_tts
+        from app.speech import orpheus_tts
         from app.receptionist.tts import UraSpeechTTS
 
         async def cut_short(_text, _language, *, voice=None):
@@ -1094,7 +1094,7 @@ class SpeechReviewTests(CallCase):
         import numpy as np
 
         from app.receptionist.tts import UraSpeechTTS
-        from app.speech_service import SynthesizeResult
+        from app.speech.speech_service import SynthesizeResult
 
         class StandInOnly:
             def synthesize(self, *_a, **_k):

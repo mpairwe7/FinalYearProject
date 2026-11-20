@@ -441,7 +441,7 @@ class TranslationTests(unittest.TestCase):
 
     def test_the_fast_fallback_asks_no_second_model_for_a_superseded_turn(self):
         from app.rag import pipeline
-        from app.speech_service import SpeechModel
+        from app.speech.speech_service import SpeechModel
 
         token = threading.Event()
 

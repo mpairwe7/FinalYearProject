@@ -113,7 +113,7 @@ from .rag.query import gate_locale
 from .seed_prototype import seed as _seed_prototype
 from .seed_prototype import should_seed as _should_seed
 from .rag.pipeline import ChatModel, localize_reply
-from .speech_service import (
+from .speech.speech_service import (
     SPEECH_ASR_BACKEND,
     SPEECH_ENABLED,
     SPEECH_MT_BACKEND,
@@ -887,7 +887,7 @@ async def lifespan(app: FastAPI):
             # without this the first taxpayer to press Listen waits for all of
             # it. On a background thread, so a slow or unreachable tier delays
             # nobody's startup; failures are logged and change nothing.
-            from .speech_service import SPEECH_WARMUP
+            from .speech.speech_service import SPEECH_WARMUP
 
             if SPEECH_WARMUP:
                 def _warm_speech(speech: SpeechModel = app.state.speech) -> None:
@@ -1503,7 +1503,7 @@ def _declared_raw_pcm(request: Request, audio_bytes: bytes, sample_rate: int) ->
     encoding = request.query_params.get("encoding")
     if not encoding:
         return audio_bytes
-    from .speech_service import raw_pcm_to_wav
+    from .speech.speech_service import raw_pcm_to_wav
 
     try:
         return raw_pcm_to_wav(audio_bytes, encoding, sample_rate)
@@ -1610,7 +1610,7 @@ async def synthesize_audio_stream(
     """
     import base64
 
-    from .speech_service import audio_for_client, voice_pieces
+    from .speech.speech_service import audio_for_client, voice_pieces
 
     pieces = voice_pieces(body.text)
 
@@ -1803,7 +1803,7 @@ def speech_health(
     is not. Callers that only check the status code keep working; callers
     that check ``status`` can see the Luganda voice is the slow tier.
     """
-    from .speech_service import speech_health_report
+    from .speech.speech_service import speech_health_report
 
     speech = getattr(request.app.state, "speech", None)
     return SpeechHealthResponse(
@@ -1831,8 +1831,9 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
 
     `default: true` marks the speaker used when a caller names none.
     """
-    from . import orpheus_tts, sunbird
-    from .speech_service import en_edge_voice_choices
+    from .speech import orpheus_tts
+    from . import sunbird
+    from .speech.speech_service import en_edge_voice_choices
 
     sunbird_ready = sunbird.is_available()
     orpheus_up = orpheus_tts.reachability() == "up"
@@ -2054,7 +2055,7 @@ async def voice_chat(
             )
         else:
             from .receptionist.brain import _split_into_sentences
-            from .speech_normalization import clean_text_for_speech
+            from .speech.speech_normalization import clean_text_for_speech
 
             # The reply's own language, not the caller's: an English fallback
             # from a failed translation is spoken with the English voice.

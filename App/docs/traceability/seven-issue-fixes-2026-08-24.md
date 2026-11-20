@@ -139,7 +139,7 @@ warm-up thread pulling Spark-TTS-SALT onto the GPU *at boot*:
 ```
 11:00:49,069 SpeechModel: Whisper-SALT ready
 11:00:49,333 SpeechModel: MT translator ready (backend=prompted)
-11:00:49,503 app.spark_tts_salt: Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cuda:0)
+11:00:49,503 app.speech.spark_tts_salt: Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cuda:0)
 ```
 
 Nothing in the request path triggered that load — no client had connected yet.

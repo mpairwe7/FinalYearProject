@@ -1,13 +1,13 @@
 """Sunbird/spark-tts-salt — local neural TTS for Ugandan languages (2026).
 
 Sibling to :mod:`app.sunbird` (an external speech provider, imported lazily
-by :mod:`app.speech_service`) rather than a member of the ``native_voice``
+by :mod:`app.speech.speech_service`) rather than a member of the ``native_voice``
 package: this is a batch full-utterance synthesizer, the same granularity as
 Piper or edge-tts, not part of that package's sub-600ms streaming
 architecture.
 
 Architecture (from the model card, verified against the actual weights —
-see the long comment on ``SALT_LANGUAGE_TOKEN_IDS`` in ``speech_service.py``
+see the long comment on ``SALT_LANGUAGE_TOKEN_IDS`` in ``speech/speech_service.py``
 for why "verified", not "the README says", is the standard this file holds
 itself to):
 
@@ -106,7 +106,7 @@ SPARK_TTS_DEVICE = os.getenv("SPARK_TTS_DEVICE", "") or None  # None -> autodete
 # id (if any) was silently omitted from the table — the same mistake already
 # caught and reverted for the ASR model's language-token ids — English is
 # left unmapped. A caller with no id for its language gets a KeyError from
-# :func:`speaker_id_for`, which the (single) caller in speech_service.py
+# :func:`speaker_id_for`, which the (single) caller in speech/speech_service.py
 # treats as "this tier does not cover this language" and falls through.
 SPARK_TTS_SPEAKER_IDS: dict[str, int] = {}
 for _locale, _default_id in (("lg", 248), ("sw", 246), ("ach", 241), ("nyn", 243)):
@@ -127,7 +127,7 @@ class SparkTtsUnavailable(RuntimeError):
     """The external checkout, its dependencies, or the weights are missing.
 
     Raised by :func:`load` and by :meth:`SparkTtsSalt.synthesize`. Callers
-    treat this exactly like :class:`app.speech_service.LocalVoiceUnavailable`
+    treat this exactly like :class:`app.speech.speech_service.LocalVoiceUnavailable`
     — a normal "this tier cannot answer", not a bug.
     """
 

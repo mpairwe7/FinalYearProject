@@ -60,7 +60,7 @@ omit = [
     # behaviour is verified by execution rather than by coverage.
     "*/ml/scripts/eval_retrieval.py",
     "*/ml/scripts/static_dense.py",
-    # On-device ASR/MT/TTS inference wrappers speech_service.py imports
+    # On-device ASR/MT/TTS inference wrappers speech/speech_service.py imports
     # lazily for the local backend tier; hardware/model-file dependent,
     # exercised by App/backend/tests but not measured for line coverage.
     "*/ml/scripts/asr/*",
@@ -74,7 +74,7 @@ omit = [
     "*/backend/app/evaluation.py",
     "*/backend/app/rag/cache.py",
     "*/backend/app/rag/corrective_rag.py",
-    "*/backend/app/speech_service.py",
+    "*/backend/app/speech/speech_service.py",
     "*/backend/app/resilience.py",
     "*/backend/app/observability/tracing.py",
     "*/backend/app/rag/retriever.py",
@@ -163,7 +163,7 @@ ignore = [
 "backend/app/observability/analytics.py" = ["S110"]
 "backend/app/rag/cache.py" = ["S110"]
 "backend/app/audit/ledger.py" = ["S110", "SIM105"]
-"backend/app/speech_service.py" = ["S110"]
+"backend/app/speech/speech_service.py" = ["S110"]
 # URL opens use known http(s) schemes only
 "backend/app/rag/generator.py" = ["S310", "S112", "E402"]
 "backend/tests/**" = ["PT009"]

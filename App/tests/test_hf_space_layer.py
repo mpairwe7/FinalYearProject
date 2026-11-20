@@ -63,7 +63,7 @@ def _patched_lines() -> list[tuple[Path, str, str]]:
         name, value = node.targets[0].id, node.value
         if isinstance(value, ast.Call) and getattr(value.func, "id", "") in ("Path", "_app_source"):
             path = value.args[0].value
-            if getattr(value.func, "id", "") == "_app_source":  # the ADR-0056 path, as this repo has it
+            if getattr(value.func, "id", "") == "_app_source":  # the current path, as this repo has it
                 path = f"/app/backend/app/{path}"
             if path.endswith(".py"):
                 source = _in_repo(path)
@@ -102,16 +102,16 @@ def test_the_flag_that_needs_pipecat_ships_with_pipecat() -> None:
 
 @pytest.fixture(scope="module")
 def built_speech():
-    """``speech_service.py`` as the Space builds it, loaded beside the real one."""
+    """``speech/speech_service.py`` as the Space builds it, loaded beside the real one."""
     sys.path.insert(0, str(ROOT / "App" / "backend"))
     strings = _patch_strings()
-    source = (ROOT / "App" / "backend" / "app" / "speech_service.py").read_text(encoding="utf-8")
+    source = (ROOT / "App" / "backend" / "app" / "speech/speech_service.py").read_text(encoding="utf-8")
     for old, new in (("old_sp", "new_sp"), ("old_sp_2", "new_sp_2")):
         source = source.replace(strings[old], strings[new], 1)
-    module = types.ModuleType("app._speech_service_as_built")
-    module.__package__ = "app"
+    module = types.ModuleType("app.speech._speech_service_as_built")
+    module.__package__ = "app.speech"
     sys.modules[module.__name__] = module
-    exec(compile(source, "speech_service.py as built", "exec"), module.__dict__)  # noqa: S102 - our own source
+    exec(compile(source, "speech/speech_service.py as built", "exec"), module.__dict__)  # noqa: S102 - our own source
     yield module
     del sys.modules[module.__name__]
 

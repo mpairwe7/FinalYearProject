@@ -533,7 +533,7 @@ def test_government_mda_pronunciation_normalization_and_asr_repair() -> None:
     """Verify speech pronunciation rules for all 10-MDA/government terms and TIN/NIN natural word preservation."""
     from app.rag.query import expand_abbreviations
     from app.receptionist.lexicon import repair_asr_entities
-    from app.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
+    from app.speech.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
 
     raw = (
         "Apply via kcca/KCCA, ursb/URSB, nema/NEMA, unbs/UNBS, nira/NIRA, dcic/DCIC, "

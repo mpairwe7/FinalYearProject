@@ -40,7 +40,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .rag.pipeline import ChatModel
-    from .speech_service import SpeechModel, SynthesizeResult, TranscribeResult
+    from .speech.speech_service import SpeechModel, SynthesizeResult, TranscribeResult
 
 logger = logging.getLogger(__name__)
 
@@ -504,7 +504,7 @@ class VoiceSession:
         try:
             from .config.flags import flags
             from .receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
-            from .speech_normalization import clean_text_for_speech
+            from .speech.speech_normalization import clean_text_for_speech
 
             cleaned_speech = clean_text_for_speech(reply_for_tts, locale=tts_lang)
             if flags.is_enabled("spoken_figure_guard", subject=self.user_id or None):
