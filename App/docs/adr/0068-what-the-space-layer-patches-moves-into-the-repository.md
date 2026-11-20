@@ -85,7 +85,10 @@ lost a section of the script on an image that lacks the code replacing it.
   made without cost to the experience or to quality.
   - A question that carries its own figures still gets the exact calculator
     answer, and a rate question the rate table's. On the web app, which uses
-    the streaming path, nothing is slower or less exact than it was.
+    the streaming path, every turn that was answered is answered as it was.
+    One turn is slower there. A bare amount such as "500,000" beside a readable
+    document used to get the instant menu of three computations, and now waits
+    for the answer that reads the document.
   - A question about another country's taxes is always declined. On the REST
     path it was not, because the script skipped the dispatcher that holds the
     decline.
@@ -113,7 +116,11 @@ lost a section of the script on an image that lacks the code replacing it.
     message cannot tell those two apart reliably. So a question that points at
     the document is still answered from the table on both routes, as the web app
     always did. On the REST route that is new: the Space's script used to send
-    every attachment turn to the answer that reads the document.
+    an attachment turn to the answer that reads the document, unless the
+    guided-workflow handler, which runs earlier, had already taken it (G705).
+  - A guided flow that is already open still asks its next question beside a
+    document, on both routes, as it did before. That handler runs before the
+    fast paths, so this rule does not reach it (G706).
 - **Part 3 changes three things in the speech fallback** (G698).
   - Each call is traced with `tracing.llm_call` and reports the provider's own
     token counts, as every model client must.
@@ -159,7 +166,19 @@ lost a section of the script on an image that lacks the code replacing it.
   one streaming call, one.
 - After the merge the Space is checked on the new image: `/ready` reports the
   reranker, the build log shows the script applied, and a live answer is read.
-- Part 2 was run twice by a verifier who did not write it, on both routes at parent
-  and head, with each commit's layer script applied. A turn with no attachment was
-  byte-identical on 132 route turns, and a document with no text behaved exactly
-  as none. The second run failed the third case described above, and it was removed.
+- Part 2 was run three times by a verifier who did not write it, on both routes at
+  parent and head, with each commit's layer script applied. The second run failed the
+  third case described above, and it was removed. The third run compared 70 cases on
+  both routes with three kinds of attachment. On the streaming route all 29 turns the
+  parent answered beside a readable document were answered identically, reply text
+  included, and the 14 where it asked went on to the answer that reads the document.
+  A turn with no attachment was byte-identical, and a document with no text behaved
+  exactly as none.
+- Part 2 was then checked on the Space, on the image built from its merge, with a
+  synthetic payslip that states a gross salary of UGX 1,200,000. Before the roll,
+  "How much PAYE should I pay?" on the streaming route asked for the salary, and "What
+  is the VAT rate in Kenya?" on the REST route was answered from Uganda's table. After
+  it, the first went on to an answer that began "Based on your payslip, your gross
+  salary is UGX 1,200,000", and the second was declined. The rate and calculation
+  questions on REST took under a second, where they had taken 6 and 16 seconds. With
+  no attachment both routes still asked for the salary.
