@@ -56,7 +56,7 @@ _RESUMED = "resumed"
 
 def _approval_key() -> bytes:
     """The HMAC key for suspended approvals: the confirmation-token secret."""
-    from ...confirm_tokens import _secret
+    from ...security.confirm_tokens import _secret
 
     return _secret()
 

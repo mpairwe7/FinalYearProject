@@ -557,7 +557,7 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify October 2026 QA/Auditor hardening: WYSIWYS ASI09 digest, zero-LLM `prepare`, high-value friction, auditor RBAC, and confirm_tokens fail-closed."""
-    from app import confirm_tokens
+    from app.security import confirm_tokens
 
     headers = {"X-Session-ID": "sess-qa-10"}
 

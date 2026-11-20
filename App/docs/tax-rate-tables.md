@@ -73,7 +73,7 @@ still means something — caveating everything trains users to ignore it.
 `get_table()` raises and the calculator returns `ok: false` rather than
 quoting an unverified figure. It defaults to **true** when
 `APP_ENV=production` and false otherwise, mirroring
-`REQUIRE_FRESH_AUTHORITY` in `app/authority.py`.
+`REQUIRE_FRESH_AUTHORITY` in `app/security/authority.py`.
 
 There is deliberately **no fallback to the previous year**. Once
 FY2026-27 is in force, answering with FY2025-26 numbers is wrong, not

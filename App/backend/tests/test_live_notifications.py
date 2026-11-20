@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.db import database as db
-from app.notify import (
+from app.notifications.notify import (
     configured_providers,
     dispatch,
     drain_outbox,
@@ -17,7 +17,7 @@ from app.notify import (
     _send_sms_live,
     _send_webhook_live,
 )
-from app.reminders import Reminder
+from app.notifications.reminders import Reminder
 
 
 class LiveNotificationTests(unittest.TestCase):

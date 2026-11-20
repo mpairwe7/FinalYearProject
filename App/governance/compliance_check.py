@@ -82,7 +82,7 @@ REQUIRED_FILES = [
     "App/backend/app/audit/tsa.py",
     "App/backend/app/observability/security_events.py",
     "App/backend/app/observability/client_telemetry.py",
-    "App/backend/app/ai_disclosure.py",
+    "App/backend/app/security/ai_disclosure.py",
     "App/ml/configs/quality_baseline.json",
     # Monorepo standardization & hierarchical agent governance (G208)
     "App/AGENTS.md",

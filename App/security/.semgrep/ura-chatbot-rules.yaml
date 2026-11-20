@@ -265,7 +265,7 @@ rules:
       include:
         - "App/backend/app/mcp/*"
         - "App/backend/app/research/web_research.py"
-        - "App/backend/app/publications.py"
+        - "App/backend/app/ingestion/publications.py"
     message: >
       follow_redirects=True on outbound MCP, web research, or publication
       HTTP calls can leak bearer tokens or bypass SSRF pre-connect DNS IP

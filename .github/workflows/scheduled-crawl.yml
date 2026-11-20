@@ -190,7 +190,7 @@ jobs:
         run: |
           args=()
           [ "$BASELINE" = "true" ] && args+=(--baseline)
-          python -m app.crawl_gate evaluate \
+          python -m app.ingestion.crawl_gate evaluate \
             --before "$RUNNER_TEMP/crawl-before" --after App/Data/crawl --pdf-dir App/Data/pdfs \
             --out "$RUNNER_TEMP/candidate" "${args[@]}"
           report="$RUNNER_TEMP/candidate/report.json"

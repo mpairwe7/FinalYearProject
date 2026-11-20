@@ -194,7 +194,7 @@ class TestNoCallPathWedgesAProviderBreaker:
     def test_a_budget_refusal_during_the_gemini_probe(self, monkeypatch) -> None:
         monkeypatch.setenv("LLM_FALLBACK_BACKEND", "gemini")
         monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
-        monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+        monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
         monkeypatch.setattr("app.providers.gateway.gemini_allowed_for", lambda _l: True)
         monkeypatch.setattr("app.providers.gateway.cloud_generation_allowed_for", lambda _l: False)
         monkeypatch.setattr("app.providers.config.is_gemini_configured", lambda: True)
@@ -208,7 +208,7 @@ class TestNoCallPathWedgesAProviderBreaker:
     def test_a_budget_refusal_during_the_workers_ai_probe(self, monkeypatch) -> None:
         monkeypatch.setenv("LLM_FALLBACK_BACKEND", "workers_ai")
         monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
-        monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+        monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
         monkeypatch.setattr("app.providers.gateway.cloud_generation_allowed_for", lambda _l: True)
         monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: True)
         monkeypatch.setattr("app.providers.budget.try_consume_neurons", lambda _n: False)

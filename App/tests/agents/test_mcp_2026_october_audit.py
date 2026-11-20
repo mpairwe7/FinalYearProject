@@ -255,7 +255,7 @@ def test_backend_circuit_breaker_half_open_single_probe_and_security_headers(mon
 
     from app.db import database as db
     from app.main import app
-    from app.production_readiness import _mcp_security_errors
+    from app.security.production_readiness import _mcp_security_errors
     from app.resilience import CircuitBreaker
 
     # 1. CircuitBreaker admits only 1 probe in HALF_OPEN

@@ -88,7 +88,7 @@ def test_the_parse_child_is_memory_capped_by_default() -> None:
 
 
 def test_production_refuses_an_uncapped_parse_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import production_readiness
+    from app.security import production_readiness
 
     monkeypatch.setenv("DOCUMENT_PARSE_MAX_MEM_BYTES", "0")
     assert any("G479" in error for error in production_readiness._document_errors())
@@ -450,7 +450,7 @@ def test_ca_bundles_and_proxies_reach_the_parse_child() -> None:
 
 @pytest.mark.parametrize("raw", ["0", "-1", "+0", "0.0", "1GiB"])
 def test_production_refuses_any_unusable_parse_cap(raw: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import production_readiness
+    from app.security import production_readiness
 
     monkeypatch.setenv("DOCUMENT_PARSE_MAX_MEM_BYTES", raw)
 

@@ -9,7 +9,7 @@ cd App/backend
 PYTHONPATH=. python3 -m pytest tests/ -q
 # from repo root:
 PYTHONPATH=App/backend python3 -m pytest App/backend/tests App/tests/agents -q
-PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
+PYTHONPATH=App/backend python3 -m app.db.seed_prototype   # development only
 ```
 
 ## Boundaries
@@ -21,18 +21,21 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `api/` | The HTTP routers: `rag.py` (chat over REST, SSE and WebSocket, titles, FAQ), `documents.py` (upload analysis, re-index), `health.py` (`/health`, `/ready`, `/metrics`), `connectors.py`, `offline.py`, `quality.py`; `deps.py` (the shared `get_model` and operator checks) and `models.py` (Pydantic request/response models). `main.py` is the composition root that includes them |
 | `rag/` | The RAG flow (ADR-0056): `pipeline.py` (the `ChatModel` orchestrator), `retriever.py`, `generator.py` (answer generation and message assembly), `prompt_builder.py` (message assembly and passage fencing; the prompt text is in `prompts/`), `query.py`, grounding checks, turn context, `tool_budget.py` (keeps tool schemas inside the model's context window) |
 | `prompts/` | Every system prompt, one module per area: `answer.py`, `query.py`, `receptionist.py`, `title.py`, `agents.py`, `vision.py`. A module imports its prompt from here under the name it had (ADR-0060) |
-| `ingestion/` | Corpus builders (`pdf_corpus`, `faq_corpus`, `crawl_corpus`), document parsing (`docling_intelligence`, `document_normalization`) and `indexer.py` |
+| `ingestion/` | Corpus builders (`pdf_corpus`, `faq_corpus`, `crawl_corpus`), document parsing (`docling_intelligence`, `document_normalization`) and `indexer.py`; `crawl_gate.py` (whether a crawl may be proposed for the corpus, ADR-0023) and `publications.py` (the URA publication ingest, which never reindexes on its own) |
 | `embeddings/` | `embedder.py`: CPU embeddings for the local dense leg (ADR-0034) |
 | `speech/` | Speech and voice (ADR-0067): `speech_service.py` (ASR, translation and TTS behind one service), `speech_normalization.py` (reply text made speakable), `accent_detector.py`, the local voices `orpheus_tts.py` and `spark_tts_salt.py`, `voice_consent.py` (consent receipts and the voice audit log), and the streaming voice transports `voice_stream.py`, `voice_stream_v2.py`, `voice_ws.py`, `voice_ws_v2.py` |
 | `research/` | Live web research (ADR-0021, ADR-0035, ADR-0067): `web_research.py` (when to look, what may leave, what an answer may trust), `web_search_providers.py` (the `SearchProvider` backends and failover), `egress.py` (the one outbound HTTP client), `doh_resolver.py`, `web_fx.py` (indicative exchange rates) and `ephemeral_pdf_sandbox.py` (the RAM-backed document sandbox) |
 | `tickets/` | Handoff to officers (ADR-0067): `escalation_policy.py` (when a person is offered, and how fast they should answer), `officer_handoff.py` (the one handoff for every path to an officer), `escalation_notify.py`, `officer_chat.py` (live chat with the officer on the case), `officer_hours.py`, `ticket_events.py` and `ticket_ws.py` (live queue events for staff), `hitl_routing.py` (document uncertainty routed to a person) |
 | `quality/` | Service quality (ADR-0067): `service_ratings.py` (one table for every stream's satisfaction ratings), `quality_audit.py` (what the 👍/👎 say about the AI's answers), `audit_reviews.py` (the administrator's review queue), `evaluation.py` (the continuous RAG evaluation harness), `discrepancy_detector.py`, `journey_analytics.py`, `artifact_export.py` (the figures and metric tables for the project report) |
+| `security/` | Security and compliance gates (ADR-0067): `production_readiness.py` (what must be true before production starts), `authority.py` (the authority-source manifest), `confirm_tokens.py` (signed single-use tokens for a confirmed tool call), `retention.py` (the retention job for personal data), `ai_disclosure.py` (the machine-readable mark on generated audio) |
+| `notifications/` | Messages sent to taxpayers (ADR-0067): `notify.py` (the outbox and its channels) and `reminders.py` (who is reminded of which deadline, and when) |
+| `offline/` | Offline bundles for mobile and edge clients (ADR-0067): `offline_bundle.py` (the builder) and `offline_sync.py` (the delta sync) |
 | `connectors/` | The URA portal and the services a taxpayer connects (ADR-0067): `connector_intent.py` (whether a turn asks for a lookup in a chosen service), `connector_outcome.py` (what the taxpayer is told once it has been asked), `portal_copilot.py` (portal tasks, confirmation and inline elicitation), `ura_account_mock.py` (sandbox taxpayer profiles, never a live account), `verified_resources.py` (official URA links offered beside an answer) |
 | `processing/` | Document processing (ADR-0067): `documents.py` (uploaded files: extraction, classification, analysis), `document_worker.py` (the isolated parse child and its allowed environment), `ocr_service.py` (the Triton OCR sidecar and proxy) |
 | `chat/` | The chat turn outside retrieval (ADR-0067): `chat_ws_v2.py` (the streaming text WebSocket), `chat_title.py` (sidebar titles), `conversational.py` (greetings and small talk), `model_welfare.py`, `turn_guidance.py` (the guidance applied to every finished turn), `turn_pipeline.py` (stage contracts and attestation) |
 | `tax/` | Fiscal data and the arithmetic that reads it: `tables.py` (the effective-dated rate tables), `money.py`, `calculator_router.py` (deterministic calculator answers and their templates), `scenario_planner.py` (the declarative planner and its verified-facts block), `schedule_sandbox.py`, `glossary.py` (the curated tax terms for each answer language) |
 | `vectorstore/` | `vector_db.py` (the pgvector leg), Qdrant `index_lifecycle`, `corpus_sync`, `qdrant_backup`, `point_ids` |
-| `db/` | `database.py` (the store and its backend seam), `postgres.py` and `cms.py` (the staff answer overrides, matched on a normalised query) |
+| `db/` | `database.py` (the store and its backend seam), `postgres.py` and `cms.py` (the staff answer overrides, matched on a normalised query); `storage_protocol.py` (the parity check between the two stores) and `seed_prototype.py` (demo rows, never in production) |
 | `tools/` | Registered tools (`ToolRegistry`) |
 | `mcp/` | MCP client + tax-calculator server |
 | `guardrails/` | OWASP LLM01–09 (ADR-0061): `input_checks.py` (`InputGuard`, `scan_*_text`), `fences.py` (spotlight fences), `pii.py` (redaction, streaming DLP), `output_checks.py` (`OutputGuard`, the figure release gate, link provenance), `normalize.py` (shared canonicalisation), `premise.py` (false premises and fact contradictions), `friction.py` (friction against adaptive probing), `pdf.py` (PDF intake guards) |
@@ -66,7 +69,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
   officer, with the transcript, the team routing and the live queue event.
 - Document analyze: PDF guards, then `malware_scan` (fail-open unless `MALWARE_SCAN_REQUIRED`). `DOCUMENT_PARSE_ISOLATED` runs extractors in a subprocess.
 - `URA_ACCOUNT_API_MODE=mock` is sandbox only (`live=false`). Production rejects it.
-- Production gap gates: `app/production_readiness.py` (malware isolated parse, https publications, RLS ack, no seed, no live notify). See `App/docs/PRODUCTION_GATES.md`.
+- Production gap gates: `app/security/production_readiness.py` (malware isolated parse, https publications, RLS ack, no seed, no live notify). See `App/docs/PRODUCTION_GATES.md`.
 - Publications ingest hashes `URA_PUBLICATIONS_URL` and enqueues reindex. Never auto-`--recreate`.
 - `crawl_corpus.review_pages` decides what a crawl may contribute, from the ledger in `App/Data/crawl/crawl_state.json`, and must stay free of the clock so export and ingest agree. `crawl_gate` is what a crawl must pass before a person sees it. A corpus fetch uses `CORPUS_FETCH_USER_AGENT`, checks each redirect hop and never treats a name or a size as proof of identity (ADR-0023).
 - Flag PATCH persists to `flag_overrides` on **this replica**. Cluster-wide still needs `FLAG_*`.

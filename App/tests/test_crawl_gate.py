@@ -14,9 +14,10 @@ from typing import Any
 import pytest
 
 from app.observability import analytics
-from app import crawl_gate, freshness
+from app.ingestion import crawl_gate
+from app import freshness
 from app.api import health
-from app.crawl_gate import check_slo, evaluate, figures, vet_new_pdfs, write_candidate
+from app.ingestion.crawl_gate import check_slo, evaluate, figures, vet_new_pdfs, write_candidate
 
 VAT = "https://ura.go.ug/en/vat/"
 PDF = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"

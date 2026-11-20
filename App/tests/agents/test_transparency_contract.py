@@ -299,7 +299,7 @@ class TestTheRowNamesWhatAnswered:
     def _sunbird_says(self, monkeypatch, text: str) -> None:
         monkeypatch.setenv("LLM_FALLBACK_BACKEND", "sunbird")
         monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
-        monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+        monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
         monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: False)
         monkeypatch.setattr("app.sunbird.is_available", lambda: True)
         monkeypatch.setattr("app.sunbird.chat_completion", lambda *_a, **_k: text)

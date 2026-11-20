@@ -17,7 +17,7 @@ import sqlite3
 
 import pytest
 
-from app.reminders import (
+from app.notifications.reminders import (
     DEFAULT_LEAD_DAYS,
     MAX_LEAD_DAYS,
     REMINDER_PURPOSE,

@@ -31,7 +31,7 @@ it keeps it, and who can read it. The code is in
   `MemoryService.forget_user`, which clears working, episodic and semantic memory.
   `DELETE /v1/me` does that and also clears case facts (`forget_user_case_facts`)
   and uploaded documents.
-- **Expiry.** `retention.py` deletes expired database, document, memory and voice
+- **Expiry.** `security/retention.py` deletes expired database, document, memory and voice
   rows at startup and on an interval, watched by the `RetentionJobFailing` and
   `RetentionJobStale` alerts. Case facts expire through their 6-hour Redis TTL, or
   the in-process deadline when Redis is absent. An expired resolution case is

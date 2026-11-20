@@ -352,7 +352,7 @@ ENV APP_BUILD_SHA=${GIT_SHA}
 # manifest instead of reusing this layer from the cache.
 ARG AUTHORITY_BUILD_ID=""
 ENV URA_AUTHORITY_MANIFEST=/app/artifacts/authority/manifest.json
-RUN PYTHONPATH=/app/backend python -m app.authority write \
+RUN PYTHONPATH=/app/backend python -m app.security.authority write \
         --out /app/artifacts/authority/manifest.json --version "${GIT_SHA:-unknown}" \
         /app/backend/app/tax/data/*.json /app/backend/app/tax/evidence/rate_evidence.json \
         /app/backend/app/kernel/releases.json

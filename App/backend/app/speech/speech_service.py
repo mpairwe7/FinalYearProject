@@ -2026,7 +2026,7 @@ class SpeechModel:
         voice: str | None = None,
         language: str = "en",
     ) -> SynthesizeResult:
-        """Synthesize speech; WAV output is marked as AI-generated (``app.ai_disclosure``).
+        """Synthesize speech; WAV output is marked as AI-generated (``app.security.ai_disclosure``).
 
         Every backend's WAV leaves here with an IPTC ``trainedAlgorithmicMedia``
         INFO chunk, whichever endpoint returns it. Non-WAV audio — the MP3
@@ -2035,7 +2035,7 @@ class SpeechModel:
         """
         result = self._synthesize_unmarked(text, voice=voice, language=language)
         if result.audio:
-            from ..ai_disclosure import mark_wav
+            from ..security.ai_disclosure import mark_wav
 
             # A cache hit reports "<backend>+cache"; the generator is the backend
             # that made the audio, so the same phrase carries the same marker.

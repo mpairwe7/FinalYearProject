@@ -43,7 +43,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ._root import PROJECT_ROOT as _PROJECT_ROOT
+from .._root import PROJECT_ROOT as _PROJECT_ROOT
 OFFLINE_BUNDLE_DIR = Path(
     os.getenv(
         "OFFLINE_BUNDLE_DIR",
@@ -370,7 +370,7 @@ class BundleBuilder:
             "chunk_count": passage_count,
             "max_bundle_size_bytes": MAX_BUNDLE_SIZE_BYTES,
             "metadata": {
-                "builder": "offline_bundle.py",
+                "builder": "offline/offline_bundle.py",
                 "pipeline_version": "2026.1.0",
             },
         }

@@ -2105,7 +2105,7 @@ only the publisher's live site, and it proposes rather than publishes (ADR-0023)
 4. Extraction    — hidden text removed, tables kept in place with merged cells, publisher dates
 5. No regression — a response older than what is held does not replace it
 6. Ledger        — App/Data/crawl/crawl_state.json: status, current capture and run record
-7. Gate          — app.crawl_gate: pass, review or hold, with the figures that moved
+7. Gate          — app.ingestion.crawl_gate: pass, review or hold, with the figures that moved
 8. Proposal      — a pull request a person merges; that merge builds and rolls
 ```
 

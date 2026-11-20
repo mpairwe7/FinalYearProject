@@ -8,4 +8,4 @@
 | Preference export | `python App/evals/export_preferences.py` |
 
 `python -m app.freshness --check` remains the index-drift gate.
-`python -m app.publications` is the publication ingest (no auto-recreate).
+`python -m app.ingestion.publications` is the publication ingest (no auto-recreate).

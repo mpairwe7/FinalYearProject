@@ -39,7 +39,7 @@ from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from .. import confirm_tokens
+from ..security import confirm_tokens
 from ..db import database as db
 from ..rag import pipeline as pipeline_module
 from ..observability.analytics import MetricSpec, metrics, record_mapped

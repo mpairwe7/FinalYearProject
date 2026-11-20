@@ -242,7 +242,7 @@ def workers_ai_chat(
     deadline: float | None = None,
 ) -> str:
     """Chat-completion via a Workers AI text model; returns the reply string."""
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return ""
@@ -382,7 +382,7 @@ def gemini_generate(
     Transport failures only. A 4xx/5xx is a real answer from the model API and
     retrying it on another host repeats the error and bills twice.
     """
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return ""

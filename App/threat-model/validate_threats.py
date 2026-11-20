@@ -55,7 +55,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/ml/scripts/data_aug/crawler.py",
             "App/backend/app/ingestion/crawl_corpus.py",
-            "App/backend/app/crawl_gate.py",
+            "App/backend/app/ingestion/crawl_gate.py",
             "App/tests/test_crawl_gate.py",
         ],
         "status": "mitigated",
@@ -340,7 +340,7 @@ THREAT_REGISTRY: list[dict] = [
         "owasp_llm": "LLM10",
         "mitre_atlas": None,
         "mitigation": "1 GiB RLIMIT_AS by default, production refuses 0; the 30 s deadline and CPU limit stand",
-        "evidence": ["App/backend/app/processing/document_worker.py", "App/backend/app/production_readiness.py",
+        "evidence": ["App/backend/app/processing/document_worker.py", "App/backend/app/security/production_readiness.py",
                      "App/tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
@@ -1322,7 +1322,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Queries and topic keys are built from a closed vocabulary of generic tax terms, so an unknown word cannot leave. Hosted providers are external processors under the G35 cross-border gate and are refused in sovereign mode. The transfer assessment itself is outstanding (G326)",
         "evidence": [
             "App/backend/app/research/web_research.py",
-            "App/backend/app/production_readiness.py",
+            "App/backend/app/security/production_readiness.py",
             "App/tests/agents/test_web_evidence_boundary.py",
             "App/tests/agents/test_web_search_providers.py",
         ],

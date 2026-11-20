@@ -21,8 +21,8 @@ decision stays with a person (OWASP ASI06: "require human review for high-risk
 actions", "detect suspicious updates or frequencies"; NITA-U NISP 2026 s.5.2.4.3:
 "protect AI models and training datasets from poisoning attacks").
 
-    python -m app.crawl_gate evaluate --before DIR --after App/Data/crawl --pdf-dir App/Data/pdfs --out DIR
-    python -m app.crawl_gate slo --crawl-dir App/Data/crawl
+    python -m app.ingestion.crawl_gate evaluate --before DIR --after App/Data/crawl --pdf-dir App/Data/pdfs --out DIR
+    python -m app.ingestion.crawl_gate slo --crawl-dir App/Data/crawl
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .ingestion.crawl_corpus import CRAWL_STATE_NAME, CorpusSelection, _clean, _parse_time, load_crawl_state, review_pages
+from .crawl_corpus import CRAWL_STATE_NAME, CorpusSelection, _clean, _parse_time, load_crawl_state, review_pages
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +249,9 @@ def vet_new_pdfs(
     scanned on its way to the corpus. A rejected file is deleted from the
     candidate and forgotten by the ledger, so the next run looks at it afresh.
     """
-    from .malware_scan import MalwareRejected, scan_bytes
-    from .ingestion.pdf_corpus import inspect_pdf_for_prompt_injection
-    from .guardrails.pdf import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
+    from ..malware_scan import MalwareRejected, scan_bytes
+    from .pdf_corpus import inspect_pdf_for_prompt_injection
+    from ..guardrails.pdf import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
 
     known = before_state.get("pdf_hashes") or {}
     hashes: dict[str, Any] = after_state.get("pdf_hashes") or {}

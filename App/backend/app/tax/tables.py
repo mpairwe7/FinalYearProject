@@ -20,7 +20,7 @@ gazetted Act is marked ``provisional``.  Every consumer receives that
 status alongside the numbers, so the answer can say so.  Setting
 ``TAX_RATES_REQUIRE_CONFIRMED=true`` makes provisional tables fail
 closed instead — the deployment refuses to quote unverified rates
-rather than quoting them quietly.  This mirrors :mod:`app.authority`.
+rather than quoting them quietly.  This mirrors :mod:`app.security.authority`.
 """
 
 from __future__ import annotations

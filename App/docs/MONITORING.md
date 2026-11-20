@@ -507,7 +507,7 @@ does not depend on any of them.
 2. **Calls refused** (`ura_receptionist_calls_refused_total` by `reason`):
    `capacity` is sixteen calls at once on a process, or five from one user;
    `not_configured` is production without its media path or local engine
-   (`python -m app.production_readiness` lists what is missing).
+   (`python -m app.security.production_readiness` lists what is missing).
 3. **Speech failing** (`…_call_failures_total{stage="stt"|"tts"}`): callers are
    asked to repeat themselves and, after two failures in a row, transferred
    (to the officers' queue when it is on), so the queue grows. Check the speech backends.

@@ -656,8 +656,8 @@ def test_packages_the_root_list_pins_exactly_move_only_with_it():
 def test_the_freshness_check_can_fail():
     """It compared files no checkout holds, took "missing" as a pass, and was always green."""
     text = (ROOT / ".github" / "workflows" / "index-freshness.yml").read_text(encoding="utf-8")
-    assert "app.crawl_gate slo" in text
-    assert "exit 0\n" not in text.split("app.crawl_gate slo")[0]
+    assert "app.ingestion.crawl_gate slo" in text
+    assert "exit 0\n" not in text.split("app.ingestion.crawl_gate slo")[0]
 
 
 def test_blog_nextjs_stays_in_step_with_frontend():

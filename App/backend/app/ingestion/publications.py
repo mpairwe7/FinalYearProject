@@ -19,9 +19,9 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from ._root import APP_DATA_ROOT
-from .freshness import FreshnessReport, enqueue_reindex_request
-from .ingestion.pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
+from .._root import APP_DATA_ROOT
+from ..freshness import FreshnessReport, enqueue_reindex_request
+from .pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -188,8 +188,8 @@ def ingest_publications(
     enqueued = False
     pdf_harvest: dict[str, Any] | None = None
     if download_pdfs and source and not source.startswith("fixture:") and source != "inline":
-        from .ingestion.indexer import PDF_DIR, PDF_JSONL_DIR
-        from .ingestion.pdf_corpus import export_pdf_chunks_to_jsonl, harvest_remote_pdfs
+        from .indexer import PDF_DIR, PDF_JSONL_DIR
+        from .pdf_corpus import export_pdf_chunks_to_jsonl, harvest_remote_pdfs
 
         target_pdf_dir = pdf_dir or PDF_DIR
         target_jsonl_dir = pdf_jsonl_dir or PDF_JSONL_DIR

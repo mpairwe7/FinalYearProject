@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app import authority
+from app.security import authority
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _SOURCES = [

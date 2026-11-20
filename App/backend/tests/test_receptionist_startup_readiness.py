@@ -1203,7 +1203,7 @@ class ProductionDegradeTests(unittest.TestCase):
         self.addCleanup(receptionist.reset)
 
     def test_the_production_gate_does_not_stop_the_api_for_calls(self):
-        from app.production_readiness import gap_gate_errors
+        from app.security.production_readiness import gap_gate_errors
 
         with patch.dict("os.environ", SECURE_PRODUCTION):
             fatal = gap_gate_errors(include_receptionist=False)
@@ -1342,7 +1342,7 @@ class ThirdReviewStartTests(unittest.TestCase):
         self.assertEqual(calls[0]["before"], calls[1]["before"])
 
     def test_the_go_live_report_reads_the_effective_flag(self):
-        from app.production_readiness import evaluate_gate
+        from app.security.production_readiness import evaluate_gate
 
         with (
             patch.dict("os.environ", {"APP_ENV": "production", "FLAG_VOICE_RECEPTIONIST": ""}),

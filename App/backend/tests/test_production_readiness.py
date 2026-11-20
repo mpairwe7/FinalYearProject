@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from app.production_readiness import gap_gate_errors, readiness_report
-from app.publications import ingest_publications
+from app.security.production_readiness import gap_gate_errors, readiness_report
+from app.ingestion.publications import ingest_publications
 from app.tools.ura_account import UraAccountProfileTool, account_api_status
 
 SECURE = {

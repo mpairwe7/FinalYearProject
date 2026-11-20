@@ -928,7 +928,7 @@ def _llm_cloud_fallback(
     other request behind them.  An in-flight HTTP call still runs to its own
     timeout; this only stops a *new* hop from starting once time is up.
     """
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return ""
@@ -1578,7 +1578,7 @@ def _local_llm_then_cloud(
         if reply and reply.strip():
             circuit.record_success()
             _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
-            from ..production_readiness import is_sovereign_mode
+            from ..security.production_readiness import is_sovereign_mode
 
             finish_reason = gen_meta.get("finish_reason")
             # E.4: When finish_reason is available from vLLM, complete_with_continuation
@@ -4820,7 +4820,7 @@ def _judge_rescue(
         f"{i}. {c['question']} — {str(c.get('answer') or '')[:160]}"
         for i, c in enumerate(candidates, 1)
     )
-    from ..production_readiness import is_sovereign_mode
+    from ..security.production_readiness import is_sovereign_mode
 
     if is_sovereign_mode():
         return []
@@ -13572,7 +13572,7 @@ class ChatModel:
             # Read by resources_for_turn: no form links under a service's record.
             result["connector_lookup"] = True
         if (os.getenv("EVAL_DEBUG") or "").strip().lower() in {"1", "true", "yes"}:
-            from ..production_readiness import is_production
+            from ..security.production_readiness import is_production
 
             if not is_production():
                 gen_meta = generator_module.get_last_generation_meta()

@@ -165,7 +165,7 @@ def test_production_refuses_an_unsafe_graph_backend(monkeypatch, env: dict, frag
         monkeypatch.setenv(name, value)
     errors = neo4j_store.production_errors()
     assert any(fragment in e for e in errors)
-    from app import production_readiness
+    from app.security import production_readiness
 
     monkeypatch.setenv("APP_ENV", "production")
     assert any("G506" in e for e in production_readiness.gap_gate_errors())
@@ -375,7 +375,7 @@ def test_the_tool_reports_a_timeout_without_detail(monkeypatch, layer) -> None:
 
 
 def test_production_refuses_the_semantic_layer_without_its_conditions(monkeypatch, tmp_path: Path) -> None:
-    from app import production_readiness
+    from app.security import production_readiness
     from app.semantic_layer import config
 
     for name in ("VAULT_ADDR", "SEMANTIC_LAYER_VAULT_PATH", "SEMANTIC_LAYER_DSN", "SEMANTIC_LAYER_DSA_REF",
