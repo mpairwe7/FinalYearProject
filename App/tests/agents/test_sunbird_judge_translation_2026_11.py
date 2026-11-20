@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 from app.rag import pipeline
-from app import sunbird
+from app.providers import sunbird
 from app.providers import breakers, gateway
 from app.speech.speech_service import SpeechModel
 

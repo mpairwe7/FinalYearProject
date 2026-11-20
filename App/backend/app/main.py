@@ -1740,7 +1740,7 @@ def export_conversation(
     _ctx: AuthContext = Depends(optional_user),
 ) -> Response:
     """Export a conversation as a branded PDF."""
-    from .pdf_export import generate_conversation_pdf
+    from .processing.pdf_export import generate_conversation_pdf
 
     started = time.perf_counter()
     pdf_bytes = generate_conversation_pdf(
@@ -1770,7 +1770,7 @@ def export_tax_summary(
     _ctx: AuthContext = Depends(current_user),
 ) -> Response:
     """Export a tax calculation summary as a branded PDF."""
-    from .pdf_export import generate_tax_summary_pdf
+    from .processing.pdf_export import generate_tax_summary_pdf
 
     started = time.perf_counter()
     pdf_bytes = generate_tax_summary_pdf(
@@ -1832,7 +1832,7 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
     `default: true` marks the speaker used when a caller names none.
     """
     from .speech import orpheus_tts
-    from . import sunbird
+    from .providers import sunbird
     from .speech.speech_service import en_edge_voice_choices
 
     sunbird_ready = sunbird.is_available()

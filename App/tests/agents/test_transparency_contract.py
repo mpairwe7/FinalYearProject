@@ -287,7 +287,7 @@ class TestTheRowNamesWhatAnswered:
         pipeline_module._TURN_GENERATION.reset(token)
 
     def test_a_cloud_answer(self, record, monkeypatch) -> None:
-        from app import sunbird
+        from app.providers import sunbird
 
         self._sunbird_says(monkeypatch, "A complete answer.")
 
@@ -301,8 +301,8 @@ class TestTheRowNamesWhatAnswered:
         monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
         monkeypatch.setattr("app.security.production_readiness.is_sovereign_mode", lambda: False)
         monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: False)
-        monkeypatch.setattr("app.sunbird.is_available", lambda: True)
-        monkeypatch.setattr("app.sunbird.chat_completion", lambda *_a, **_k: text)
+        monkeypatch.setattr("app.providers.sunbird.is_available", lambda: True)
+        monkeypatch.setattr("app.providers.sunbird.chat_completion", lambda *_a, **_k: text)
         breakers.SUNBIRD_LLM_BREAKER.record_success()
 
     def test_a_provider_that_returned_nothing_is_not_named(self, record, monkeypatch) -> None:
@@ -314,7 +314,7 @@ class TestTheRowNamesWhatAnswered:
         assert record["model"] == ""
 
     def test_a_truncated_answer_served_anyway_names_who_wrote_it(self, record, monkeypatch) -> None:
-        from app import sunbird
+        from app.providers import sunbird
 
         self._sunbird_says(monkeypatch, "The penalty is calculated on the")
 

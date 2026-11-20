@@ -163,7 +163,7 @@ class LocalOnlyScopeTest(unittest.TestCase):
              patch.object(pipeline, "FAQ_JUDGE_ENABLED", True), \
              patch("app.providers.gateway.gemini_generate", side_effect=AssertionError("Gemini called")), \
              patch("app.providers.gateway.workers_ai_chat", side_effect=AssertionError("Workers AI called")), \
-             patch("app.sunbird.chat_completion", side_effect=AssertionError("Sunbird chat called")), \
+             patch("app.providers.sunbird.chat_completion", side_effect=AssertionError("Sunbird chat called")), \
              local_models_only():
             self.assertFalse(pipeline._cloud_llm_ready())
             self.assertEqual(pipeline._judge_rescue("What is VAT?", {}, 3), [])
@@ -175,7 +175,7 @@ class LocalOnlyScopeTest(unittest.TestCase):
 
         with patch.object(pipeline, "REPLY_MT_BACKEND", "local_first"), \
              patch("app.rag.generator.translate_text", return_value=None) as local, \
-             patch("app.sunbird.translate_from_english", side_effect=AssertionError("Sunbird API called")), \
+             patch("app.providers.sunbird.translate_from_english", side_effect=AssertionError("Sunbird API called")), \
              patch("app.speech.speech_service.SpeechModel._sunbird_llm_translate", side_effect=AssertionError("Sunflower called")), \
              local_models_only():
             self.assertIsNone(pipeline._translate_reply("VAT is 18%.", "sw"))

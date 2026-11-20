@@ -23,7 +23,7 @@ from typing import Any
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-from .vision.ocr import strip_hidden_control_and_bidi
+from ..vision.ocr import strip_hidden_control_and_bidi
 
 log = logging.getLogger(__name__)
 _LONG_TOKEN_RE = re.compile(r"\S{65,}")
@@ -50,7 +50,7 @@ class _URAReport(FPDF):
 
     def _setup_font(self) -> str:
         """Load a bundled/system Unicode font, with a safe core-font fallback."""
-        font_dir = Path(__file__).parent / "fonts"
+        font_dir = Path(__file__).parent.parent / "fonts"
         regular_candidates = (
             font_dir / "NotoSans-Regular.ttf",
             Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),

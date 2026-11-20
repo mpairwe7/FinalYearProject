@@ -205,8 +205,8 @@ class TestTheGeneratorActuallyAppliesIt(unittest.TestCase):
             pipeline.flags, "is_enabled", return_value=True
         ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
-        ), patch("app.sunbird.is_available", return_value=True), patch(
-            "app.sunbird.chat_completion", return_value=sunbird_reply
+        ), patch("app.providers.sunbird.is_available", return_value=True), patch(
+            "app.providers.sunbird.chat_completion", return_value=sunbird_reply
         ), patch("app.providers.gateway.workers_ai_chat", return_value=backend_return):
             return pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, locale)
 

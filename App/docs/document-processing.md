@@ -27,7 +27,7 @@ Macro-enabled Office (`.xlsm`, `.docm`, `.pptm`) is rejected.
 - Records are bound to their upload session and/or authenticated user. A legacy record without either binding is never retrievable by document ID.
 - Responses include a SHA-256 source fingerprint, extraction method, OCR backend/status, page numbers, region count, and mean OCR score. Extracted values (including 10-digit `tins`, 14-character `nins`, 12–15 digit `prns`, and `efris_invoices`) retain a bounded source pointer (page, OCR or PDF vector glyph box, and region score).
 - Automated tax reconciliation audits commercial documents (invoices, receipts, assessments, WHT certificates) across `UGX` and `USD`: reconciles taxable subtotal, standard 18.0% VAT, zero-rated/exempt (0%) supplies, and Withholding Tax (`6%`/`15%`) net payable equations, cross-checking table column totals against summary totals and routing discrepancies or unbordered fallback tables into `hitl_routing.assess_document_for_human_review`.
-- Branded PDF reports (`pdf_export.py`) embed PDF metadata, a deterministic `Report Audit SHA-256` digest, HITL officer review badges, line-item vs. total arithmetic verification warnings on tax summaries, and safe token wrapping for long unbroken strings.
+- Branded PDF reports (`processing/pdf_export.py`) embed PDF metadata, a deterministic `Report Audit SHA-256` digest, HITL officer review badges, line-item vs. total arithmetic verification warnings on tax summaries, and safe token wrapping for long unbroken strings.
 - Interactive taxpayer and officer inspection modal allows inline verification of
   extracted tax fields, arithmetic breakdown, audit notes, and quick suggested
   questions in English, Luganda, and Swahili without requiring a raw PDF download.

@@ -475,11 +475,11 @@ App/backend/app/
 ├── tax/calculator_router.py # Single-calculator fast path & multi-turn amount carryover
 ├── guardrails/premise.py     # False-premise detector, legitimate statutory modifier allowlist, abolished-tax claims
 ├── speech/speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
-├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
+├── providers/sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── observability/tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
 ├── observability/analytics.py         # Prometheus-compatible metrics middleware
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
-├── pdf_export.py        # Branded PDF conversation/tax summary export
+├── processing/pdf_export.py        # Branded PDF conversation/tax summary export
 ├── quality/evaluation.py        # RAG evaluation harness (8 metrics)
 │
 ├── auth/                # JWT authentication (Phase 14)

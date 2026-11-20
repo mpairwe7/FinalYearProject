@@ -602,7 +602,7 @@ THREAT_REGISTRY: list[dict] = [
             "never an invented answer. Sunbird refusals log their error code. Residual: a suspended account (G539) "
             "and the relay (G540) are fixed outside the code"
         ),
-        "evidence": ["App/backend/app/rag/pipeline.py", "App/backend/app/sunbird.py",
+        "evidence": ["App/backend/app/rag/pipeline.py", "App/backend/app/providers/sunbird.py",
                      "App/backend/app/providers/gateway.py", "App/backend/app/providers/breakers.py",
                      "App/tests/agents/test_sunbird_primary_llm_2026_11.py", "App/backend/tests/test_gemini_routing.py"],
         "status": "in_progress",

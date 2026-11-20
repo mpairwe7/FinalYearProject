@@ -1418,7 +1418,8 @@ def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_c
 
 def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     from app.tax import glossary
-    from app import mt, sunbird
+    from app import mt
+    from app.providers import sunbird
     from app.speech import orpheus_tts, spark_tts_salt
     from app.speech import speech_service as ss
     from app.memory.language_state import normalize_locale_tag, resolve_turn_locale

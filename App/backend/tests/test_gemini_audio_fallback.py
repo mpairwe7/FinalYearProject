@@ -202,7 +202,7 @@ class _EveryTierDown:
 class TestAnOutageStaysAnOutage:
     @pytest.fixture(autouse=True)
     def _sunbird_down(self, monkeypatch) -> None:
-        monkeypatch.setattr("app.sunbird.is_available", lambda: False)
+        monkeypatch.setattr("app.providers.sunbird.is_available", lambda: False)
 
     def _chain(self, samples: Any) -> Any:
         model = _EveryTierDown(samples)

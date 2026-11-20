@@ -259,8 +259,8 @@ class ModelChainTests(unittest.TestCase):
             with (
                 patch.object(pipeline.flags, "is_enabled", return_value=True),
                 patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}),
-                patch("app.sunbird.is_available", return_value=True),
-                patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sunbird,
+                patch("app.providers.sunbird.is_available", return_value=True),
+                patch("app.providers.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sunbird,
                 contextlib.suppress(TurnCancelled),
             ):
                 pipeline._llm_cloud_fallback(
@@ -429,7 +429,7 @@ class TranslationTests(unittest.TestCase):
         with (
             patch.object(pipeline, "REPLY_MT_BACKEND", "local_first"),
             patch.object(generator, "translate_text", side_effect=sunflower) as local,
-            patch("app.sunbird.translate_from_english", return_value="Unaweza kujisajili.") as sunbird,
+            patch("app.providers.sunbird.translate_from_english", return_value="Unaweza kujisajili.") as sunbird,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
@@ -451,7 +451,7 @@ class TranslationTests(unittest.TestCase):
 
         with (
             patch.object(pipeline, "REPLY_MT_BACKEND", "sunbird"),
-            patch("app.sunbird.translate_from_english", return_value=None),
+            patch("app.providers.sunbird.translate_from_english", return_value=None),
             patch.object(SpeechModel, "_sunbird_llm_translate", side_effect=sunbird_llm) as first,
             patch.object(SpeechModel, "_cf_llama_translate", return_value="Unaweza kujisajili.") as second,
             turn_cancel_scope(token),

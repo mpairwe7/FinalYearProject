@@ -1,6 +1,6 @@
 """Sunbird/spark-tts-salt — local neural TTS for Ugandan languages (2026).
 
-Sibling to :mod:`app.sunbird` (an external speech provider, imported lazily
+Sibling to :mod:`app.providers.sunbird` (an external speech provider, imported lazily
 by :mod:`app.speech.speech_service`) rather than a member of the ``native_voice``
 package: this is a batch full-utterance synthesizer, the same granularity as
 Piper or edge-tts, not part of that package's sub-600ms streaming

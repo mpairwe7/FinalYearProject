@@ -21,16 +21,16 @@ class EnglishRetrievalQueryTests(unittest.TestCase):
         self.assertEqual(english_retrieval_query("VAT rate this year", "en"), "VAT rate this year")
 
     def test_failed_or_identical_translation_keeps_original(self) -> None:
-        with patch("app.sunbird.translate_to_english", return_value="VAT rate this year"):
+        with patch("app.providers.sunbird.translate_to_english", return_value="VAT rate this year"):
             self.assertEqual(
                 english_retrieval_query("VAT rate this year", "lg"),
                 "VAT rate this year",
             )
-        with patch("app.sunbird.translate_to_english", side_effect=RuntimeError("down")):
+        with patch("app.providers.sunbird.translate_to_english", side_effect=RuntimeError("down")):
             self.assertEqual(english_retrieval_query("essomero", "lg"), "essomero")
 
     def test_luganda_is_translated(self) -> None:
-        with patch("app.sunbird.translate_to_english", return_value="How do I get a TIN?"):
+        with patch("app.providers.sunbird.translate_to_english", return_value="How do I get a TIN?"):
             self.assertEqual(
                 english_retrieval_query("Nfunira ntya TIN?", "lg"),
                 "How do I get a TIN?",
