@@ -913,12 +913,12 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
     """"What documents are required to clear an imported vehicle at customs?" was answered
     "The common external tariff for finished goods is 25%" on the live Space (G700).
 
-    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Seven
+    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Eight
     versions of the fix each lost real answers and were failed by an independent replay, because
-    each tried to tell from words whether the rest of the message asked for a rate. The reading
-    is now left alone, and the rest of the message is not read at all: the general tariff is
-    withheld only when the whole message is one plain paperwork question. Every case those
-    replays found is held here.
+    each kept a list of what to refuse, and a rate request in words outside the list got through.
+    The reading is now left alone, and every list says what is allowed: the general tariff is
+    withheld only when the whole message is a greeting and one plain paperwork question made of
+    known words. Every case those replays found is held here.
     """
 
     def _plans(self, cases) -> None:
@@ -1050,6 +1050,21 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
                 ("What is the VAT on imported goods? What documents are required to clear them?", "vat_standard"),
                 ("Tell me the import duty on cars. What documents are required to clear one?", "customs_duty_common"),
                 ("Excise duty on beer? What documents are required to import it?", "excise_duty_beer_malt"),
+            )
+        )
+
+    def test_a_message_with_anything_unrecognised_in_it_is_read_as_before(self) -> None:
+        """Version eight refused listed charge and joining words after the question. A request
+        in other words, after a dash or in another script, was not refused."""
+        self._plans(
+            (
+                ("What documents are required to clear a car at customs - is it dutiable?", "customs_duty_common"),
+                ("What documents are required to clear a car at customs (taxed)?", "customs_duty_common"),
+                ("\u6c7d\u8f66\u5173\u7a0e\u591a\u5c11? What documents are required to clear it at customs?", "customs_duty_common"),
+                ("What documents are required to clear a car at customs? \u0643\u0645 \u0627\u0644\u0631\u0633\u0648\u0645", "customs_duty_common"),
+                ("What documents are required to clear a tractor at customs?", "customs_duty_common"),
+                ("$? What documents are required to clear a car at customs?", "customs_duty_common"),
+                ("1. What documents are required to clear an imported vehicle at customs?", "customs_duty_common"),
             )
         )
 
