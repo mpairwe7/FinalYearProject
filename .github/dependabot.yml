@@ -153,6 +153,13 @@ updates:
     commit-message:
       prefix: "deps(frontend)"
     groups:
+      # vitest and its plugins release together, and each plugin's peer range is the exact vitest
+      # version. Bumped alone, @vitest/coverage-v8 5 ran on vitest 4 (#771). Listed first: a
+      # package joins the first group that matches it.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       minor-and-patch:
         patterns:
           - "*"
@@ -185,6 +192,12 @@ updates:
       - "automated"
     commit-message:
       prefix: "deps(docker)"
+    # The shipped Node major is the one in App/frontend/.nvmrc, which CI tests with
+    # (test_shipped_frontend_runtimes_match_ci_and_are_digest_pinned). A major bump is a change to
+    # .nvmrc and both images together, so it is not proposed one image at a time (#768, #769).
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         patterns:
@@ -211,6 +224,12 @@ updates:
       - "automated"
     commit-message:
       prefix: "deps(docker-frontend)"
+    # The shipped Node major is the one in App/frontend/.nvmrc, which CI tests with
+    # (test_shipped_frontend_runtimes_match_ci_and_are_digest_pinned). A major bump is a change to
+    # .nvmrc and both images together, so it is not proposed one image at a time (#768, #769).
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         patterns:

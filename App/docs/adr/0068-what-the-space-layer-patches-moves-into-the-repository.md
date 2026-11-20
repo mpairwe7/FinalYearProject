@@ -108,6 +108,10 @@ lost a section of the script on an image that lacks the code replacing it.
   - A response with no candidate (a blocked prompt) or a candidate with no
     part is no answer. It was returned as an empty transcript, which the chain
     reports as "no speech detected" even with every other tier down.
+  - A transcript cut off at the output limit (`finishReason` `MAX_TOKENS`) is
+    no answer either. The request caps output at 1,024 tokens and a clip can
+    run for minutes, so the end of what was said, where the question usually
+    is, would be missing from text the caller read as complete.
 - **One finding is not taken.** A candidate whose text is empty still means the
   model heard no words. That is the tested rule that keeps a mis-tap from being
   reported as a failure, and the review's suggestion would have reversed it.
