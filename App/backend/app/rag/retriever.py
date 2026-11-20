@@ -76,6 +76,8 @@ DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "mixedbread-ai/mxbai-rerank-base-v2")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
+# Where the image has no torch, rerank on word overlap (`_CpuLexicalReranker`). Off unless set.
+SPARSE_CPU_RERANKER = os.getenv("SPARSE_CPU_RERANKER", "false").strip().lower() in ("1", "true", "yes", "on")
 RETRIEVER_DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "cpu")
 RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", RETRIEVER_DENSE_DEVICE)
 BM25_STATE_PATH = Path(
@@ -952,6 +954,45 @@ def _breaker_open(breaker: Any) -> bool:
 _LOCAL_DENSE_SLOTS = threading.BoundedSemaphore(2)
 
 
+class _CpuLexicalReranker:
+    """A word-overlap stand-in for the cross-encoder, for an image with no torch.
+
+    Scores are bounded to [0, 1]: the BM25 relevance of the passage, the share
+    of the question's words it holds, and a bonus for shared word pairs. A
+    passage with no word in common scores 0. `_rerank` scores it like any other
+    reranker, so stale editions are demoted and the gates read its own score.
+    """
+
+    is_cpu_lexical_reranker = True
+    # What `_reranker_emits_logits` reads: these scores are already probabilities.
+    activation_fn = type("Sigmoid", (), {})()
+
+    def __init__(self, sparse_encoder: Any = None) -> None:
+        self._sparse_encoder = sparse_encoder
+
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+        scores: list[float] = []
+        for q, doc in pairs:
+            q_toks = [t for t in re.sub(r"[^\w\s]", " ", (q or "").lower()).split() if len(t) >= 2]
+            d_toks = [t for t in re.sub(r"[^\w\s]", " ", (doc or "").lower()).split() if len(t) >= 2]
+            if not q_toks or not d_toks:
+                scores.append(0.0)
+                continue
+            base = lexical_relevance(q, {"text": doc}, self._sparse_encoder) if self._sparse_encoder else 0.0
+            d_set = set(d_toks)
+            overlap = sum(1 for t in q_toks if t in d_set) / len(q_toks)
+            q_bi = {f"{a}_{b}" for a, b in zip(q_toks, q_toks[1:])}
+            d_bi = {f"{a}_{b}" for a, b in zip(d_toks, d_toks[1:])}
+            bi_bonus = (0.15 * len(q_bi & d_bi) / len(q_bi)) if q_bi else 0.0
+            scores.append(min(1.0, max(0.0, 0.65 * base + 0.25 * overlap + bi_bonus)))
+        return scores
+
+
+def _sparse_only_reranker(sparse_encoder: Any) -> _CpuLexicalReranker | None:
+    """The reranker for an image that cannot load a cross-encoder: word overlap, where switched on."""
+    return _CpuLexicalReranker(sparse_encoder) if RERANK_ENABLED and SPARSE_CPU_RERANKER else None
+
+
 def _blend_cpu_lexical(candidates: list[dict[str, Any]], fused_order: list[str]) -> list[dict[str, Any]]:
     """CPU-reranked *candidates* ordered by the blend, each gated on its own word-overlap score.
 
@@ -1647,13 +1688,14 @@ class HybridRetriever:
                     return False
                 self._sparse_only = True
                 self._dense_model = None
-                self._reranker = None
+                self._reranker = _sparse_only_reranker(self._sparse_encoder)
                 self._ready = True
                 logger.info(
                     "HybridRetriever ready in SPARSE-ONLY mode (url=%s collection=%s) — "
-                    "no sentence-transformers, so dense retrieval and reranking are off",
+                    "no sentence-transformers, so dense retrieval is off and reranking is %s",
                     QDRANT_URL,
                     QDRANT_COLLECTION,
+                    "by word overlap" if self._reranker is not None else "off",
                 )
                 return True
 
