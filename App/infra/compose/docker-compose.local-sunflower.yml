@@ -4,7 +4,7 @@
 # FP8 KV cache (--kv-cache-dtype fp8), --dtype auto, and 64K-262K long-context support
 # (native max_position_embeddings=262144 on Sunflower-Qwen3.5-9B & Sunflower-Qwen3.8-27B).
 #
-#   cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d
+#   cd App && docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml up -d
 services:
   vllm:
     image: vllm/vllm-openai:v0.17.1

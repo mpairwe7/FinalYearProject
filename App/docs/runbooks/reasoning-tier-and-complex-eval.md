@@ -1,7 +1,7 @@
 # Runbook: Sovereign Reasoning Tier (`vllm-reasoner`) & Complex Tax Scenario Evaluation
 
 **Related ADR:** [ADR-0007](../adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md)  
-**Compose Overlay:** `App/docker-compose.reasoner.yml`  
+**Compose Overlay:** `App/infra/compose/docker-compose.reasoner.yml`  
 **Evaluation Harness:** `App/evals/complex_scenarios/` & `App/scripts/eval_complex_scenarios.py`
 
 ---
@@ -39,11 +39,11 @@ nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu --for
 cd App
 docker compose \
   -f docker-compose.yml \
-  -f docker-compose.local-retrieval.yml \
-  -f docker-compose.local-sunflower.yml \
-  -f docker-compose.gpu-salt.yml \
-  -f docker-compose.connectors.yml \
-  -f docker-compose.reasoner.yml \
+  -f infra/compose/docker-compose.local-retrieval.yml \
+  -f infra/compose/docker-compose.local-sunflower.yml \
+  -f infra/compose/docker-compose.gpu-salt.yml \
+  -f infra/compose/docker-compose.connectors.yml \
+  -f infra/compose/docker-compose.reasoner.yml \
   up -d vllm-reasoner
 ```
 

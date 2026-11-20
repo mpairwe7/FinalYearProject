@@ -213,7 +213,7 @@ missing guard as a security incident until explained. Streaming turns are not at
 ### Provider outage or kill switch
 
 Set `FLAG_LIVE_WEB_RESEARCH=false`. Answers then come from the corpus with no live claim.
-`App/docker-compose.gpu-salt.yml` defaults both research flags to `true`, so a stack
+`App/infra/compose/docker-compose.gpu-salt.yml` defaults both research flags to `true`, so a stack
 started from that overlay has them on unless they are set explicitly. A
 single bad provider can be dropped with `WEB_SEARCH_PROVIDERS`.
 

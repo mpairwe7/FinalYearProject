@@ -47,9 +47,9 @@ import urllib.error
 import urllib.request
 
 REPO = "landwind22/ura-chatbot"
-ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
+ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-# Mirrors the same keys in the repo-root .env so local and Space agree.
+# Mirrors the same keys in App/.env so local and Space agree.
 SETTINGS = {
     # Master gate for the Workers AI / Gemini tier. The chat-side gates ALSO
     # require LLM_FALLBACK_BACKEND, which is deliberately left empty, so this

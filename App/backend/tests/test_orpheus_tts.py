@@ -59,7 +59,7 @@ class SpeakerSelection(unittest.TestCase):
             self.assertEqual(orpheus_tts.speaker_for("sw"), "waxal_swa_0006")
 
     def test_the_local_stack_voices_every_call_language(self):
-        # docker-compose.gpu-salt.yml enables lg,sw,en: no call reaches a cloud voice.
+        # infra/compose/docker-compose.gpu-salt.yml enables lg,sw,en: no call reaches a cloud voice.
         with patch.dict(os.environ, {**ON, "ORPHEUS_TTS_LANGUAGES": "lg,sw,en"}):
             self.assertEqual(
                 [orpheus_tts.speaker_for(lang) for lang in ("lg", "sw", "en")],

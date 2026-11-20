@@ -43,8 +43,8 @@ def validate(env: str = "development") -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     is_prod = env == "production"
 
-    # Load .env if present
-    env_file = Path(".env")
+    # Load App/.env if present, wherever the script is run from
+    env_file = Path(__file__).resolve().parents[1] / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
