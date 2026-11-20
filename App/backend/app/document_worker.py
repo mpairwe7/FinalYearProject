@@ -138,11 +138,11 @@ def _child(kind: str, data: bytes, conn: Any) -> None:
     try:
         _apply_child_sandbox_limits(apply_rlimits=True)
         if kind == "sandbox_pdf":
-            from .ephemeral_pdf_sandbox import _extract_pdf_pages
+            from .research.ephemeral_pdf_sandbox import _extract_pdf_pages
 
             extraction = _extract_pdf_pages(data)
         elif kind == "sandbox_xlsx":
-            from .ephemeral_pdf_sandbox import _extract_xlsx_pages
+            from .research.ephemeral_pdf_sandbox import _extract_xlsx_pages
 
             extraction = _extract_xlsx_pages(data)
         else:

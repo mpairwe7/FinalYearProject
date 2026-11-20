@@ -12,9 +12,9 @@ from time import monotonic
 
 import httpx
 import pytest
-from app import egress
-from app import web_search_providers as wsp
-from app.web_search_providers import (
+from app.research import egress
+from app.research import web_search_providers as wsp
+from app.research.web_search_providers import (
     BraveProvider,
     ChainResult,
     DuckDuckGoHtmlProvider,
@@ -94,7 +94,7 @@ class TestWireContracts:
         ]
 
     def test_the_default_recency_horizon_reaches_every_provider_as_a_filter(self):
-        from app.web_research import WEB_RESEARCH_RECENCY_HORIZON_DAYS as horizon
+        from app.research.web_research import WEB_RESEARCH_RECENCY_HORIZON_DAYS as horizon
 
         assert TavilyProvider._time_range(horizon) == "year"
         assert BraveProvider._freshness(horizon) == "py"

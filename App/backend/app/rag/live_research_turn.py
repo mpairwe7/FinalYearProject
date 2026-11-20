@@ -28,7 +28,7 @@ def live_research_for_turn(
     once already. A crash is reported as a failed check when the question needed
     one: going quiet is how a stale answer comes to look current.
     """
-    from ..web_research import (
+    from ..research.web_research import (
         WebResearchTurnOutcome,
         merge_into_hits,
         query_is_time_sensitive,

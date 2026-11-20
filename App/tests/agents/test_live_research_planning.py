@@ -13,8 +13,8 @@ from time import monotonic, sleep
 
 import pytest
 
-from app import web_research as wr
-from app.web_search_providers import ChainResult, RawResult
+from app.research import web_research as wr
+from app.research.web_search_providers import ChainResult, RawResult
 
 
 @pytest.fixture(autouse=True)
@@ -645,7 +645,7 @@ class TestCorpusSyncApproval:
         from types import SimpleNamespace
 
         import app.vectorstore.corpus_sync as corpus_sync
-        import app.ephemeral_pdf_sandbox as sandbox
+        import app.research.ephemeral_pdf_sandbox as sandbox
 
         document = SimpleNamespace(
             url=self.PDF_URL, filename="Guide.pdf", stem="Guide", sha256="a" * 64, fiscal_year="FY2026-27", top_chunks=[]

@@ -165,7 +165,7 @@ def record(purpose: str, host: str, outcome: str, *, nbytes: int = 0, sent: int 
     """
     label = group or host_group(host)
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc("web_egress_requests_total", labels={"purpose": purpose, "host": label, "outcome": outcome})
         if sent:

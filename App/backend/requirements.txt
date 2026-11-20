@@ -104,7 +104,7 @@ opentelemetry-instrumentation-httpx==0.66b2
 pydantic-settings>=2.15.0
 boto3>=1.43.114
 urllib3>=2.8.0
-# DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
+# DNS-over-HTTPS resolver (research/doh_resolver.py) for DNS-broken pods (USE_DOH=true)
 dnspython>=2.9.0
 
 # Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;

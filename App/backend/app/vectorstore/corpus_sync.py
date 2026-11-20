@@ -41,13 +41,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .._root import APP_DATA_ROOT as _APP_DATA_ROOT
-from ..ephemeral_pdf_sandbox import SandboxDocument
+from ..research.ephemeral_pdf_sandbox import SandboxDocument
 from ..freshness import SNAPSHOT_PATH, write_snapshot
 from ..redis_shared import shared_redis
 from ..ingestion.indexer import PDF_JSONL_DIR, QDRANT_COLLECTION, _embedding_text
 from ..ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, PDF_MANIFEST_NAME, _stable_id
 from ..rag.retriever import deterministic_point_id, fiscal_year_rank
-from ..web_research import QDRANT_SYNC_ALLOWED_HOSTS, extract_fiscal_year, infer_doc_family
+from ..research.web_research import QDRANT_SYNC_ALLOWED_HOSTS, extract_fiscal_year, infer_doc_family
 
 logger = logging.getLogger(__name__)
 

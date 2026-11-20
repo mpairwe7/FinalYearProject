@@ -47,7 +47,7 @@ class WebCitationProvenanceTests(unittest.TestCase):
 
 class SearchSummaryEffectiveDateTests(unittest.TestCase):
     def test_a_search_summary_gets_no_effective_date_guessed_from_its_text(self) -> None:
-        from app import web_research
+        from app.research import web_research
 
         source = web_research.WebSearchResult(
             title="Uganda tax summary", url="https://www.pwc.com/ug/tax-summary",

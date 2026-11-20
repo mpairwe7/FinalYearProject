@@ -24,6 +24,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `ingestion/` | Corpus builders (`pdf_corpus`, `faq_corpus`, `crawl_corpus`), document parsing (`docling_intelligence`, `document_normalization`) and `indexer.py` |
 | `embeddings/` | `embedder.py`: CPU embeddings for the local dense leg (ADR-0034) |
 | `speech/` | Speech and voice (ADR-0067): `speech_service.py` (ASR, translation and TTS behind one service), `speech_normalization.py` (reply text made speakable), `accent_detector.py`, the local voices `orpheus_tts.py` and `spark_tts_salt.py`, `voice_consent.py` (consent receipts and the voice audit log), and the streaming voice transports `voice_stream.py`, `voice_stream_v2.py`, `voice_ws.py`, `voice_ws_v2.py` |
+| `research/` | Live web research (ADR-0021, ADR-0035, ADR-0067): `web_research.py` (when to look, what may leave, what an answer may trust), `web_search_providers.py` (the `SearchProvider` backends and failover), `egress.py` (the one outbound HTTP client), `doh_resolver.py`, `web_fx.py` (indicative exchange rates) and `ephemeral_pdf_sandbox.py` (the RAM-backed document sandbox) |
 | `vectorstore/` | `vector_db.py` (the pgvector leg), Qdrant `index_lifecycle`, `corpus_sync`, `qdrant_backup`, `point_ids` |
 | `db/` | `database.py` (the store and its backend seam) and `postgres.py` |
 | `tools/` | Registered tools (`ToolRegistry`) |

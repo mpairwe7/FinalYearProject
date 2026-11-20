@@ -184,7 +184,7 @@ def test_an_identifier_in_a_trusted_link_query_is_dropped() -> None:
 
 
 def test_link_allowlist_covers_every_tier1_research_host_outside_go_ug() -> None:
-    from app.web_research import TIER1_DOMAINS
+    from app.research.web_research import TIER1_DOMAINS
 
     outside = {host.removeprefix("www.").removeprefix("media.") for host in TIER1_DOMAINS}
     outside = {host for host in outside if not host.endswith(".go.ug")}

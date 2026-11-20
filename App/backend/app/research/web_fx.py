@@ -35,8 +35,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import egress
-from .redis_shared import shared_redis
-from .tax.tables import DATA_DIR
+from ..redis_shared import shared_redis
+from ..tax.tables import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ def _load_bou_fx_file() -> dict[str, Any]:
 
 def _count_quote(outcome: str) -> None:
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc("fx_quotes_total", labels={"outcome": outcome})
     except Exception:  # noqa: BLE001 - telemetry must never fail a conversion

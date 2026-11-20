@@ -261,7 +261,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
 
     from app.calculator_router import plan_calculation
     from app.vectorstore.corpus_sync import _NON_REPLACING_FAMILIES
-    from app.web_research import infer_doc_family
+    from app.research.web_research import infer_doc_family
 
     # 1. calculator_router must return None on B2G / Deemed VAT / UNBS / NEMA queries carrying amounts
     for bypass_q in (
@@ -284,7 +284,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert "6,000,000" in block_surcharge
 
     # 3. Verify web_research doc_family classification and non-replacing family safeguard for MDA / B2G / UESW
-    from app.web_research import can_persist_to_qdrant, classify_source_authority
+    from app.research.web_research import can_persist_to_qdrant, classify_source_authority
 
     assert infer_doc_family("UDLS driving permit and DCIC e-passport NTR fees") == "mda_ntr_schedule"
     assert infer_doc_family("NITA-U PDPO data protection and privacy registration fee") == "mda_ntr_schedule"
@@ -309,7 +309,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert "s.29" in block_nita_ntr
     assert "25,000" in block_nita_ntr
 
-    from app.web_research import build_search_queries, detect_research_triggers
+    from app.research.web_research import build_search_queries, detect_research_triggers
 
     nita_trigs = detect_research_triggers(
         "What is the latest NITA-U PDPO data protection registration fee schedule?",

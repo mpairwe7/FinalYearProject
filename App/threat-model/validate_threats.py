@@ -373,7 +373,7 @@ THREAT_REGISTRY: list[dict] = [
             "Any page that trips the injection or tool-result screen rejects the whole document, cached copies "
             "included; its search summary is not quoted and nothing is synced"
         ),
-        "evidence": ["App/backend/app/ephemeral_pdf_sandbox.py", "App/tests/agents/test_web_research_integrity_2026_11.py"],
+        "evidence": ["App/backend/app/research/ephemeral_pdf_sandbox.py", "App/tests/agents/test_web_research_integrity_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -390,8 +390,8 @@ THREAT_REGISTRY: list[dict] = [
             "degrading to disclosed search summaries"
         ),
         "evidence": [
-            "App/backend/app/ephemeral_pdf_sandbox.py",
-            "App/backend/app/web_research.py",
+            "App/backend/app/research/ephemeral_pdf_sandbox.py",
+            "App/backend/app/research/web_research.py",
             "App/tests/agents/test_web_research_integrity_2026_11.py",
         ],
         "status": "mitigated",
@@ -1285,11 +1285,11 @@ THREAT_REGISTRY: list[dict] = [
         "description": "Live web research SSRF, DNS rebinding to internal/metadata IPs, or malicious statutory/MDA PDF extraction outside the ephemeral sandbox (ADR-0008, ADR-0009, OWASP ASI04/ASI05/LLM01)",
         "owasp_llm": "LLM01",
         "mitre_atlas": "AML.T0052",
-        "mitigation": "Domain allowlisting (ura.go.ug, parliament.go.ug, bou.or.ug, ulii.org, etc.) on the default https port only, follow_redirects=False with every hop re-validated, connections pinned to the address they were validated against by app/egress.py (resolve once, every answer publicly routable, TLS still verified against the hostname), so DNS rebinding is closed for every fetch on a turn (ADR-0035), and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural guardrails/pdf.py checks. Residual: the CI crawler is not yet on the pinned backend (G533)",
+        "mitigation": "Domain allowlisting (ura.go.ug, parliament.go.ug, bou.or.ug, ulii.org, etc.) on the default https port only, follow_redirects=False with every hop re-validated, connections pinned to the address they were validated against by app/research/egress.py (resolve once, every answer publicly routable, TLS still verified against the hostname), so DNS rebinding is closed for every fetch on a turn (ADR-0035), and isolated subprocess extraction in research/ephemeral_pdf_sandbox.py with structural guardrails/pdf.py checks. Residual: the CI crawler is not yet on the pinned backend (G533)",
         "evidence": [
-            "App/backend/app/egress.py",
-            "App/backend/app/web_research.py",
-            "App/backend/app/ephemeral_pdf_sandbox.py",
+            "App/backend/app/research/egress.py",
+            "App/backend/app/research/web_research.py",
+            "App/backend/app/research/ephemeral_pdf_sandbox.py",
             "App/tests/agents/test_ephemeral_pdf_sandbox.py",
             "App/tests/agents/test_web_egress_2026_11.py",
         ],
@@ -1303,7 +1303,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0051.001",
         "mitigation": "Search control flow is decided from the question and the model has no search tool. Web text reaches the model only as scanned, spotlighted passages labelled with authority, evidence and age, never the prompt or verified_facts. Instruction-shaped results are dropped whole. Regex screening can be evaded; the channel boundary is what holds when it misses. The body cannot close the spotlight, header fields are single-line, and the cloud fallback uses the same fence (ADR-0027, G458).",
         "evidence": [
-            "App/backend/app/web_research.py",
+            "App/backend/app/research/web_research.py",
             "App/backend/app/rag/generator.py",
             "App/backend/app/guardrails/",
             "App/backend/app/rag/pipeline.py",
@@ -1321,7 +1321,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0057",
         "mitigation": "Queries and topic keys are built from a closed vocabulary of generic tax terms, so an unknown word cannot leave. Hosted providers are external processors under the G35 cross-border gate and are refused in sovereign mode. The transfer assessment itself is outstanding (G326)",
         "evidence": [
-            "App/backend/app/web_research.py",
+            "App/backend/app/research/web_research.py",
             "App/backend/app/production_readiness.py",
             "App/tests/agents/test_web_evidence_boundary.py",
             "App/tests/agents/test_web_search_providers.py",

@@ -26,8 +26,8 @@ def test_phase1_search_tools_scrubbing_4000_chars_education_threshold_and_mda_au
     from app.mcp.validation import result_matches_schema
     from app.tools.education import explain
     from app.tools.graph_tools import GraphEffectiveOnTool, GraphResolveRateTool
-    from app.web_research import classify_source_authority
-    from app.web_search_providers import SearxngProvider
+    from app.research.web_research import classify_source_authority
+    from app.research.web_search_providers import SearxngProvider
 
     class _FakeRetriever:
         is_ready = True
@@ -348,7 +348,7 @@ def test_phase5_and_phase6_xlsx_zip_bomb_audit_doc_portal_dts_and_dom_scrubbing(
     """G434–G438: XLSX zip-bomb guard, AuditTaxDocumentTool scrubbing & currency, Portal Co-Pilot DTS WINE/fees & DOM scrubbing, and crawler invisible-char stripping."""
     from bs4 import BeautifulSoup
 
-    from app.ephemeral_pdf_sandbox import PdfRejected, _validate_xlsx_zip_container
+    from app.research.ephemeral_pdf_sandbox import PdfRejected, _validate_xlsx_zip_container
     from app.portal_copilot import (
         classify_portal_task,
         compute_estimated_liability_ugx,

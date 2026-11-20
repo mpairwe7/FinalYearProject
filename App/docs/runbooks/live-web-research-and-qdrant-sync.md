@@ -1,16 +1,16 @@
 # Runbook: Sovereign Live Web Research, Global FX & Self-Updating Qdrant Sync
 
 **ADR Reference**: [ADR-0008](../adr/0008-live-web-research-ephemeral-pdf-sandbox-and-self-updating-qdrant.md), [ADR-0021](../adr/0021-planner-bound-web-evidence-and-honest-live-checks.md)  
-**Modules**: `App/backend/app/web_fx.py`, `App/backend/app/web_research.py`, `App/backend/app/web_search_providers.py`, `App/backend/app/ephemeral_pdf_sandbox.py`, `App/backend/app/vectorstore/corpus_sync.py`
+**Modules**: `App/backend/app/research/web_fx.py`, `App/backend/app/research/web_research.py`, `App/backend/app/research/web_search_providers.py`, `App/backend/app/research/ephemeral_pdf_sandbox.py`, `App/backend/app/vectorstore/corpus_sync.py`
 
 ---
 
 ## 1. Overview
 
 When enabled, the Phase 41 Live Web Research and Self-Updating Qdrant subsystem provides:
-1. **Indicative FX (`web_fx.py`)**: market quotes to `UGX` from `XE.com`, Google Finance and the Open ER mirror, for estimating before the Bank of Uganda rate is to hand. Sources that disagree by more than 2% produce no rate, a stale mirror is refused, and a verified BoU snapshot always takes precedence.
-2. **9-Trigger Live Check (`web_research.py`)**: decided deterministically from the question (`fx_rate`, `stale_corpus_edition`, `vehicle_valuation_cif`, `public_notice_or_waiver`, `efris_dts_gazette`, `bill_assent_gazette`, `eac_cet_stay`, `unverified_rate_or_low_confidence`, `recency_intent`). Queries are built from a closed vocabulary and run through a provider chain (`web_search_providers.py`). Web text stays labelled evidence and every check ends in a `status`.
-3. **Ephemeral `tmpfs` PDF/XLSX Sandbox (`ephemeral_pdf_sandbox.py`)**: Streams official Tier-1 PDFs/workbooks into `/dev/shm/ura-web-sandbox/<turn_id>/` (or `URA_WEB_SANDBOX_DIR` on a dedicated `tmpfs` mount, `0o700`, 25 MB cap), runs `malware_scan` + `pdf_guards.inspect_pdf_bytes` + prompt-injection screening, micro-reranks the top 4 chunks on GPU 2, and deletes the directory in a `finally:` block while logging any cleanup failure.
+1. **Indicative FX (`research/web_fx.py`)**: market quotes to `UGX` from `XE.com`, Google Finance and the Open ER mirror, for estimating before the Bank of Uganda rate is to hand. Sources that disagree by more than 2% produce no rate, a stale mirror is refused, and a verified BoU snapshot always takes precedence.
+2. **9-Trigger Live Check (`research/web_research.py`)**: decided deterministically from the question (`fx_rate`, `stale_corpus_edition`, `vehicle_valuation_cif`, `public_notice_or_waiver`, `efris_dts_gazette`, `bill_assent_gazette`, `eac_cet_stay`, `unverified_rate_or_low_confidence`, `recency_intent`). Queries are built from a closed vocabulary and run through a provider chain (`research/web_search_providers.py`). Web text stays labelled evidence and every check ends in a `status`.
+3. **Ephemeral `tmpfs` PDF/XLSX Sandbox (`research/ephemeral_pdf_sandbox.py`)**: Streams official Tier-1 PDFs/workbooks into `/dev/shm/ura-web-sandbox/<turn_id>/` (or `URA_WEB_SANDBOX_DIR` on a dedicated `tmpfs` mount, `0o700`, 25 MB cap), runs `malware_scan` + `pdf_guards.inspect_pdf_bytes` + prompt-injection screening, micro-reranks the top 4 chunks on GPU 2, and deletes the directory in a `finally:` block while logging any cleanup failure.
 4. **Self-Updating Qdrant Hot-Swap (`vectorstore/corpus_sync.py`)**: Compares discovered `ura.go.ug` / `ulii.org` / `parliament.go.ug` PDFs against Qdrant and `App/Data/pdf_jsonl/`. When a single-edition full guide has a strictly newer `fiscal_year`, embeds and upserts the new chunks into Qdrant, tombstones and deletes the superseded points, moves the replaced `.jsonl` to `App/Data/archive/`, writes the new `.jsonl`, refreshes `index_freshness.json`, and stamps a 7-day entry in `web_sync_ledger`.
 
 ---
@@ -19,7 +19,7 @@ When enabled, the Phase 41 Live Web Research and Self-Updating Qdrant subsystem 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FLAG_LIVE_WEB_RESEARCH` | `false` | Enables indicative FX, the 9-trigger live check and the ephemeral `tmpfs` PDF/XLSX sandbox (`ephemeral_pdf_sandbox.py`). |
+| `FLAG_LIVE_WEB_RESEARCH` | `false` | Enables indicative FX, the 9-trigger live check and the ephemeral `tmpfs` PDF/XLSX sandbox (`research/ephemeral_pdf_sandbox.py`). |
 | `FLAG_AUTO_QDRANT_WEB_SYNC` | `false` | Enables automatic Qdrant hot-swapping, old-document tombstoning, JSONL archival, and `web_sync_ledger` persistence (`vectorstore/corpus_sync.py`). |
 | `FX_CACHE_TTL_SECONDS` | `1800` | Positive cache TTL (30 minutes) for FX quotes in L1 memory and Redis (`ura:fx:live:{CUR}:UGX`). |
 | `FX_HTTP_TIMEOUT_SECONDS` | `3.0` | Per-source HTTPS timeout. `FX_LOOKUP_BUDGET_SECONDS` (`6.0`) bounds a whole lookup. |
@@ -221,7 +221,7 @@ single bad provider can be dropped with `WEB_SEARCH_PROVIDERS`.
 
 ## 6a. Watching what leaves the deployment (ADR-0035)
 
-Every fetch on a turn goes through `app/egress.py`. That covers the PDF sandbox, the search
+Every fetch on a turn goes through `app/research/egress.py`. That covers the PDF sandbox, the search
 providers and the FX engine. Each request is counted, and no path, query or body is recorded:
 
 | Metric | Labels | Read it as |

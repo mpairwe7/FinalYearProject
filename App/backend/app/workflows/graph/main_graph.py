@@ -242,7 +242,7 @@ def _apply_live_research(
     and citations still describe.
     """
     from ...config.flags import flags
-    from ...web_research import merge_web_hits
+    from ...research.web_research import merge_web_hits
 
     if state.live_checked:
         return merge_web_hits(state.live_web_hits, hits), state.live_mode

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.db import database as db
-from app import web_research as wr
+from app.research import web_research as wr
 from app.memory.case_facts import extract_case_facts
 
 

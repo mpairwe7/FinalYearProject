@@ -815,9 +815,9 @@ async def lifespan(app: FastAPI):
     # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
     # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
     # has no working upstream DNS; this routes external hostname resolution
-    # through 1.1.1.1 over TCP/443. No-op unless USE_DOH=true (doh_resolver.py).
+    # through 1.1.1.1 over TCP/443. No-op unless USE_DOH=true (research/doh_resolver.py).
     try:
-        from . import doh_resolver
+        from .research import doh_resolver
 
         if doh_resolver.is_enabled():
             doh_resolver.activate()
