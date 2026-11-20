@@ -1279,6 +1279,33 @@ class SpeechModel:
                 text=cf_text, language=language or "en", backend="cf_workers_ai"
             )
 
+        if not heard_nothing:
+            # ⑦ Gemini (opt-in through STT_FALLBACK_BACKEND=gemini). Silence is not worth
+            # sending to a cloud model, but it never clears a failure: with every tier
+            # down, "no speech" would hide the outage.
+            try:
+                samples_chk = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
+                rms_val = float((samples_chk ** 2).mean()) ** 0.5 if samples_chk.size else 0.0
+                if rms_val >= 0.002:
+                    # copy_context: a call turn's local-only scope (providers.scope) must
+                    # reach the pool thread, or its recording could leave for a cloud model.
+                    gem_text = _cloud_call(
+                        "Gemini STT",
+                        contextvars.copy_context().run,
+                        self._gemini_audio_transcribe,
+                        samples_chk,
+                        sample_rate,
+                        language,
+                    )
+                    if gem_text:
+                        return TranscribeResult(text=gem_text, language=language, backend="gemini_audio")
+                    if gem_text is not None:
+                        heard_nothing = "gemini_audio"
+            except TimeoutError:
+                pass  # _cloud_call logged it
+            except Exception:
+                logger.warning("Gemini audio ASR fallback skipped", exc_info=True)
+
         if heard_nothing:
             # A backend ran and returned nothing. Not an error — the caller's
             # empty-transcript branch is the right one, and it phrases this for
@@ -1292,6 +1319,111 @@ class SpeechModel:
             text="", backend="unavailable",
             error="All ASR backends failed (Whisper-SALT, Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)",
         )
+
+    def _gemini_audio_transcribe(self, samples, sample_rate: int, language: str | None) -> str | None:
+        """Transcribe with Gemini: the text, "" if it heard no words, None if it gave no answer.
+
+        Held to the gates on ``_gemini_translate``. A recording is personal data leaving
+        Uganda, so this is opt-in through ``STT_FALLBACK_BACKEND=gemini``. Audio with no
+        stated language is refused, because ``gemini_allowed_for`` reads ``None`` as
+        English and the clip could be Luganda.
+        """
+        from .. import sunbird
+        from ..config.flags import flags
+
+        multilingual_opt_in = (
+            os.getenv("STT_ALLOW_MULTILINGUAL_GEMINI", "false").strip().lower() in ("1", "true", "yes", "on")
+            or sunbird.both_accounts_quota_exhausted()
+        )
+        if (not language and not multilingual_opt_in) or not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
+            return None
+        if os.getenv("STT_FALLBACK_BACKEND", "").strip().lower() != "gemini":
+            return None
+        try:
+            from ..providers import breakers, budget
+            from ..providers import config as cfg
+            from ..providers import gateway as gw
+        except Exception:
+            return None
+        if getattr(samples, "size", 0) * 2 > 14 * 1024 * 1024:
+            return None
+        if not (
+            (multilingual_opt_in or gw.gemini_allowed_for(language))
+            and cfg.is_gemini_configured()
+            and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
+        ):
+            return None
+        import base64 as _b64
+        import io as _io
+        import wave as _wave
+
+        import httpx as _httpx
+
+        from ..observability.tracing import llm_call
+
+        gem_key = cfg.get_cloud_settings().gemini_api_key.get_secret_value().strip()
+        headers = {"x-goog-api-key": gem_key, "Content-Type": "application/json"}
+
+        def ask(model: str, body: dict[str, Any]) -> dict[str, Any]:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            with llm_call("generate_content", model, "gcp.gemini") as call:
+                response = _httpx.post(url, headers=headers, json=body, timeout=20.0)
+                response.raise_for_status()
+                data = response.json()
+                meta = data.get("usageMetadata") or {}
+                call.usage(meta.get("promptTokenCount"), gw._gemini_output_tokens(meta))
+            return data
+
+        try:
+            pcm16_g = (samples * 32768).clip(-32768, 32767).astype("int16")
+            wbuf = _io.BytesIO()
+            with _wave.open(wbuf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(pcm16_g.tobytes())
+            gem_model = os.getenv("GEMINI_STT_MODEL", "gemini-3.5-transcribe").strip() or "gemini-3.5-transcribe"
+            gen_cfg: dict[str, Any] = {"temperature": 0.0, "maxOutputTokens": 1024}
+            if "transcribe" not in gem_model and ("3." in gem_model or "-3-" in gem_model):
+                gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
+            gem_body = {
+                "contents": [{
+                    "role": "user",
+                    "parts": [
+                        {"text": "Transcribe the spoken audio verbatim in the language spoken (English, Luganda, Swahili, Runyankole, or Acholi). Output only the spoken words, or empty string if silence."},
+                        {"inlineData": {"mimeType": "audio/wav", "data": _b64.b64encode(wbuf.getvalue()).decode("ascii")}},
+                    ],
+                }],
+                "generationConfig": gen_cfg,
+            }
+            data = ask(gem_model, gem_body)
+            cands = data.get("candidates") or []
+            if not cands and data.get("promptFeedback"):
+                if not budget.try_consume_gemini_call():
+                    breakers.GEMINI_BREAKER.record_success()
+                    return None
+                fallback_body = {**gem_body, "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1024}}
+                cands = ask("gemini-2.5-flash", fallback_body).get("candidates") or []
+            parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
+            breakers.GEMINI_BREAKER.record_success()
+            if cands and cands[0].get("finishReason") == "MAX_TOKENS":
+                # Cut off at the output limit. The end of the recording is missing, and that is
+                # where the question usually is, so a partial transcript is not an answer.
+                logger.warning("Gemini audio transcription stopped at the output limit; not used")
+                return None
+            if not parts:
+                # No candidate (a blocked prompt) or a candidate with no part: the model gave
+                # no answer. Returned as "" it would read as silence, and hide an outage.
+                logger.warning(
+                    "Gemini audio transcription returned no content (%s)",
+                    "no candidate" if not cands else "a candidate with no part",
+                )
+                return None
+            return "".join(p.get("text") or (p.get("audioTranscription") or {}).get("text") or "" for p in parts).strip()
+        except Exception:
+            breakers.GEMINI_BREAKER.record_failure()
+            logger.warning("Gemini audio transcription failed", exc_info=True)
+            return None
 
     def _cf_whisper_transcribe(
         self, audio_bytes: bytes, sample_rate: int, language: str | None
