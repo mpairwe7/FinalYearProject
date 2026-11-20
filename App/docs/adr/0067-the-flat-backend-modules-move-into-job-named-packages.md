@@ -72,7 +72,8 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 - Shared infrastructure that belongs to no one job: `redis_shared`,
   `resilience`, `tenancy`, `linear_text`, `text_signals`, `process_role` and
   `ws_concurrency`. Four packages cap their WebSocket sessions through
-  `ws_concurrency`, and three read `process_role`.
+  `ws_concurrency`, and `main.py`, `api/` and `receptionist/` read
+  `process_role`.
 - `number_words`. Speech uses it, and so do the calculator, memory, entailment
   and the MCP validators.
 
