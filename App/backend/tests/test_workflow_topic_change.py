@@ -179,3 +179,40 @@ class WorkflowTopicChangeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuestionAboutAnotherTaxTest(unittest.TestCase):
+    """A number slot finds its value inside any sentence, so a question about another tax was
+    taken as the answer (G699). Seen live: the VAT registration check was waiting for turnover,
+    and "What is the PAYE on UGX 500,000 a month?" came back as a VAT threshold verdict."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        WorkflowRegistry._workflows.clear()
+        for path in sorted(FLOWS_DIR.glob("*.yaml")):
+            WorkflowRegistry.register(load_workflow(path))
+        cls.model = ChatModel()
+
+    def _awaiting_turnover(self):
+        session = WorkflowRegistry.create_session("calc_vat_registration")
+        WorkflowRegistry.advance(session, "")
+        self.assertEqual(WorkflowRegistry.pending_step(session).slot, "annual_turnover")
+        return session
+
+    def test_a_question_about_another_tax_leaves_the_flow(self) -> None:
+        for message in (
+            "What is the PAYE on UGX 500,000 a month?",
+            "My Taxpayer Identification Number is 1000123456. What is the PAYE on UGX 500,000 a month?",
+            "How much withholding tax is due on a 2,000,000 payment?",
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(self.model._workflow_input_changes_subject(self._awaiting_turnover(), message))
+
+    def test_an_answer_that_asks_about_the_flows_own_tax_stays(self) -> None:
+        for message in ("250,000,000?", "About 250m", "Is 300 million enough for VAT?", "Would 180,000,000 be under the VAT threshold?"):
+            with self.subTest(message=message):
+                self.assertFalse(self.model._workflow_input_changes_subject(self._awaiting_turnover(), message))
+
+    def test_a_question_naming_both_taxes_stays_with_the_flow(self) -> None:
+        message = "With PAYE staff costs out, is my VAT turnover of 400,000,000 over the threshold?"
+        self.assertFalse(self.model._workflow_input_changes_subject(self._awaiting_turnover(), message))
