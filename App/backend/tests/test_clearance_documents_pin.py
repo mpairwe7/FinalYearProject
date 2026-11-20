@@ -4,6 +4,9 @@
 register a motor vehicle: 1. Login to the URA web portal...". The pin chose every row whose text
 held "bill of lading", in file order, and the registration procedure lists one among its uploads.
 Every question that reached the pin got that row first, the Kiswahili FAQ's own question included.
+
+A message made only of the words of that question now gets the rows that answer it. Any other
+word leaves the message to the old pin, because for registration after customs that row is right.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ class ClearanceDocumentsPinTests(unittest.TestCase):
             "Hello! What documents are required to clear an imported vehicle at customs?",
             "Which documents do I need to clear my car at customs?",
             "Documents needed for clearing a motor vehicle?",
+            "What documents are required for customs clearance of a vehicle?",
             "What documents are needed to clear goods through customs?",  # App/Data/eval/rag_eval.jsonl
             "What documents do I need at customs?",
         ):
@@ -61,11 +65,22 @@ class ClearanceDocumentsPinTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self._hits(query)[0]["question"], row)
 
-    def test_a_registration_question_keeps_the_registration_procedure(self):
+    def test_a_question_with_any_other_word_is_read_as_before(self):
+        """Registration after customs got the registration procedure from the old pin, and still
+        does. A first version listed registration words and lost every phrasing it did not name."""
         for query in (
             "What documents are required to register an imported vehicle after customs clearance?",
             "What documents do I upload to register my car once customs has released it?",
             "What documents do I need for number plates after customs?",
+            "What documents do I need for number-plates after customs?",
+            "What documents do I need to license my imported car after clearing customs?",
+            "What documents do I need to get a log-book for my car after customs?",
+            "What documents do I need to take to the URA licensing office after customs?",
+            "Which documents do I need to clear my car and get plates?",
+            "Biwandiiko ki ebyetaagisa okwewandiisa emmotoka oluvannyuma lwa forodha?",
+            "Nyaraka gani zinahitajika gari kusajiliwa baada ya forodha?",
+            "documents gani zinahitajika kusafisha gari forodha?",
+            "What documents are required to clear an imported vehicle at customs? And how do I register it?",
         ):
             with self.subTest(query=query):
                 first = self._hits(query)[0]
