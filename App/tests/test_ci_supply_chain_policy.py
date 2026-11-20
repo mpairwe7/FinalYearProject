@@ -676,3 +676,22 @@ def test_the_declared_python_floor_is_the_oldest_python_a_lock_targets():
         assert declared.contains(target), f"{lock} targets Python {target}, which requires-python excludes"
     floor = next(Version(spec.version) for spec in declared if spec.operator == ">=")
     assert floor == min(targets.values()), f"requires-python starts at {floor}, the oldest lock targets {min(targets.values())}"
+
+
+def test_dependabot_does_not_propose_what_a_policy_test_rejects():
+    """Two kinds of pull request could never go green. A Node major for one image (#768, #769)
+    fails the test that holds the shipped runtime to `.nvmrc`. A vitest plugin bumped without
+    vitest (#771) passes while running a plugin whose peer range is another vitest major."""
+    updates = _load(ROOT / ".github" / "dependabot.yml")["updates"]
+    for update in updates:
+        if update["package-ecosystem"] != "docker":
+            continue
+        folders = [update["directory"]] if "directory" in update else update["directories"]
+        if not any("FROM node:" in f.read_text(encoding="utf-8") for d in folders for f in (ROOT / d.lstrip("/")).glob("Dockerfile*")):
+            continue
+        assert {"dependency-name": "node", "update-types": ["version-update:semver-major"]} in update.get("ignore", []), folders
+    bun = next(update for update in updates if update["package-ecosystem"] == "bun")
+    groups = list(bun["groups"].items())
+    first_for_vitest = next(name for name, group in groups if any(p in ("vitest", "*") for p in group["patterns"]))
+    assert first_for_vitest == "vitest" and "@vitest/*" in bun["groups"]["vitest"]["patterns"]
+    assert "update-types" not in bun["groups"]["vitest"], "a major must move the pair together too"
