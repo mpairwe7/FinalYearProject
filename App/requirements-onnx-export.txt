@@ -47,7 +47,7 @@
 # fold back into App/requirements.txt and this file can go away.
 
 optimum[onnxruntime]>=1.24.0,<2.0.0
-transformers>=4.36,<4.58.0
+transformers>=5.22.2,<5.23.0
 onnx>=1.16.0
 onnxruntime>=1.20.0
 protobuf>=3.20.1
