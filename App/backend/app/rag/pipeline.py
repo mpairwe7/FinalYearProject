@@ -251,6 +251,15 @@ from ..workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
 
+
+def has_readable_document(attachments: list[Any] | None) -> bool:
+    """Whether the turn carries a document that could hold a detail a fast path would ask for.
+
+    A scan with no extracted text cannot, so it counts as no document and the taxpayer is asked
+    for the figure as usual (ADR-0068 part 2).
+    """
+    return any((getattr(doc, "text", "") or "").strip() for doc in attachments or ())
+
 # Turn context lives in the leaf module turn_context (ADR-0031); these are the
 # same ContextVar objects under their historical names.
 from .turn_context import ACTIVE_CASE_FACTS as _ACTIVE_CASE_FACTS  # noqa: E402
@@ -9242,6 +9251,7 @@ class ChatModel:
         thread_id: str,
         locale: str,
         user_id: str | None = None,
+        beside_document: bool = False,
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
@@ -9257,39 +9267,29 @@ class ChatModel:
         Whatever answers, a question that named Uganda *and* another country
         gets a scope caveat appended, so the half URA cannot speak to is never
         left unmarked.
+
+        Beside a readable document (*beside_document*) a path may answer but may not
+        ask. A question that carries its own figures still gets the exact answer, a rate
+        question the rate table's, and one about another country's taxes is still
+        declined. The paths that ask for a missing detail are skipped: the detail may be
+        in the document, and the turn goes on to the answer that reads it (ADR-0068).
         """
         if flags.is_enabled("langgraph") and flags.is_enabled("agentic_mode"):
             return None
+        may_ask = not beside_document
+        common = {"message": message, "rewritten": rewritten, "thread_id": thread_id, "locale": locale}
         result = (
-            self._maybe_decline_out_of_jurisdiction(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_local_government_tax(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_tin_clarification(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
-            )
-            or self._maybe_handle_calculator(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
-            )
-            or self._maybe_handle_calc_followup(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_bare_amount(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_situational_advisory(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_rate_lookup(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
-            or self._maybe_handle_education(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
-            )
+            self._maybe_decline_out_of_jurisdiction(**common)
+            or self._maybe_handle_local_government_tax(**common)
+            or (may_ask and self._maybe_handle_tin_clarification(**common, user_id=user_id))
+            or self._maybe_handle_calculator(**common, user_id=user_id, elicit=may_ask)
+            or self._maybe_handle_calc_followup(**common, elicit=may_ask)
+            or (may_ask and self._maybe_handle_bare_amount(**common))
+            or self._maybe_handle_situational_advisory(**common)
+            or self._maybe_handle_rate_lookup(**common)
+            or self._maybe_handle_education(**common)
         )
-        return self._add_comparison_scope_caveat(result, message=message, rewritten=rewritten)
+        return self._add_comparison_scope_caveat(result or None, message=message, rewritten=rewritten)
 
     @staticmethod
     def _add_comparison_scope_caveat(
@@ -10268,6 +10268,7 @@ class ChatModel:
         thread_id: str,
         locale: str,
         user_id: str | None = None,
+        elicit: bool = True,
     ) -> dict[str, Any] | None:
         """Deterministic tax-calculator fast path (REST and streaming parity).
 
@@ -10294,6 +10295,11 @@ class ChatModel:
         )
         if facts is not None:
             plan = prefill_plan_from_case_facts(plan, facts)
+
+        if plan.missing and not elicit:
+            # The caller has a document that may hold the missing figure. Asking for it,
+            # or opening a guided flow that does, would be the wrong reply.
+            return None
 
         if not plan.missing:
             try:
@@ -10406,6 +10412,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        elicit: bool = True,
     ) -> dict[str, Any] | None:
         """Replay the last calculator when the next turn is only a new amount.
 
@@ -10418,6 +10425,8 @@ class ChatModel:
         nxt = continue_calculation(saved, message) or continue_calculation(saved, rewritten)
         if nxt is None:
             return None
+        if not nxt["ready"] and not elicit:
+            return None  # the next detail may be in the document
         if not nxt["ready"]:
             remember_calculation(
                 _state_conversation_id(thread_id),
@@ -11881,6 +11890,7 @@ class ChatModel:
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
                 core_msg = strip_conversational_prefix(message) or message
+                beside_document = has_readable_document(attachments)
                 calc_result = None
                 if connector_intent is None and core_msg != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11889,6 +11899,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        beside_document=beside_document,
                     )
                 if connector_intent is None and not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11897,6 +11908,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        beside_document=beside_document,
                     )
                 if connector_intent is None and not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
@@ -11905,6 +11917,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         user_id=user_id,
+                        beside_document=beside_document,
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
@@ -14045,6 +14058,7 @@ class ChatModel:
         # Same order generate() tries: the taxpayer's own words first (their
         # figures), then the English form the calculator patterns are written in.
         core_msg_s = strip_conversational_prefix(message) or message
+        beside_document = has_readable_document(attachments)
         calc_result = (
             None
             if connector_intent is not None
@@ -14054,6 +14068,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                beside_document=beside_document,
             )
         )
         if connector_intent is None and not calc_result and core_msg_s != message:
@@ -14063,6 +14078,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                beside_document=beside_document,
             )
         if connector_intent is None and not calc_result and router_message != message:
             calc_result = self._maybe_handle_fast_paths(
@@ -14071,6 +14087,7 @@ class ChatModel:
                 thread_id=thread_id,
                 locale=locale,
                 user_id=user_id,
+                beside_document=beside_document,
             )
         if calc_result:
             if distress and calc_result.get("reply"):
