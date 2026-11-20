@@ -85,10 +85,10 @@ lost a section of the script on an image that lacks the code replacing it.
   made without cost to the experience or to quality.
   - A question that carries its own figures still gets the exact calculator
     answer, and a rate question the rate table's. On the web app, which uses
-    the streaming path, every turn that was answered is answered as it was.
-    One turn is slower there. A bare amount such as "500,000" beside a readable
-    document used to get the instant menu of three computations, and now waits
-    for the answer that reads the document.
+    the streaming path, every turn that was answered is answered as it was,
+    except a bare amount such as "500,000" beside a readable document: it used
+    to get the instant menu of three computations, and now waits for the answer
+    that reads the document.
   - A question about another country's taxes is always declined. On the REST
     path it was not, because the script skipped the dispatcher that holds the
     decline.
@@ -115,9 +115,10 @@ lost a section of the script on an image that lacks the code replacing it.
     contract says", "see attached") lost its instant exact answer. Words in a
     message cannot tell those two apart reliably. So a question that points at
     the document is still answered from the table on both routes, as the web app
-    always did. On the REST route that is new: the Space's script used to send
-    an attachment turn to the answer that reads the document, unless the
-    guided-workflow handler, which runs earlier, had already taken it (G705).
+    always did. On the REST route that is new: the Space's script skipped the
+    fast paths on every turn with an attachment, so such a question went on to
+    the answer that reads the document unless a handler that runs before them,
+    such as the guided-workflow handler, had already taken it (G705).
   - A guided flow that is already open still asks its next question beside a
     document, on both routes, as it did before. That handler runs before the
     fast paths, so this rule does not reach it (G706).
