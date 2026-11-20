@@ -44,7 +44,7 @@ class ContextsJsonTest(unittest.TestCase):
 
 class CollectSamplesTest(unittest.TestCase):
     def test_uses_real_contexts_and_skips_empty(self) -> None:
-        from app import evaluation
+        from app.quality import evaluation
 
         fake_rows = [
             {
@@ -66,7 +66,7 @@ class CollectSamplesTest(unittest.TestCase):
 
 class EvalGateCanFailTest(unittest.TestCase):
     def test_faithfulness_low_for_unsupported_answer(self) -> None:
-        from app.evaluation import EVAL_FAITHFULNESS_MIN, _heuristic_faithfulness
+        from app.quality.evaluation import EVAL_FAITHFULNESS_MIN, _heuristic_faithfulness
 
         ctx = ["The VAT standard rate in Uganda is 18 percent."]
         supported = _heuristic_faithfulness("The VAT rate is 18 percent.", ctx)
@@ -79,7 +79,7 @@ class EvalGateCanFailTest(unittest.TestCase):
 
     def test_old_vacuous_behaviour_always_passed(self) -> None:
         # Demonstrates the bug we removed: answer-as-its-own-context ~1.0.
-        from app.evaluation import EVAL_FAITHFULNESS_MIN, _heuristic_faithfulness
+        from app.quality.evaluation import EVAL_FAITHFULNESS_MIN, _heuristic_faithfulness
 
         fabricated = "A totally fabricated tax claim with no retrieval support whatsoever."
         self.assertGreaterEqual(_heuristic_faithfulness(fabricated, [fabricated]), EVAL_FAITHFULNESS_MIN)

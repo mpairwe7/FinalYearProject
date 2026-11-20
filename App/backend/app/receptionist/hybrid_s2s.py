@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from ..calculator_router import detect_calculator_intent, has_money_amount
+from ..tax.calculator_router import detect_calculator_intent, has_money_amount
 from ..config.flags import flags
 
 logger = logging.getLogger(__name__)

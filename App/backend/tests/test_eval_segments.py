@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.evaluation import _compute_by_segment  # noqa: E402
+from app.quality.evaluation import _compute_by_segment  # noqa: E402
 from app.config.flags import flags  # noqa: E402
 from app.rag.retriever import canonical_source_url  # noqa: E402
 

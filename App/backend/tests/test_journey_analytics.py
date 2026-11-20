@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app.db import database as db
 from app import main as main_module
-from app.journey_analytics import build_journey_funnel
+from app.quality.journey_analytics import build_journey_funnel
 from app.main import journey_funnel
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry

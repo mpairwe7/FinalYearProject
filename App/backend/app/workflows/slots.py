@@ -12,7 +12,7 @@ import logging
 import re
 from collections.abc import Callable
 
-from ..calculator_router import parse_ugx_amount
+from ..tax.calculator_router import parse_ugx_amount
 
 logger = logging.getLogger(__name__)
 

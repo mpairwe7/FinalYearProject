@@ -11,7 +11,8 @@ import re
 import time
 
 import pytest
-from app import calculator_router, mt
+from app.tax import calculator_router
+from app import mt
 from app.guardrails import output_checks
 from app.memory.case_facts import extract_all_money
 from app.linear_text import strip_blocks, strip_spans

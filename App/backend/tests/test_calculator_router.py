@@ -7,7 +7,7 @@ import unittest
 import uuid
 
 from app.rag.query import rewrite as rewrite_query
-from app.calculator_router import (
+from app.tax.calculator_router import (
     _INFO_ONLY_RE,
     _PAYE_THRESHOLD_ASK_RE,
     extract_amounts,
@@ -402,7 +402,7 @@ class ReplyReadsTheTableTests(unittest.TestCase):
     """
 
     def test_non_resident_line_tracks_the_table(self) -> None:
-        from app.calculator_router import RatePlan, format_rate_reply
+        from app.tax.calculator_router import RatePlan, format_rate_reply
         from app.tax.tables import get_table
 
         table = get_table("FY2026-27")
@@ -411,7 +411,7 @@ class ReplyReadsTheTableTests(unittest.TestCase):
         self.assertIn(f"Non-resident employees are taxed from {first_rate * 100:.0f}%", reply)
 
     def test_resident_bands_are_listed_at_the_tables_rates(self) -> None:
-        from app.calculator_router import RatePlan, format_rate_reply
+        from app.tax.calculator_router import RatePlan, format_rate_reply
         from app.tax.tables import get_table
 
         table = get_table("FY2026-27")
@@ -421,13 +421,13 @@ class ReplyReadsTheTableTests(unittest.TestCase):
                 self.assertIn(f"**{rate * 100:.0f}%**", reply)
 
     def test_provisional_caveat_names_no_fiscal_year_specific_act(self) -> None:
-        from app.calculator_router import PROVISIONAL_CAVEAT
+        from app.tax.calculator_router import PROVISIONAL_CAVEAT
 
         self.assertNotIn("2026", PROVISIONAL_CAVEAT)
         self.assertIn("{fy}", PROVISIONAL_CAVEAT)
 
     def test_paye_reply_states_what_was_not_deducted(self) -> None:
-        from app.calculator_router import format_calc_reply
+        from app.tax.calculator_router import format_calc_reply
         from app.tools import ToolRegistry
 
         result = ToolRegistry.call(
@@ -438,7 +438,7 @@ class ReplyReadsTheTableTests(unittest.TestCase):
         self.assertNotIn("NSSF employee contribution:", reply)
 
     def test_paye_reply_shows_nssf_when_it_was_deducted(self) -> None:
-        from app.calculator_router import format_calc_reply
+        from app.tax.calculator_router import format_calc_reply
         from app.tools import ToolRegistry
 
         result = ToolRegistry.call(
@@ -725,7 +725,7 @@ class VatRegistrationScopeTests(unittest.TestCase):
 
 class NewRateLookupsTests(unittest.TestCase):
     def test_mobile_money_cash_withdrawal_excise_lookup(self) -> None:
-        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.calculator_router import format_rate_reply, plan_rate_lookup
         from app.tax.tables import get_table
 
         plan = plan_rate_lookup("What is the excise duty rate on mobile money cash withdrawals?")
@@ -736,7 +736,7 @@ class NewRateLookupsTests(unittest.TestCase):
         self.assertIn("Excise Duty Act", reply)
 
     def test_penal_tax_late_filing_lookup(self) -> None:
-        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.calculator_router import format_rate_reply, plan_rate_lookup
         from app.tax.tables import get_table
 
         plan = plan_rate_lookup("What is the penalty for late filing of an income tax return?")
@@ -748,7 +748,7 @@ class NewRateLookupsTests(unittest.TestCase):
         self.assertIn("Tax Procedures Code Act", reply)
 
     def test_presumptive_tax_threshold_lookup(self) -> None:
-        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.calculator_router import format_rate_reply, plan_rate_lookup
         from app.tax.tables import get_table
 
         plan = plan_rate_lookup("What is the turnover threshold for small businesses using presumptive tax?")
@@ -759,7 +759,7 @@ class NewRateLookupsTests(unittest.TestCase):
         self.assertIn("10,000,000", reply)
 
     def test_vehicle_environmental_levy_lookup(self) -> None:
-        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.calculator_router import format_rate_reply, plan_rate_lookup
         from app.tax.tables import get_table
 
         plan = plan_rate_lookup("What is the environmental levy rate on imported motor vehicles aged 6 years?")
@@ -769,7 +769,7 @@ class NewRateLookupsTests(unittest.TestCase):
         self.assertIn("35%", reply)
 
     def test_fuel_and_telecom_excise_lookups(self) -> None:
-        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.calculator_router import format_rate_reply, plan_rate_lookup
         from app.tax.tables import get_table
 
         table = get_table()
@@ -881,7 +881,7 @@ class ExplanationVsCalculationRoutingTests(unittest.TestCase):
                 self.assertEqual(plan.tool, expected_tool)
 
     def test_wizard_prefills_from_case_facts_and_surfaces_assumptions(self) -> None:
-        from app.calculator_router import prefill_plan_from_case_facts
+        from app.tax.calculator_router import prefill_plan_from_case_facts
         from app.memory.case_facts import extract_case_facts
 
         # Case 1: 240 days in Uganda + UGX 5m salary -> resident + no missing slots

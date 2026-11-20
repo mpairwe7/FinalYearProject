@@ -711,7 +711,7 @@ FinalYearProject/
 │   │   │   ├── speech/accent_detector.py # Prosodic accent classifier
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
 │   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
-│   │   │   ├── evaluation.py # RAG evaluation harness (8 metrics)
+│   │   │   ├── quality/evaluation.py # RAG evaluation harness (8 metrics)
 │   │   │   ├── auth/       # JWT auth (HS256 dev / RS256 prod OIDC)
 │   │   │   │   ├── jwt_auth.py      # Token verification + JWKS cache
 │   │   │   │   ├── dependencies.py  # FastAPI DI (current_user, require_role)

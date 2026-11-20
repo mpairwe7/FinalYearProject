@@ -8,7 +8,7 @@ module is safe to import in minimal environments.
 Triggered by:
 - ``POST /v1/evaluate`` (admin, Bearer token) — one-shot eval of the
   most recent *n* conversations / thumbs-down feedback items.
-- CI/CD via ``python -m App.backend.app.evaluation`` from a
+- CI/CD via ``python -m App.backend.app.quality.evaluation`` from a
   scheduled GitHub Action (nightly).  The CLI writes a JSON summary
   plus a Prometheus-compatible exposition so Grafana can alert on
   regressions.
@@ -32,9 +32,9 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .db import database as db
-from .rag.retriever import HybridRetriever
-from .text_signals import content_tokens
+from ..db import database as db
+from ..rag.retriever import HybridRetriever
+from ..text_signals import content_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +470,7 @@ def record_eval_report(report: EvalReport) -> None:
     A run with no samples sets ``ura_eval_samples`` to 0 and leaves the last
     verdicts in place rather than reporting a pass.
     """
-    from .observability.analytics import metrics
+    from ..observability.analytics import metrics
 
     metrics.set_gauge("eval_samples", report.sample_size)
     metrics.set_gauge("eval_last_run_timestamp_seconds", report.started_at)

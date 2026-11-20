@@ -21,7 +21,7 @@ import time
 import uuid
 from typing import Any
 
-from .db import database as db
+from ..db import database as db
 from . import quality_audit, service_ratings
 
 ITEM_TYPES: tuple[str, ...] = ("ai_chat", "rating")
@@ -141,7 +141,7 @@ def set_review(
         raise ValueError(f"unknown review status {status!r}")
     _ensure()
     tenant = _tenant(tenant_id)
-    from .guardrails.pii import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     clean_note = redact_pii_text((note or "").strip())[:1000]
     now = time.time()

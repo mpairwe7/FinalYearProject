@@ -520,7 +520,7 @@ export interface AnswerOverride {
 
 /* ── Service-quality audit (GET /v1/admin/quality/*) ────────────────────── */
 
-/** How a rated conversation went, worst first. See app/quality_audit.py. */
+/** How a rated conversation went, worst first. See app/quality/quality_audit.py. */
 export type QualityPattern = "went_wrong" | "never_helpful" | "recovered" | "all_helpful";
 
 export interface QualityBreakdownRow {

@@ -471,8 +471,8 @@ App/backend/app/
 ├── research/web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── research/web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── research/ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
-├── calculator_router.py # Single-calculator fast path & multi-turn amount carryover
+├── tax/scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
+├── tax/calculator_router.py # Single-calculator fast path & multi-turn amount carryover
 ├── guardrails/premise.py     # False-premise detector, legitimate statutory modifier allowlist, abolished-tax claims
 ├── speech/speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
@@ -480,7 +480,7 @@ App/backend/app/
 ├── observability/analytics.py         # Prometheus-compatible metrics middleware
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
-├── evaluation.py        # RAG evaluation harness (8 metrics)
+├── quality/evaluation.py        # RAG evaluation harness (8 metrics)
 │
 ├── auth/                # JWT authentication (Phase 14)
 │   ├── jwt_auth.py      #   HS256 (dev) / RS256 (prod OIDC) verification + JWKS cache
@@ -553,7 +553,7 @@ Three deterministic fast paths intercept BEFORE routing
    for a TIN/pin?") asks individual-vs-organisation first (one-question
    `tin_procedure_help` flow), then returns the matching curated template;
    typed asks answer immediately.
-2. **Calculator** (`calculator_router.py`): a message that already carries
+2. **Calculator** (`tax/calculator_router.py`): a message that already carries
    the figures ("VAT on 1.5m", Luganda `vati`) is answered instantly from
    the registered calculator tool through the MCP client
    (`retrieval_mode="calculator"`, no LLM). The conversation remembers that
@@ -1110,7 +1110,7 @@ When `FLAG_MODEL_TIERING=true`, `providers/routing.py` (`select_tier`, `ENDPOINT
 
 - **T1 (`Sunbird/Sunflower-Qwen3.5-9B`, `VLLM_BASE_URL`):** Fast single-clause RAG, greetings, local machine translation, and vernacular locales (`lg`, `sw`, `nyn`, `ach` unless `FLAG_REASONER_FOR_TRANSLATED_LOCALES=true`).
 - **T2 / T3 (`Qwen/Qwen3.8-27B-FP8`, `REASONER_BASE_URL`, `enable_thinking=False`):** Multi-hop legal reasoning, multi-tool tax scenarios (`planner_tool_count >= 2`), statutory premise contradictions (`premise_contradiction=True`), and dispute/objection turns. Capped by a rolling 200-turn window (`REASONER_MAX_SHARE=0.25`) and per-turn timeout (`REASONER_DEADLINE_S=90`) with automatic local T1 fallback (`reasoner_fallback_total`).
-- **Code-Owned Tax Scenario Planner (`memory/case_facts.py`, `scenario_planner.py`, `guardrails/premise.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
+- **Code-Owned Tax Scenario Planner (`memory/case_facts.py`, `tax/scenario_planner.py`, `guardrails/premise.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
 - **Polarity-Aware Faithfulness & Figure Lock (`rag/claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
 
 Eval set: `App/Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.

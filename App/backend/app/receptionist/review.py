@@ -25,7 +25,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Final
 
-from .. import service_ratings
+from ..quality import service_ratings
 from ..text_signals import names_a_task
 from .clarify import classify_yes_no
 from .config import get_call_review_enabled

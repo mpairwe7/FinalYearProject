@@ -39,7 +39,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..calculator_router import plan_calculation
+from ..tax.calculator_router import plan_calculation
 from ..rag.entailment import _AMOUNT_PREFIX_RE, _AMOUNT_SUFFIX, canonical_amounts, percentages
 
 logger = logging.getLogger(__name__)

@@ -15,7 +15,7 @@ shows up as a miss listed by name rather than as silence.
 
 Deterministic and offline — the supervisor is pure Python — so it runs
 in CI on every change rather than nightly against sampled traffic like
-:mod:`app.evaluation`.
+:mod:`app.quality.evaluation`.
 """
 
 from __future__ import annotations

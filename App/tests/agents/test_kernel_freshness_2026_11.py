@@ -68,7 +68,7 @@ def test_coverage_says_when_no_table_covers_the_day(day: _dt.date, coverage: str
 
 
 def _rate_reply(key: str) -> str:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
 
     reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type=key), tables.get_table())
     return reply
@@ -87,7 +87,7 @@ def test_an_answer_inside_the_year_has_no_rollover_caveat(monkeypatch: pytest.Mo
 
 
 def test_a_calculator_footer_after_the_last_table_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import calculator_router as cr
+    from app.tax import calculator_router as cr
 
     monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
     lines = cr._rate_table_footer({"fiscal_year": "FY2026-27", "rate_basis": {"status": "confirmed"}})

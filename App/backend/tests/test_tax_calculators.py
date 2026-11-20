@@ -821,7 +821,7 @@ class PhaseFResidencyBikFxAndRuleToolTests(unittest.TestCase):
         self.assertEqual(wht_emp["withholding_tax"], 0.0)
 
         # 5. calculate_capital_gains on capital loss includes 'rate' key (fixes HTTP 500 in format_calc_reply)
-        from app.calculator_router import format_calc_reply
+        from app.tax.calculator_router import format_calc_reply
 
         cgt_loss = ToolRegistry.call(
             "calculate_capital_gains",

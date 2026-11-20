@@ -46,9 +46,9 @@ def _tenant_scope(ctx: AuthContext) -> str | None:
 @router.get("/v1/admin/quality/summary")
 def quality_summary(request: Request, days: int = _DAYS) -> dict[str, Any]:
     """Headline figures for the audit overview: one block per stream audited so far."""
-    from .. import quality_audit
+    from ..quality import quality_audit
 
-    from .. import audit_reviews, service_ratings
+    from ..quality import audit_reviews, service_ratings
 
     ctx = _audit_reader(request)
     tenant = _tenant_scope(ctx)
@@ -79,7 +79,7 @@ def quality_ai_chat(
     offset: int = Query(0, ge=0, le=10_000),
 ) -> dict[str, Any]:
     """How the AI's chat answers were rated: breakdowns plus one page of conversations."""
-    from .. import quality_audit
+    from ..quality import quality_audit
 
     ctx = _audit_reader(request)
     tenant = _tenant_scope(ctx)
@@ -104,7 +104,7 @@ def quality_ai_chat_timeline(
     conversation_id: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,64}$"),
 ) -> dict[str, Any]:
     """One conversation, answer by answer, with its ratings and the point it went wrong."""
-    from .. import quality_audit
+    from ..quality import quality_audit
     from ..main import _audit_staff_action
 
     ctx = _audit_reader(request)
@@ -139,7 +139,7 @@ def quality_ratings(
     The list never names the taxpayer; each rating names the ticket or call it
     rates, which the drill-down opens through its own audited read.
     """
-    from .. import service_ratings
+    from ..quality import service_ratings
 
     ctx = _audit_reader(request)
     return service_ratings.audit(
@@ -183,7 +183,7 @@ def quality_needs_review(
     comment; an officer chat or call rated 1 or 2; a caller who said the AI
     did not help. Newest first. ``status=open`` is what nobody has decided yet.
     """
-    from .. import audit_reviews
+    from ..quality import audit_reviews
 
     ctx = _audit_reader(request)
     return audit_reviews.needs_review(
@@ -204,7 +204,7 @@ def quality_set_review(
     audit note and changes no case. Recorded as ``staff.quality_reviewed``
     (the note as its length). 404 for an item the audit cannot see.
     """
-    from .. import audit_reviews
+    from ..quality import audit_reviews
     from ..main import _audit_staff_action
 
     ctx = _audit_reader(request)

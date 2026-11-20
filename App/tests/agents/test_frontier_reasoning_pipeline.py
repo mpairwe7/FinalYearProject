@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.calculator_router import plan_calculation
+from app.tax.calculator_router import plan_calculation
 from app.guardrails.premise import check_false_premise
 from app.providers.routing import ModelTier, select_tier
 from app.rag.query import correct_spelling, expand_abbreviations

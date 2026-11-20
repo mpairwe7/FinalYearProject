@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from app.agents import AgentRoute, supervisor
-from app.calculator_router import (
+from app.tax.calculator_router import (
     INTENT_TOOLS,
     detect_calculator_intent,
     has_money_amount,

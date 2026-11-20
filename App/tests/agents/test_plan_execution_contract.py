@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from app import scenario_planner as sp
-from app.scenario_planner import PlanRunReport, build_verified_facts, plan_digest, plan_tools
+from app.tax import scenario_planner as sp
+from app.tax.scenario_planner import PlanRunReport, build_verified_facts, plan_digest, plan_tools
 
 PAYE_AND_VAT = "What is PAYE on a monthly salary of UGX 3,000,000 and VAT on UGX 1,000,000 purchase?"
 USD_SALARY = "My salary is USD 5,000 per month, what is my PAYE?"
@@ -155,7 +155,7 @@ class TestPlanIdentity:
         assert first != plan_digest(plan_tools(USD_SALARY))
 
     def test_plans_needing_different_inputs_are_different_plans(self):
-        from app.scenario_planner import ToolCallSpec
+        from app.tax.scenario_planner import ToolCallSpec
 
         needs_rate = ToolCallSpec("convert_currency", {"amount": 5.0}, missing_inputs=["exchange rate"])
         complete = ToolCallSpec("convert_currency", {"amount": 5.0})
@@ -254,7 +254,7 @@ class TestGraphBinding:
         return lambda query: AgentGraphState(query=query, rewritten_query=query, locale="en", top_k=3)
 
     def test_a_year_is_not_an_amount(self, state, fresh_registry, monkeypatch):
-        from app import calculator_router
+        from app.tax import calculator_router
         from app.workflows.graph.main_graph import bind_arguments
 
         monkeypatch.setattr(calculator_router, "plan_calculation", lambda _q: None)
@@ -264,7 +264,7 @@ class TestGraphBinding:
         assert bound == {"amount": 500_000.0}
 
     def test_two_amounts_are_not_guessed_between(self, state, fresh_registry, monkeypatch):
-        from app import calculator_router
+        from app.tax import calculator_router
         from app.workflows.graph.main_graph import bind_arguments
 
         monkeypatch.setattr(calculator_router, "plan_calculation", lambda _q: None)

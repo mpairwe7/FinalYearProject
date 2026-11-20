@@ -501,7 +501,7 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
 
 
 def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> None:
-    from app.calculator_router import continue_calculation
+    from app.tax.calculator_router import continue_calculation
     from app.memory.case_facts import extract_case_facts
     from app.rag.context_manager import RollingContextManager
 
@@ -617,7 +617,7 @@ def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: 
 
 
 def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_claim_verifier() -> None:
-    from app.calculator_router import continue_calculation, plan_calculation
+    from app.tax.calculator_router import continue_calculation, plan_calculation
     from app.memory.case_facts import extract_case_facts
     from app.rag.claim_verifier import verify_claims
     from app.rag.query import _fuzzy_correct_word

@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 from app import mt  # noqa: E402
 from app.speech import orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
-from app.calculator_router import extract_amounts, plan_calculation  # noqa: E402
+from app.tax.calculator_router import extract_amounts, plan_calculation  # noqa: E402
 from app.conversational import handle_conversational_turn  # noqa: E402
 from app.tickets.escalation_policy import (  # noqa: E402
     after_hours_escalation_message,

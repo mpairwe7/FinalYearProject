@@ -870,7 +870,7 @@ class FeatureFlags:
 
         Experiments are only measurable if each conversation records
         which side of the split served it.  Callers log this alongside
-        the turn so :mod:`app.evaluation` can report per variant instead
+        the turn so :mod:`app.quality.evaluation` can report per variant instead
         of averaging the two together.
         """
         return "on" if self.is_enabled(name, subject=subject, cohorts=cohorts) else "off"

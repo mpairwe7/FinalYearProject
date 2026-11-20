@@ -190,7 +190,7 @@ def _states_amount(message: str) -> bool:
     amount (``plan_rate_lookup``), and both come back as ``calculator``: a rate
     read out is a plain answer, a computation on the taxpayer's figure is progress.
     """
-    from ..calculator_router import extract_amounts  # noqa: PLC0415
+    from ..tax.calculator_router import extract_amounts  # noqa: PLC0415
 
     return bool(extract_amounts(message or ""))
 

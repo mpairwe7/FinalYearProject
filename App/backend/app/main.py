@@ -59,7 +59,7 @@ from .auth.models import (
 )
 from .authority import authority_required, get_authority_status
 from .tickets.escalation_notify import known_teams
-from .journey_analytics import build_journey_funnel
+from .quality.journey_analytics import build_journey_funnel
 from .api.models import (
     AnalyticsDashboard,
     AnalyticsEvent,
@@ -2273,7 +2273,7 @@ def _require_live_officer(ctx: AuthContext) -> None:
 def _run_online_evaluation() -> None:
     """One scheduled evaluation run; failures are counted, never raised."""
     try:
-        from .evaluation import record_eval_report, run_evaluation
+        from .quality.evaluation import record_eval_report, run_evaluation
 
         record_eval_report(run_evaluation())
     except Exception:
@@ -2452,7 +2452,7 @@ def submit_feedback(
     from are copied from the conversation log, and the logged question and
     reply are kept rather than the client's copy.
     """
-    from . import quality_audit
+    from .quality import quality_audit
     from .rag.pipeline import ChatModel as _CM
 
     tenant_id = ctx.tenant_id or "default"
@@ -2837,7 +2837,7 @@ def rate_officer_chat(
     officer's service quality, read by administrators on ``/admin/quality``.
     """
     from .tickets import officer_chat
-    from . import service_ratings
+    from .quality import service_ratings
 
     ticket = db.get_ticket(ticket_id)
     if not ticket:
@@ -3080,7 +3080,7 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
 
-    from .evaluation import record_eval_report, run_evaluation
+    from .quality.evaluation import record_eval_report, run_evaluation
 
     report = run_evaluation(sample_size=sample_size, days=days)
     record_eval_report(report)
@@ -4173,7 +4173,7 @@ def get_ticket_endpoint(
     caller-history views the same way).
     """
     from .tickets import officer_chat
-    from . import service_ratings
+    from .quality import service_ratings
 
     ticket = _staff_ticket(ticket_id, ctx)
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
@@ -4843,7 +4843,7 @@ async def wrapup_call_endpoint(
     _staff_call_event(ctx, call_id, "officer_wrapup_saved")
     recorded = result.get("caller_satisfaction") or {}
     if recorded.get("recorded"):
-        from .service_ratings import sentiment_for_score
+        from .quality.service_ratings import sentiment_for_score
 
         metrics.inc(
             "service_rating_total",

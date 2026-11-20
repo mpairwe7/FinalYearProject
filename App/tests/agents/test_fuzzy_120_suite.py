@@ -107,7 +107,7 @@ class TestPillarIRobustness:
 
     def test_fzz_013_currency_string_normalizations(self):
         """FZZ-013: Various currency notation formats parsed to float/Decimal."""
-        from app.calculator_router import parse_ugx_amount
+        from app.tax.calculator_router import parse_ugx_amount
         for val, expected in [
             ("5,000,000", 5000000.0),
             ("5000000", 5000000.0),

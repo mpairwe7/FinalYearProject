@@ -18,12 +18,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .workflows.loader import default_step_title
+from ..workflows.loader import default_step_title
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from .workflows.loader import WorkflowDefinition
+    from ..workflows.loader import WorkflowDefinition
 
 
 def _empty_row(workflow_id: str, wf: WorkflowDefinition | None) -> dict[str, Any]:

@@ -18,7 +18,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.db import database as db
-from app import service_ratings
+from app.quality import service_ratings
 from app.config.flags import flags
 from app.receptionist import review
 from app.receptionist.brain import LLMContextFrame, UraReceptionistBrain

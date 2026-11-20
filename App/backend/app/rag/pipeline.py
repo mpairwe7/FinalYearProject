@@ -132,7 +132,7 @@ from ..providers.routing import (
 )
 from ..providers.scope import cloud_models_allowed, local_models_only
 from .cache import create_cache
-from ..calculator_router import (
+from ..tax.calculator_router import (
     _CURRENCY,
     NEXT_ACTIONS_BY_TOOL,
     continue_calculation,
@@ -1252,14 +1252,14 @@ def _turn_plan_summary() -> dict[str, Any]:
 
 
 def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
-    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`.
+    """Build the verified statutory facts & calculations block via :mod:`app.tax.scenario_planner`.
 
     Called while building the prompt and again while verifying the reply. Running
     the plan twice paid for every live FX step twice, and let the two disagree
     when a source failed in between, so a reply could be judged against figures
     the model never saw. The first run of a turn is the run.
     """
-    from ..scenario_planner import PlanRunReport, build_verified_facts
+    from ..tax.scenario_planner import PlanRunReport, build_verified_facts
 
     plans = _TURN_PLANS.get()
     key = " ".join(str(query or "").lower().split())
@@ -5002,7 +5002,7 @@ def record_discrepancy(
     try:
         last_turn = (conversation_history or [])[-1] if conversation_history else {}
         prev_bot_reply = str(last_turn.get("bot_reply") or "").strip()
-        from ..discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
+        from ..quality.discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
 
         det = detect_discrepancy(message, prev_bot_reply)
         if not det.is_dispute:
@@ -9658,7 +9658,7 @@ class ChatModel:
             and not any(k in text for k in ("guide me to", "workflow", "how to generate", "how do i generate", "steps to generate"))
         ):
             from ..ura_account_mock import generate_mock_prn, format_prn_voucher_reply
-            from ..calculator_router import extract_amounts
+            from ..tax.calculator_router import extract_amounts
 
             amts = extract_amounts(message) or extract_amounts(rewritten)
             amt = amts[0][0] if amts else 0
@@ -10277,7 +10277,7 @@ class ChatModel:
         calculator workflow starts pre-filled with everything the message
         did contain, so the user is asked only for what's absent.
         """
-        from ..calculator_router import is_explanation_question, prefill_plan_from_case_facts
+        from ..tax.calculator_router import is_explanation_question, prefill_plan_from_case_facts
         from ..memory.case_facts import recall_case_facts
 
         # Rate-table inquiries carry no amounts and are answered by _maybe_handle_rate_lookup.
@@ -11789,7 +11789,7 @@ class ChatModel:
             if connector_intent is None and re.search(
                 r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
             ):
-                from ..calculator_router import extract_amounts
+                from ..tax.calculator_router import extract_amounts
 
                 if extract_amounts(router_message):
                     prn_res = self._maybe_handle_situational_advisory(
@@ -12115,7 +12115,7 @@ class ChatModel:
                 # or not the flag is on — off, it reports T1, which is
                 # what the single configured model has always been.
                 from ..guardrails.premise import check_fact_contradictions
-                from ..scenario_planner import plan_tools
+                from ..tax.scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
                 planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
@@ -12150,7 +12150,7 @@ class ChatModel:
                 log_tier("chat", tier_decision)
             elif tiering_enabled:
                 from ..guardrails.premise import check_fact_contradictions
-                from ..scenario_planner import plan_tools
+                from ..tax.scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
                 planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
@@ -12705,7 +12705,7 @@ class ChatModel:
                         and not connector_namespaces
                         and trace_ctx.get("model_tier") == ModelTier.T3.value
                     ):
-                        from ..scenario_planner import plan_tools
+                        from ..tax.scenario_planner import plan_tools
                         from ..tools import ToolRegistry
 
                         if not plan_tools(agentic_query, _ACTIVE_CASE_FACTS.get()):
@@ -13015,7 +13015,7 @@ class ChatModel:
                 router_rewritten or router_message or message
             )
             if extractive_fallback and calc_facts_block:
-                from ..calculator_router import _SCENARIO_PLANNER_BYPASS_RE
+                from ..tax.calculator_router import _SCENARIO_PLANNER_BYPASS_RE
 
                 if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
                     user_facts = re.sub(r"^\s*##[^\n]*\n", "", calc_facts_block, count=1)
@@ -13958,7 +13958,7 @@ class ChatModel:
         if connector_intent is None and re.search(
             r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
         ):
-            from ..calculator_router import extract_amounts
+            from ..tax.calculator_router import extract_amounts
 
             if extract_amounts(router_message):
                 prn_res = self._maybe_handle_situational_advisory(
@@ -14228,7 +14228,7 @@ class ChatModel:
         has_premise_contra_s = False
         if flags.is_enabled("agentic_mode") or stream_tiering_enabled:
             from ..guardrails.premise import check_fact_contradictions
-            from ..scenario_planner import plan_tools
+            from ..tax.scenario_planner import plan_tools
 
             active_cf_s = _ACTIVE_CASE_FACTS.get()
             planned_specs_s = plan_tools(router_rewritten or rewritten, active_cf_s)
@@ -14780,7 +14780,7 @@ class ChatModel:
             router_rewritten or router_message or message
         )
         if calc_facts_block and not attachments:
-            from ..calculator_router import _SCENARIO_PLANNER_BYPASS_RE
+            from ..tax.calculator_router import _SCENARIO_PLANNER_BYPASS_RE
 
             if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
                 user_facts = re.sub(r"^\s*##[^\n]*\n", "", calc_facts_block, count=1)

@@ -29,7 +29,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from .db import database as db
+from ..db import database as db
 
 SOURCES: tuple[str, ...] = (
     "chat_officer_csat",
@@ -184,7 +184,7 @@ def answer(
         raise ValueError(f"invalid rating status {status!r}")
     if score is not None and not 1 <= int(score) <= 5:
         raise ValueError("a score is 1 to 5")
-    from .guardrails.pii import redact_pii_text
+    from ..guardrails.pii import redact_pii_text
 
     _ensure()
     column, value = _key_column(ticket_id, call_id)

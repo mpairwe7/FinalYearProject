@@ -350,7 +350,7 @@ above is what users experience.
 
 Every `ONLINE_EVAL_INTERVAL_SECONDS` (6 h by default) each worker re-scores a
 sample of recent conversations with the evaluation harness
-(`app/evaluation.py`) and publishes `ura_eval_metric` /
+(`app/quality/evaluation.py`) and publishes `ura_eval_metric` /
 `ura_eval_metric_passed`. `POST /v1/evaluate` (ops key) runs one on demand.
 Offline, CI scores the golden sets (`ml.pipelines.evaluate_rag`) and the
 production gate fails a pull request when any metric drops more than 0.03

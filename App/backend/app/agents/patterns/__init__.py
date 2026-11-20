@@ -8,7 +8,7 @@ n'omuntu"`` ("I want to speak to a person"), which is an explicit
 request for a human that the English escalation patterns cannot see.
 
 Code-switched queries carrying an Arabic numeral already routed
-correctly, because :func:`app.calculator_router.has_money_amount` keys
+correctly, because :func:`app.tax.calculator_router.has_money_amount` keys
 on digits and the tax nouns taxpayers use ("VAT", "PAYE", "corporate
 tax") are English even in a Luganda sentence. So the missing piece is
 not translation of the whole table — it is the **trigger vocabulary**:

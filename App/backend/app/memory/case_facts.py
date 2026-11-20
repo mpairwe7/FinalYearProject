@@ -2,7 +2,7 @@
 
 Extracts, merges, and persists structured taxpayer scenario facts across turns:
 - Multi-currency monetary amounts (``UGX``, ``USD``, ``EUR``, ``GBP``, ``KES``)
-  reusing :func:`app.calculator_router.extract_amounts` for UGX and adding
+  reusing :func:`app.tax.calculator_router.extract_amounts` for UGX and adding
   foreign-currency + Luganda/Swahili number-word normalization beside it.
 - Physical presence in Uganda (``days_in_uganda``, ``period_start``, ``period_end``)
   strictly separated from contract duration (``contract_months``).
@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from ..calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
+from ..tax.calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
 from ..rag.context_manager import extract_conversation_entities
 from ..guardrails.pii import redact_pii_text
 from ..number_words import (

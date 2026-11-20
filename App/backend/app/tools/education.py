@@ -1220,7 +1220,7 @@ def detect_education_intent(
             return topic, "beginner", True
         return None, "beginner", True
 
-    from ..calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
+    from ..tax.calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
 
     if extract_amounts(text) or plan_calculation(text):
         return None, "beginner", False
