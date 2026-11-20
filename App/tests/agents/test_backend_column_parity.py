@@ -209,7 +209,10 @@ def _wildcard_search_result(backend) -> dict[str, list[str]]:
     """
     import uuid
 
-    nonce = uuid.uuid4().hex[:10]
+    # Letters only. A hex nonce is all digits about once in a hundred runs, and `create_ticket`
+    # redacts a ten-digit run starting with 1 as a TIN: "[REDACTED_UG_TIN]" then put an underscore
+    # in all three reasons, and the search for "_" found all three (seen in CI on PR #801).
+    nonce = uuid.uuid4().hex[:10].translate(str.maketrans("0123456789", "ghijklmnop"))
     made = {
         "percent": backend.create_ticket(reason=f"Paid 100% of it {nonce}")["id"],
         "underscore": backend.create_ticket(reason=f"Quoted ref_{nonce}")["id"],
