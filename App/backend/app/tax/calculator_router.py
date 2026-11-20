@@ -1681,8 +1681,8 @@ _JOINING_WORDS = frozenset(
 _CHARGE_WORDS = frozenset(
     {"duty", "duties", "tax", "taxes", "taxation", "vat", "excise", "levy", "levies", "tariff", "tariffs", "charge",
      "charges", "cost", "costs", "fee", "fees", "payable", "payment", "payments", "amount", "money", "price", "rate",
-     "rates", "refund", "bond", "security", "ssente", "sente", "pesa", "ada", "emisolo", "musolo", "omusolo", "obusolo",
-     "kodi", "ushuru"}
+     "rates", "percent", "percentage", "refund", "bond", "security", "ssente", "sente", "pesa", "ada", "emisolo",
+     "musolo", "omusolo", "obusolo", "kodi", "ushuru"}
 )  # fmt: skip
 _JOINING_MARKS = frozenset(",&+/")
 _GENERAL_TARIFF = "customs_duty_common"
@@ -1690,7 +1690,7 @@ _GENERAL_TARIFF = "customs_duty_common"
 
 def _plain_paperwork_ask(text: str) -> int | None:
     """Where the is/are ends when the whole message is one plain paperwork question, else None."""
-    if not _NEED_WORD_RE.search(text):
+    if "%" in text or not _NEED_WORD_RE.search(text):
         return None
     tokens = [(m.end(), m.group().lower()) for m in _SENTENCE_TOKEN_RE.finditer(text)]
     words = [word for _end, word in tokens]
@@ -1703,8 +1703,11 @@ def _plain_paperwork_ask(text: str) -> int | None:
         return None
     wh = asking[0]
     be = wh + 2
-    if any(word not in _GREETING_WORDS and word not in _SENTENCE_BREAKS for word in words[:wh]):
-        return None
+    opening = text[: tokens[wh][0]]
+    if any(word not in _GREETING_WORDS and word not in _SENTENCE_BREAKS for word in words[:wh]) or any(
+        ch.isdigit() for ch in opening
+    ):
+        return None  # something other than a greeting comes first; the tokens above are letters only
     if at(wh + 1) not in _PAPERWORK_NOUNS or at(be) not in ("is", "are"):
         return None
     if not (at(be + 1) in _NEED_WORDS or (at(be + 1) == "the" and at(be + 2) in _PROCESS_NOUNS)):
