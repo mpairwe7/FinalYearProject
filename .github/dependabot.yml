@@ -75,6 +75,10 @@ updates:
       # pipecat-ai 1.15.0 requires soundfile<0.14.
       - dependency-name: "soundfile"
         versions: [">=0.14"]
+      # lingua-language-detector 2.2.0 needs Python 3.12, and the production lock in this
+      # folder is compiled for 3.11. Written into that lock, it could not install (#790).
+      - dependency-name: "lingua-language-detector"
+        versions: [">=2.2"]
     groups:
       minor-and-patch:
         patterns:
@@ -112,6 +116,16 @@ updates:
         versions: [">=0.14"]
     groups:
       # The first group whose patterns match takes the update.
+      # transformers and datasets each set a floor for huggingface-hub, which the root list
+      # pins exactly. In the shared group, which takes minor and patch updates, they moved
+      # without it and nothing resolved (#798). No update-types here: the releases after
+      # huggingface-hub 1.x are 2.x.
+      hf-cluster:
+        patterns:
+          - "transformers"
+          - "datasets"
+          - "huggingface-hub"
+          - "sentence-transformers"
       fastapi-stack:
         patterns:
           - "fastapi*"
