@@ -1654,11 +1654,13 @@ _ALLOWED_KEYWORD_RE = re.compile(
 )
 #: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
 #: the same two words and asks for paperwork. It was answered "the common external tariff is 25%"
-#: (G700). One closed shape stops being an allowance question: a sentence that opens with what,
-#: which or who, then a paperwork noun, then is/are and a word of need, with no further question
-#: after it. Everything else is read as before, so a word this lacks changes nothing:
+#: (G700). One closed shape stops being an allowance question: the last question in the message,
+#: opening a sentence with what, which or who, then a paperwork noun, then is/are and a word of
+#: need, and after that one plain clause: nothing joined to it, no charge named, nothing following.
+#: Everything else is read as before. Each condition only narrows what changes, so a word these
+#: lists lack leaves a question answered as it was, never unanswered:
 #: "What VAT is required to import a car?", "What is required to be paid to clear a car?" and
-#: "What documents are required to clear a car, and how much is the duty?" keep their answers.
+#: "What documents are required to import beer and the excise duty?" keep their answers.
 _NEED_WORD_RE = re.compile(r"\b(?:required|needed|necessary|mandatory)\b|\bthe\b", re.IGNORECASE)
 _SENTENCE_TOKEN_RE = re.compile(r"[A-Za-z]+|[.?!:;\n]")
 _WH_WORDS = frozenset({"what", "which", "who"})
@@ -1670,6 +1672,13 @@ _PAPERWORK_NOUNS = frozenset(
 _NEED_WORDS = frozenset({"required", "needed", "necessary", "mandatory"})
 _PROCESS_NOUNS = frozenset({"process", "procedure", "steps", "requirement", "requirements"})
 _SENTENCE_BREAKS = frozenset(".?!:;\n")
+_JOINING_WORDS = frozenset({"and", "plus", "also", "too", "well", "along", "together", "including", "or", "both", "then"})
+_CHARGE_WORDS = frozenset(
+    {"duty", "duties", "tax", "taxes", "vat", "excise", "levy", "levies", "tariff", "tariffs", "charge", "charges",
+     "cost", "costs", "fee", "fees", "payable", "amount", "rate", "rates", "bond", "security", "ssente", "emisolo",
+     "musolo", "kodi", "ushuru"}
+)  # fmt: skip
+_JOINING_MARKS = frozenset(",&+/")
 
 
 def _allowance_starts(text: str) -> list[int]:
@@ -1683,15 +1692,25 @@ def _allowance_starts(text: str) -> list[int]:
     def at(i: int) -> str:
         return words[i] if 0 <= i < len(words) else "."
 
-    last_asking = max((i for i, word in enumerate(words) if word in _ASKING_WORDS), default=-1)
-    asks_for_paperwork = set()
-    for i, word in enumerate(words):
-        if word not in ("is", "are") or at(i - 1) not in _PAPERWORK_NOUNS:
-            continue
-        need = at(i + 1) in _NEED_WORDS or (at(i + 1) == "the" and at(i + 2) in _PROCESS_NOUNS)
-        if need and at(i - 2) in _WH_WORDS and at(i - 3) in _SENTENCE_BREAKS and last_asking == i - 2:
-            asks_for_paperwork.add(tokens[i][0])
-    return [end for end in starts if end not in asks_for_paperwork]
+    # Only the last asking word in the message can open the shape, so at most one is/are is weighed.
+    wh = max((i for i, word in enumerate(words) if word in _ASKING_WORDS), default=-1)
+    be = wh + 2
+    if wh < 0 or at(wh) not in _WH_WORDS or at(wh - 1) not in _SENTENCE_BREAKS:
+        return starts
+    if at(wh + 1) not in _PAPERWORK_NOUNS or at(be) not in ("is", "are"):
+        return starts
+    if not (at(be + 1) in _NEED_WORDS or (at(be + 1) == "the" and at(be + 2) in _PROCESS_NOUNS)):
+        return starts
+    rest = words[be + 1 :]
+    clause_end = next((k for k, word in enumerate(rest) if word in _SENTENCE_BREAKS), len(rest))
+    one_plain_clause = (
+        not any(word in _JOINING_WORDS or word in _CHARGE_WORDS for word in rest)
+        and all(word in _SENTENCE_BREAKS for word in rest[clause_end:])
+        and _JOINING_MARKS.isdisjoint(text[tokens[be][0] :])
+    )
+    if not one_plain_clause:
+        return starts
+    return [end for end in starts if end != tokens[be][0]]
 
 
 _SAME_LINE_PAIRS = tuple(

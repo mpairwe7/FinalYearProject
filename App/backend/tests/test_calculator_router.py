@@ -913,7 +913,7 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
     """"What documents are required to clear an imported vehicle at customs?" was answered
     "The common external tariff for finished goods is 25%" on the live Space (G700).
 
-    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Four
+    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Five
     versions of the fix each lost real answers and were failed by an independent replay. What
     is left is one closed shape, and every case those replays found is held here.
     """
@@ -1015,13 +1015,21 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
             )
         )
 
-    def test_a_paperwork_question_joined_to_another_question_is_read_as_before(self) -> None:
+    def test_a_paperwork_question_joined_to_anything_is_read_as_before(self) -> None:
+        """Version five let the shape through whenever no second question followed. A rate request
+        with no question word of its own ("...and the excise duty?") then lost its answer."""
         self._plans(
             (
                 ("What documents are required to clear a car at customs and how much is the duty?", "customs_duty_common"),
                 ("What documents are needed to clear a car at customs and what is the tax?", "customs_duty_common"),
                 ("What license is required to import beer and what is the excise?", "excise_duty_beer_malt"),
                 ("What is required to clear a car at customs and how much is the duty?", "customs_duty_common"),
+                ("What documents are required to import beer and the excise duty?", "excise_duty_beer_malt"),
+                ("What documents are required to clear a car at customs and the duty payable?", "customs_duty_common"),
+                ("What documents are required to clear a car at customs? Also the duty.", "customs_duty_common"),
+                ("What documents are required to clear a car at customs, plus the fees?", "customs_duty_common"),
+                ("What documents are required to clear a car at customs & the duty?", "customs_duty_common"),
+                ("What documents are required for import duty clearance?", "customs_duty_common"),
             )
         )
 
