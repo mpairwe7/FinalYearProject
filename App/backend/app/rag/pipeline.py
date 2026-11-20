@@ -573,9 +573,9 @@ _CLEARANCE_QUESTION_WORDS: dict[str, frozenset[str]] = {
     "documents": frozenset(
         "hello hi hey dear sir madam please kindly good morning afternoon evening "
         "what which are is the do does i we you one need needs needed require requires required necessary "
-        "mandatory must have should can could would will to for of in at through from when a an my our "
+        "mandatory must have should can could would will to for of in at through when a an my our "
         "documents clear clearing clearance import importing imported bring "
-        "vehicle vehicles car cars motor motorcycle motorcycles goods cargo it them used new "
+        "vehicle vehicles car cars motor motorcycle motorcycles goods cargo used new "
         "customs uganda ura border".split()
     ),
     "biwandiiko": frozenset("biwandiiko ki ebyetaagisa byetaagisa bye nneetaaga neetaaga okuyisa emmotoka yange mu ku forodha".split()),
