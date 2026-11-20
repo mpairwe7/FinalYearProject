@@ -119,7 +119,8 @@ updates:
       # transformers and datasets each set a floor for huggingface-hub, and datasets sets one
       # for pyarrow. The root list pins both exactly. In the shared group, which takes minor
       # and patch updates, the two moved alone and nothing resolved (#798). No update-types
-      # here: the releases that satisfy them are a huggingface-hub major and a pyarrow major.
+      # here: the huggingface-hub release Dependabot proposes is a 2.x, and every pyarrow that
+      # datasets 5.2.0 accepts is a major.
       hf-cluster:
         patterns:
           - "transformers"
