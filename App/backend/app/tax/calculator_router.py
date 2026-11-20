@@ -1654,16 +1654,15 @@ _ALLOWED_KEYWORD_RE = re.compile(
 )
 #: "Can I clear it duty-free?" asks what is allowed. "What documents are required to clear it?" has
 #: the same two words and asks for paperwork. It was answered "the common external tariff is 25%"
-#: (G700). Two closed shapes are read apart from an allowance question, each a sentence that opens
-#: with what, which or who and reaches is/are and a word of need:
-#:   "what documents are required ..."  names paperwork, and is never an allowance question;
-#:   "what is required ..."             names nothing. It stays one, but the general tariff is
-#:                                      not an answer to it (see plan_rate_lookup).
-#: Any other subject keeps the allowance reading, so an unlisted word ("What VAT is required to
-#: import a car?") is read as before and never loses its answer.
+#: (G700). One closed shape stops being an allowance question: a sentence that opens with what,
+#: which or who, then a paperwork noun, then is/are and a word of need, with no further question
+#: after it. Everything else is read as before, so a word this lacks changes nothing:
+#: "What VAT is required to import a car?", "What is required to be paid to clear a car?" and
+#: "What documents are required to clear a car, and how much is the duty?" keep their answers.
 _NEED_WORD_RE = re.compile(r"\b(?:required|needed|necessary|mandatory)\b|\bthe\b", re.IGNORECASE)
 _SENTENCE_TOKEN_RE = re.compile(r"[A-Za-z]+|[.?!:;\n]")
 _WH_WORDS = frozenset({"what", "which", "who"})
+_ASKING_WORDS = _WH_WORDS | {"how", "when", "where", "why", "whose", "whom"}
 _PAPERWORK_NOUNS = frozenset(
     {"document", "documents", "documentation", "docs", "paper", "papers", "paperwork", "certificate", "certificates",
      "form", "forms", "permit", "permits", "licence", "licences", "license", "licenses"}
@@ -1673,11 +1672,8 @@ _PROCESS_NOUNS = frozenset({"process", "procedure", "steps", "requirement", "req
 _SENTENCE_BREAKS = frozenset(".?!:;\n")
 
 
-def _allowance_starts(text: str, *, bare_need: bool = True) -> list[int]:
-    """Ends of each can/is/are/may that can open an allowance question.
-
-    With *bare_need* off, "what is required ..." does not count either.
-    """
+def _allowance_starts(text: str) -> list[int]:
+    """Ends of each can/is/are/may that can open an allowance question."""
     starts = [m.end() for m in _ALLOWED_RE.finditer(text)]
     if not starts or not _NEED_WORD_RE.search(text):
         return starts
@@ -1687,17 +1683,15 @@ def _allowance_starts(text: str, *, bare_need: bool = True) -> list[int]:
     def at(i: int) -> str:
         return words[i] if 0 <= i < len(words) else "."
 
-    asks_what_is_needed = set()
+    last_asking = max((i for i, word in enumerate(words) if word in _ASKING_WORDS), default=-1)
+    asks_for_paperwork = set()
     for i, word in enumerate(words):
-        if word not in ("is", "are"):
+        if word not in ("is", "are") or at(i - 1) not in _PAPERWORK_NOUNS:
             continue
-        if not (at(i + 1) in _NEED_WORDS or (at(i + 1) == "the" and at(i + 2) in _PROCESS_NOUNS)):
-            continue
-        paperwork = at(i - 1) in _PAPERWORK_NOUNS
-        wh = i - 2 if paperwork else i - 1
-        if at(wh) in _WH_WORDS and at(wh - 1) in _SENTENCE_BREAKS and (paperwork or not bare_need):
-            asks_what_is_needed.add(tokens[i][0])
-    return [end for end in starts if end not in asks_what_is_needed]
+        need = at(i + 1) in _NEED_WORDS or (at(i + 1) == "the" and at(i + 2) in _PROCESS_NOUNS)
+        if need and at(i - 2) in _WH_WORDS and at(i - 3) in _SENTENCE_BREAKS and last_asking == i - 2:
+            asks_for_paperwork.add(tokens[i][0])
+    return [end for end in starts if end not in asks_for_paperwork]
 
 
 _SAME_LINE_PAIRS = tuple(
@@ -1738,7 +1732,7 @@ def _same_line(text: str, newlines: list[int], first: re.Pattern[str], second: r
     return False
 
 
-def _asks_about_rates(text: str, *, bare_need: bool = True) -> bool:
+def _asks_about_rates(text: str) -> bool:
     """The rate-question test that was one ``_RATE_ASK_RE``, in linear time."""
     if _RATE_ASK_RE.search(text) or _asks_how_calculated(text):
         return True
@@ -1760,7 +1754,7 @@ def _asks_about_rates(text: str, *, bare_need: bool = True) -> bool:
     if _keyword_before_stop(sorted(starts), keywords, questions):
         return True
     tax_cut = [m.end() for m in _TAX_CUT_RE.finditer(text)]
-    allowed = _allowance_starts(text, bare_need=bare_need)
+    allowed = _allowance_starts(text)
     for ends, keyword_re in ((tax_cut, _TAX_CUT_KEYWORD_RE), (allowed, _ALLOWED_KEYWORD_RE)):
         if ends and _keyword_before_stop(ends, [m.start() for m in keyword_re.finditer(text)], questions):
             return True
@@ -2390,8 +2384,6 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                     continue
                 if re.search(r"\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa)\b[^?]{0,50}\b(?:supplies|services|goods|items|emirimu|ebintu|bidhaa)\b", text, re.IGNORECASE):
                     continue
-            if plan.tax_type == "customs_duty_common" and not short_ask and not _asks_about_rates(text, bare_need=False):
-                return None  # "What is required to clear it?": the general tariff is not what was asked
             return plan
     if _PAYE_THRESHOLD_ASK_RE.search(text):
         return RatePlan(summary="paye")

@@ -913,74 +913,40 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
     """"What documents are required to clear an imported vehicle at customs?" was answered
     "The common external tariff for finished goods is 25%" on the live Space (G700).
 
-    "are ... clear" read as an allowance question, like "Can I clear it duty-free?".
+    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Four
+    versions of the fix each lost real answers and were failed by an independent replay. What
+    is left is one closed shape, and every case those replays found is held here.
     """
 
-    def test_a_question_about_what_is_required_is_not_an_allowance_question(self) -> None:
+    def _plans(self, cases) -> None:
         from app.tax.calculator_router import plan_rate_lookup
 
-        for question in (
-            "What documents are required to clear an imported vehicle at customs?",
-            "what documents are required to clear an imported vehicle at customs",
-            "What documentation is required to clear an imported vehicle at customs?",
-            "What certificates are required to clear an imported vehicle at customs?",
-            "What is required to clear an imported vehicle at customs?",
-            "What is needed to clear an imported vehicle at customs?",
-            "What is the process to clear an imported vehicle at customs?",
-            "What documents are needed to clear goods through customs?",
-            "What papers are needed to clear goods at customs?",
-            "Who is required to clear goods at customs?",
-        ):
-            with self.subTest(question=question):
-                self.assertIsNone(plan_rate_lookup(question))
-
-    def test_a_question_whose_subject_is_not_paperwork_is_still_a_rate_question(self) -> None:
-        """Two later fixes dropped the answer unless the subject was on a list of charges. Two
-        independent replays found what the list lacked: "duty" first, then VAT, excise, security,
-        emisolo. Only a paperwork subject is listed now, so an unknown one is read as before."""
-        from app.tax.calculator_router import plan_rate_lookup
-
-        for question, expected in (
-            ("What duty is required to clear an imported vehicle at customs?", "customs_duty_common"),
-            ("Which duties are mandatory to clear a car at customs?", "customs_duty_common"),
-            ("Ssente meka are required to clear emmotoka at customs?", "customs_duty_common"),
-            ("What emisolo are required to clear emmotoka at customs?", "customs_duty_common"),
-            ("What VAT is required to import a car?", "vat_standard"),
-            ("What excise is needed to import beer?", "excise_duty_beer_malt"),
-            ("What security is required to clear goods in transit through Uganda?", "customs_transit_goods_security"),
-            ("Tell me the duty which is required to clear a car at customs.", "customs_duty_common"),
-            ("Is the requirement to pay duty waived when I import a car as a diplomat?", "customs_diplomatic_exemption"),
-            (
-                "I am a diplomat who has just arrived. Is the requirement to pay duty waived when I import a car as a diplomat?",
-                "customs_diplomatic_exemption",
-            ),
-            ("Is necessary medical equipment exempt from import duty?", "customs_duty_common"),
-            ("We run a clinic which imports supplies. Is necessary medical equipment exempt from import duty?", "customs_duty_common"),
-        ):
+        for question, expected in cases:
             with self.subTest(question=question):
                 plan = plan_rate_lookup(question)
                 self.assertIsNotNone(plan)
                 self.assertEqual(plan.tax_type or plan.summary, expected)
 
-    def test_a_bare_what_is_required_keeps_an_answer_that_is_about_it(self) -> None:
-        """"What is required to clear goods in transit?" is answered by the transit rule (a bond and
-        cargo tracking). Only the general tariff is withheld from a question that names nothing."""
+    def test_a_lone_question_whose_subject_is_paperwork_is_not_an_allowance_question(self) -> None:
         from app.tax.calculator_router import plan_rate_lookup
 
-        for question, expected in (
-            ("What is required to clear goods in transit through Uganda?", "customs_transit_goods_security"),
-            ("Who is required to pay import duty on goods in transit?", "customs_transit_goods_security"),
-            ("What is required for a diplomat to import a car duty-free?", "customs_diplomatic_exemption"),
-            ("What is required for passenger baggage to be duty-free?", "passenger_baggage_allowance"),
+        for question in (
+            "What documents are required to clear an imported vehicle at customs?",
+            "what documents are required to clear an imported vehicle at customs",
+            "Hello! What documents are required to clear an imported vehicle at customs?",
+            "I imported a car. What documents are required to clear it at customs?",
+            "What documentation is required to clear an imported vehicle at customs?",
+            "What certificates are required to clear an imported vehicle at customs?",
+            "Which documents are required to clear an imported car at customs?",
+            "What documents are needed to clear goods through customs?",
+            "What papers are needed to clear goods at customs?",
+            "What permit is required to import used clothing?",
         ):
             with self.subTest(question=question):
-                plan = plan_rate_lookup(question)
-                self.assertIsNotNone(plan)
-                self.assertEqual(plan.tax_type, expected)
-        self.assertIsNone(plan_rate_lookup("What documents are required to clear goods in transit through Uganda?"))
+                self.assertIsNone(plan_rate_lookup(question))
 
     def test_an_allowance_question_is_still_a_rate_question(self) -> None:
-        from app.tax.calculator_router import _asks_about_rates, plan_rate_lookup
+        from app.tax.calculator_router import _asks_about_rates
 
         for question in (
             "Can I import a car duty-free?",
@@ -990,30 +956,74 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
         ):
             with self.subTest(question=question):
                 self.assertTrue(_asks_about_rates(question))
-        self.assertEqual(plan_rate_lookup("Can I clear my car at customs duty free?").tax_type, "customs_duty_common")
-        self.assertEqual(
-            plan_rate_lookup("Are imported medical supplies exempt from customs duty?").tax_type, "customs_duty_common"
+        self._plans(
+            (
+                ("Can I clear my car at customs duty free?", "customs_duty_common"),
+                ("Are imported medical supplies exempt from customs duty?", "customs_duty_common"),
+                ("Is necessary medical equipment exempt from import duty?", "customs_duty_common"),
+                ("Is the requirement to pay duty waived when I import a car as a diplomat?", "customs_diplomatic_exemption"),
+            )
         )
 
     def test_a_rate_question_that_mentions_a_form_is_still_planned(self) -> None:
-        """A first fix filtered every rate question for the words "form" or "documents". An
-        independent replay of 16,938 questions found these lost their answer under it."""
-        from app.tax.calculator_router import plan_rate_lookup
+        """Version one filtered every rate question for "form" and "documents"."""
+        self._plans(
+            (
+                ("Adhabu ya kuchelewa kuwasilisha fomu ya kodi ni kiasi gani?", "penal_tax_late_filing"),
+                ("Ushuru wa forodha ni kiasi gani na fomu gani nijaze?", "customs_duty_common"),
+                ("What tax do I pay on rent and other forms of income?", "rental"),
+                ("What tax is charged on dividends and other forms of investment income?", "withholding_dividend"),
+                ("What is the tax-free requirement for my salary?", "paye"),
+                ("What documents do I need and what is the stamp duty rate on a land transfer?", "stamp_duty_property_transfer"),
+                ("What is the import duty on a used car?", "customs_duty_common"),
+                ("What is the VAT rate in Uganda?", "vat_standard"),
+            )
+        )
 
-        for question, expected in (
-            ("Adhabu ya kuchelewa kuwasilisha fomu ya kodi ni kiasi gani?", "penal_tax_late_filing"),
-            ("Ushuru wa forodha ni kiasi gani na fomu gani nijaze?", "customs_duty_common"),
-            ("What tax do I pay on rent and other forms of income?", "rental"),
-            ("What tax is charged on dividends and other forms of investment income?", "withholding_dividend"),
-            ("What is the tax-free requirement for my salary?", "paye"),
-            ("What documents do I need and what is the stamp duty rate on a land transfer?", "stamp_duty_property_transfer"),
-            ("What is the import duty on a used car?", "customs_duty_common"),
-            ("What is the VAT rate in Uganda?", "vat_standard"),
-        ):
-            with self.subTest(question=question):
-                plan = plan_rate_lookup(question)
-                self.assertIsNotNone(plan)
-                self.assertEqual(plan.tax_type or plan.summary, expected)
+    def test_a_question_whose_subject_is_not_paperwork_is_read_as_before(self) -> None:
+        """Version two dropped every "is required", and version three kept it only for a listed
+        charge. Each lost what its list lacked: "duty", then VAT, excise, security, emisolo."""
+        self._plans(
+            (
+                ("What duty is required to clear an imported vehicle at customs?", "customs_duty_common"),
+                ("Which duties are mandatory to clear a car at customs?", "customs_duty_common"),
+                ("Ssente meka are required to clear emmotoka at customs?", "customs_duty_common"),
+                ("What emisolo are required to clear emmotoka at customs?", "customs_duty_common"),
+                ("What VAT is required to import a car?", "vat_standard"),
+                ("What excise is needed to import beer?", "excise_duty_beer_malt"),
+                ("What security is required to clear goods in transit through Uganda?", "customs_transit_goods_security"),
+                ("Tell me the duty which is required to clear a car at customs.", "customs_duty_common"),
+                (
+                    "I am a diplomat who has just arrived. Is the requirement to pay duty waived when I import a car as a diplomat?",
+                    "customs_diplomatic_exemption",
+                ),
+                ("We run a clinic which imports supplies. Is necessary medical equipment exempt from import duty?", "customs_duty_common"),
+            )
+        )
+
+    def test_a_question_that_names_no_subject_is_read_as_before(self) -> None:
+        """Version four withheld the general tariff from a bare "what is required". That also took
+        it from "What is required to be paid to clear a car at customs?"."""
+        self._plans(
+            (
+                ("What is required to be paid to clear a car at customs?", "customs_duty_common"),
+                ("What is required as duty to import a car at customs?", "customs_duty_common"),
+                ("What is required to clear a car at customs?", "customs_duty_common"),
+                ("Who is required to pay import duty on goods in transit?", "customs_transit_goods_security"),
+                ("What is required to clear goods in transit through Uganda?", "customs_transit_goods_security"),
+                ("What is required for passenger baggage to be duty-free?", "passenger_baggage_allowance"),
+            )
+        )
+
+    def test_a_paperwork_question_joined_to_another_question_is_read_as_before(self) -> None:
+        self._plans(
+            (
+                ("What documents are required to clear a car at customs and how much is the duty?", "customs_duty_common"),
+                ("What documents are needed to clear a car at customs and what is the tax?", "customs_duty_common"),
+                ("What license is required to import beer and what is the excise?", "excise_duty_beer_malt"),
+                ("What is required to clear a car at customs and how much is the duty?", "customs_duty_common"),
+            )
+        )
 
     def test_the_paperwork_question_reaches_retrieval(self) -> None:
         from app.rag import pipeline
