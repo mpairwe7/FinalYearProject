@@ -6,7 +6,7 @@ import os
 import unittest
 from unittest import mock
 
-from app.escalation_policy import (
+from app.tickets.escalation_policy import (
     TIER_NONE,
     TIER_OFFER,
     TIER_PRIORITY,
@@ -14,7 +14,7 @@ from app.escalation_policy import (
     higher_priority,
     sla_seconds,
 )
-from app.officer_handoff import _names_only, prune_required_details, strongest_assessment
+from app.tickets.officer_handoff import _names_only, prune_required_details, strongest_assessment
 from app.text_signals import detect_high_stakes
 
 

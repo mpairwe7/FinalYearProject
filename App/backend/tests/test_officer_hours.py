@@ -1,4 +1,4 @@
-"""Officer working hours (app.officer_hours): when a person can take a call or a handoff."""
+"""Officer working hours (app.tickets.officer_hours): when a person can take a call or a handoff."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from app import officer_hours as oh
+from app.tickets import officer_hours as oh
 
 
 def desk_env(**env: str) -> dict[str, str]:
@@ -88,7 +88,7 @@ class ConfiguredHoursTests(unittest.TestCase):
         self.assertIsNone(oh.next_on_duty(at(17, 10, 0), closed))
 
     def test_settings_that_cannot_be_read_keep_the_defaults(self):
-        with self.assertLogs("app.officer_hours", level="WARNING"):
+        with self.assertLogs("app.tickets.officer_hours", level="WARNING"):
             bad = self.hours(CXP_OPEN_HOUR="7am", CXP_CLOSE_HOUR="25", CXP_WORKING_DAYS="funday",
                              CXP_TIMEZONE="Mars/Olympus", CXP_CLOSED_DATES="soon")
         self.assertEqual((bad.open_hour, bad.close_hour, bad.days, bad.closed_dates), (7, 23, frozenset(range(7)), frozenset()))

@@ -44,7 +44,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .db import database as db
 from . import documents
-from . import officer_hours
+from .tickets import officer_hours
 from .observability.analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .observability.security_events import record_http_security_event
 from .text_signals import ESCALATION_NOT_QUEUED_REPLY
@@ -58,7 +58,7 @@ from .auth.models import (
     ProfileUpdateRequest,
 )
 from .authority import authority_required, get_authority_status
-from .escalation_notify import known_teams
+from .tickets.escalation_notify import known_teams
 from .journey_analytics import build_journey_funnel
 from .api.models import (
     AnalyticsDashboard,
@@ -2176,9 +2176,9 @@ async def admin_ticket_stream_ws(websocket: WebSocket) -> None:
 
     Read-only and staff-only; carries triage metadata, never a
     transcript. ``?team=customs`` narrows it to one queue. See
-    ``ticket_ws.py``.
+    ``tickets/ticket_ws.py``.
     """
-    from .ticket_ws import ticket_stream_ws
+    from .tickets.ticket_ws import ticket_stream_ws
 
     await ticket_stream_ws(websocket)
 
@@ -2589,7 +2589,7 @@ def request_human_officer(
             "escalation_requested_total",
             labels={"outcome": "reused_off_duty" if reused else "after_hours_queued"},
         )
-        from .escalation_policy import after_hours_escalation_message
+        from .tickets.escalation_policy import after_hours_escalation_message
 
         final_msg = after_hours_escalation_message(locale, reused=reused)
     else:
@@ -2734,7 +2734,7 @@ def reply_to_escalation(
         raise HTTPException(status_code=404, detail="Support case not found")
 
     tid = str(ticket.get("id") or ticket_id)
-    from . import officer_chat
+    from .tickets import officer_chat
 
     chat = officer_chat.get_chat(tid)
     if officer_chat.chat_state(ticket, chat) == "ended" and officer_chat.ended_by_officer(chat):
@@ -2752,7 +2752,7 @@ def reply_to_escalation(
             logger.warning("taxpayer message not added to the chat thread of %s", tid, exc_info=True)
 
     try:
-        from .ticket_events import build_event, publish
+        from .tickets.ticket_events import build_event, publish
 
         publish(build_event(updated, event_type="escalation.taxpayer_reply"))
     except Exception:
@@ -2800,7 +2800,7 @@ def escalation_messages(
     taxpayer's language when it was translated. Reading the officer's latest
     message here counts as delivering it, so the next AI turn does not repeat it.
     """
-    from . import officer_chat
+    from .tickets import officer_chat
 
     ticket = db.get_ticket(ticket_id)
     if not ticket:
@@ -2836,7 +2836,8 @@ def rate_officer_chat(
     chat asks. Exact ticket id only, as for the thread. The rating is the
     officer's service quality, read by administrators on ``/admin/quality``.
     """
-    from . import officer_chat, service_ratings
+    from .tickets import officer_chat
+    from . import service_ratings
 
     ticket = db.get_ticket(ticket_id)
     if not ticket:
@@ -4171,7 +4172,8 @@ def get_ticket_endpoint(
     who read it is part of the audit trail (the call desk already logs its
     caller-history views the same way).
     """
-    from . import officer_chat, service_ratings
+    from .tickets import officer_chat
+    from . import service_ratings
 
     ticket = _staff_ticket(ticket_id, ctx)
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
@@ -4242,7 +4244,7 @@ async def update_ticket_endpoint(
         except Exception:
             pass
 
-    from . import officer_chat
+    from .tickets import officer_chat
 
     before = await asyncio.to_thread(db.get_ticket, ticket_id)
     reply_locale = locale or (before or {}).get("locale") or "en"
@@ -4388,7 +4390,7 @@ def _note_officer_chat_turn(
     status: str | None,
 ) -> None:
     """Keep the chat thread in step with a ticket change: the reply, and who has the case."""
-    from . import officer_chat
+    from .tickets import officer_chat
 
     name = _desk_officer_name(ctx)
     took_case = bool(assignee)
@@ -4422,7 +4424,7 @@ async def end_ticket_chat(
     ``staff.chat_ended``. 409 for a call's ticket or a chat that has ended.
     """
     _require_live_officer(ctx)
-    from . import officer_chat
+    from .tickets import officer_chat
 
     ticket = await asyncio.to_thread(_staff_ticket, ticket_id, ctx)
     if not officer_chat.is_text(ticket):
@@ -4907,7 +4909,7 @@ class OfficerPresenceUpdate(BaseModel):
     @field_validator("teams")
     @classmethod
     def _known_teams(cls, value: list[str] | None) -> list[str] | None:
-        from .escalation_notify import known_teams
+        from .tickets.escalation_notify import known_teams
 
         if value is not None and any(v not in known_teams() for v in value):
             raise ValueError("teams must be teams a call can be passed to")

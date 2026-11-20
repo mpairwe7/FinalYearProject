@@ -6,7 +6,7 @@ import time
 from unittest import mock
 
 from app.documents import DocumentRecord
-from app.hitl_routing import assess_document_for_human_review, draft_staff_escalation_ticket
+from app.tickets.hitl_routing import assess_document_for_human_review, draft_staff_escalation_ticket
 
 
 def test_clear_document_requires_no_human_review() -> None:
@@ -32,7 +32,7 @@ def test_clear_document_requires_no_human_review() -> None:
     assert assessment.suggested_action == "auto_approve"
 
     # Ticket is not drafted when no review is needed
-    with mock.patch("app.hitl_routing.flags.is_enabled", return_value=True):
+    with mock.patch("app.tickets.hitl_routing.flags.is_enabled", return_value=True):
         ticket = draft_staff_escalation_ticket(doc, assessment)
         assert ticket is None
 
@@ -60,7 +60,7 @@ def test_uncertain_document_triggers_staff_review_draft() -> None:
     assert assessment.suggested_action == "officer_review"
     assert len(assessment.reasons) >= 2
 
-    with mock.patch("app.hitl_routing.flags.is_enabled", return_value=True):
+    with mock.patch("app.tickets.hitl_routing.flags.is_enabled", return_value=True):
         ticket = draft_staff_escalation_ticket(
             doc,
             assessment,

@@ -16,8 +16,8 @@ abuse at runtime.
 | Article 5(1) practice | Does the system do it? | Evidence |
 | --- | --- | --- |
 | (a) Subliminal, manipulative or deceptive techniques that distort behaviour | No. The assistant answers questions and offers a person. It has no goal of steering a taxpayer's choices. | The governed prompt states only current, enforced facts (ADR-0030). |
-| (b) Exploiting vulnerability from age, disability or social or economic situation | No. Distress and hardship cues lead to an offer of a person, not to a push towards an action. | [escalation_policy.py](../../backend/app/escalation_policy.py) |
-| (c) Social scoring | No. Nothing scores a person. The escalation policy weighs distress, stakes, effort and the assistant's confidence in the current conversation, and it can only raise a ticket's priority. | [escalation_policy.py](../../backend/app/escalation_policy.py) |
+| (b) Exploiting vulnerability from age, disability or social or economic situation | No. Distress and hardship cues lead to an offer of a person, not to a push towards an action. | [tickets/escalation_policy.py](../../backend/app/tickets/escalation_policy.py) |
+| (c) Social scoring | No. Nothing scores a person. The escalation policy weighs distress, stakes, effort and the assistant's confidence in the current conversation, and it can only raise a ticket's priority. | [tickets/escalation_policy.py](../../backend/app/tickets/escalation_policy.py) |
 | (d) Predicting criminal offences from profiling | No. The system does no compliance, fraud or evasion scoring of taxpayers. | No such module exists in `App/backend/app`. |
 | (e) Untargeted scraping of facial images | No. The system collects no facial images. | Not applicable. |
 | (f) Emotion recognition in a workplace or school | No. Voice emotion inference, when switched on, runs on callers' audio only, never on officers. It may still be high risk, which is a different question. | [FRIA, open classification question](../systems/ura-ai-chatbot/fria.md#open-classification-question) |

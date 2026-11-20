@@ -43,7 +43,7 @@ def setUpModule() -> None:
     db.init_db()
 
 
-#: What ChatModel._maybe_create_ticket puts on the handoff at night (app.officer_hours.status).
+#: What ChatModel._maybe_create_ticket puts on the handoff at night (app.tickets.officer_hours.status).
 OFF_DUTY = {"on_duty": False, "hours": "07:00–23:00 EAT", "next_on_duty": "2026-10-17T07:00:00+03:00"}
 
 
@@ -131,7 +131,7 @@ class EscalationEndpointTest(unittest.TestCase):
         from app.tools.escalate import EscalateToHumanTool
 
         flags.set("ticket_queue", True)
-        with mock.patch("app.officer_hours.status", return_value=OFF_DUTY):
+        with mock.patch("app.tickets.officer_hours.status", return_value=OFF_DUTY):
             result = EscalateToHumanTool().execute(reason="Disputed assessment", summary="Disputes the notice")
         self.assertTrue(result["ok"])
         self.assertIn("when they are next on duty, from Saturday 17 October at 07:00", result["message"])

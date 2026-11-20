@@ -68,7 +68,7 @@ Three constraints, all deliberate:
 ## Delivery
 
 The pipeline used to end at a database row: an officer had to poll and
-notice. `app/escalation_notify.py` posts a webhook on ticket creation.
+notice. `app/tickets/escalation_notify.py` posts a webhook on ticket creation.
 
 ```
 ESCALATION_WEBHOOK_URL            POST target; unset disables delivery

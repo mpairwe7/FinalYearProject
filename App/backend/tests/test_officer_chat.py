@@ -25,7 +25,8 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.db import database as db  # noqa: E402
-from app import officer_chat, service_ratings  # noqa: E402
+from app.tickets import officer_chat  # noqa: E402
+from app import service_ratings  # noqa: E402
 from app.auth.jwt_auth import make_dev_token  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -239,7 +240,7 @@ class CallTicketTests(_Chat):
 class EndChatTests(_Chat):
     def test_the_officer_ends_the_chat_and_the_taxpayer_is_asked_to_rate_it(self):
         self.take_case()
-        with mock.patch("app.ticket_events.publish") as publish:
+        with mock.patch("app.tickets.ticket_events.publish") as publish:
             r = self.end(closing_message="Glad I could help. Goodbye.", outcome="resolved")
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["chat_state"], "ended")

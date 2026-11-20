@@ -143,7 +143,7 @@ export function ticketIdFrom(meta: unknown): string | null {
   return typeof tid === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(tid) ? tid : null;
 }
 
-/** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
+/** Whether officers were on duty when a handoff was queued (`app.tickets.officer_hours.status`). */
 export interface OfficerHours {
   onDuty: boolean;
   /** For display, e.g. "07:00–23:00 EAT". */

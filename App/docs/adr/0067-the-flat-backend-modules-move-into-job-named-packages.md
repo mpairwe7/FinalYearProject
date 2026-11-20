@@ -51,7 +51,8 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | 1 | `speech/` | `speech_service`, `speech_normalization`, `accent_detector`, `orpheus_tts`, `spark_tts_salt` | yes |
 | 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` || yes |
 | 3 | `research/` | `web_research`, `web_search_providers`, `web_fx`, `egress`, `doh_resolver`, `ephemeral_pdf_sandbox` | yes |
-| later | `tickets/`, `quality/`, `connectors/`, `offline/` | the handoff, service-quality, connector and offline modules | no |
+| 4 | `tickets/` | `escalation_policy`, `escalation_notify`, `officer_handoff`, `officer_chat`, `officer_hours`, `ticket_events`, `ticket_ws`, `hitl_routing` | yes |
+| later | `quality/`, and `tax/` for the calculator modules | the service-quality modules; `calculator_router` and `scenario_planner` | no |
 
 **What stays flat, and why.**
 
@@ -79,8 +80,8 @@ so merging them would change how a reported number is reproduced.
 
 ## Consequences
 
-- Speech and voice code is found in `app/speech/`, and live web research in
-  `app/research/`. Imports read `from .speech import speech_service`; a
+- Speech and voice code is found in `app/speech/`, live web research in
+  `app/research/`, and handoff to officers in `app/tickets/`. Imports read `from .speech import speech_service`; a
   caller's own code does not change.
 - A moved module's logger takes its new name, for example
   `app.speech.speech_service`. A saved log query on the old name needs the new

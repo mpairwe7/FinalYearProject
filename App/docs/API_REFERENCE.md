@@ -543,7 +543,7 @@ stops sorting anything — staff re-prioritise from the officer console.
 | `ok` | `false` when the queue is off or the write failed; `message` then says how to reach URA instead |
 | `status` | `open` · `queue_disabled` · `failed` |
 | `reused_existing` | `true` when this conversation already had an open ticket — one conversation, one officer |
-| `officer_hours` | Whether officers are on duty now (`app/officer_hours.py`, `CXP_*` settings), their hours for display, and the ISO start of the next shift. Outside working hours `message` says when the case will be picked up and leaves out the toll-free line, which the same desk answers (G196) |
+| `officer_hours` | Whether officers are on duty now (`app/tickets/officer_hours.py`, `CXP_*` settings), their hours for display, and the ISO start of the next shift. Outside working hours `message` says when the case will be picked up and leaves out the toll-free line, which the same desk answers (G196) |
 
 A chat turn that queued a ticket (saved, or an open one reused) carries the same `officer_hours`
 object at the top level: the `/v1/chat` response and the stream's `grounding` event, read when the

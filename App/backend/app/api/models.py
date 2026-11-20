@@ -170,7 +170,7 @@ class ConnectorNotice(BaseModel):
 
 
 class OfficerHoursStatus(BaseModel):
-    """Whether a URA officer can pick a handoff up now (``app.officer_hours.status``)."""
+    """Whether a URA officer can pick a handoff up now (``app.tickets.officer_hours.status``)."""
 
     on_duty: bool = Field(..., description="True while officers are on duty")
     hours: str = Field(..., description='Officers\' working hours, e.g. "07:00–23:00 EAT"')

@@ -105,7 +105,7 @@ class NobodyOnlineTests(QueueCase):
 
     async def test_with_nobody_online_the_callback_is_offered_at_once(self):
         self.staffed.return_value = False
-        with patch("app.officer_hours.on_duty", return_value=True):  # within working hours
+        with patch("app.tickets.officer_hours.on_duty", return_value=True):  # within working hours
             await self.brain.process_frame(RequestOfficerFrame())
 
         self.assertEqual(self.state.mode, "ai")
@@ -122,7 +122,7 @@ class NobodyOnlineTests(QueueCase):
     async def test_outside_working_hours_the_caller_hears_officers_are_off_duty(self):
         """G195: after the desk closes (11 PM by default) nobody can take the call."""
         self.staffed.return_value = False
-        with patch("app.officer_hours.on_duty", return_value=False):
+        with patch("app.tickets.officer_hours.on_duty", return_value=False):
             await self.brain.process_frame(RequestOfficerFrame())
         self.assertEqual(self.state.mode, "ai")
         self.assertIn(phrase("officers_off_duty", "en"), self.voiced())
@@ -135,14 +135,14 @@ class NobodyOnlineTests(QueueCase):
     async def test_no_hours_line_for_a_wait_that_had_already_ended(self):
         """The hours follow the callback line, never a wait that ended some other way."""
         self.staffed.return_value = False
-        with patch("app.officer_hours.on_duty", return_value=False), \
+        with patch("app.tickets.officer_hours.on_duty", return_value=False), \
                 patch.object(brain_mod, "close_transfer_on_timeout", return_value=None):
             await self.brain.process_frame(RequestOfficerFrame())
         self.assertFalse(any(t.startswith("Officers' hours: ") for t in self.texts()))
         self.assertNotIn(phrase("officers_off_duty", "en"), self.voiced())
 
     async def test_an_officer_working_late_still_takes_the_call(self):
-        with patch("app.officer_hours.on_duty", return_value=False):
+        with patch("app.tickets.officer_hours.on_duty", return_value=False):
             await self.brain.process_frame(RequestOfficerFrame())
         self.assertEqual(self.state.mode, "transferring")  # someone is signed in: queue
 

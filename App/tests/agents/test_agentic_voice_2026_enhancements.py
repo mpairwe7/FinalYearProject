@@ -467,7 +467,7 @@ def test_phase32_zero_effort_slot_prefill_and_workflow_specialist_bridge(tmp_db)
 def test_phase32_proactive_continuation_and_officer_ai_co_execution(tmp_db):
     from pathlib import Path
 
-    from app import officer_chat
+    from app.tickets import officer_chat
     from app.workflows.registry import auto_load_flows
 
     auto_load_flows(Path("App/backend/app/workflows/flows"))
@@ -1067,7 +1067,7 @@ def test_phase35_memory_backed_tool_binding_and_workflow_tangent_resume(tmp_db):
 
 
 def test_phase35_multi_case_resolution_ledger_anon_promotion_and_officer_preferences(tmp_db):
-    from app import officer_chat
+    from app.tickets import officer_chat
 
     memsvc = get_memory_service()
     u = tmp_db.upsert_user(external_id="1000999222", tenant_id="default")
@@ -2029,14 +2029,14 @@ def test_phase44_cxp_after_hours_escalation_and_sla_pause(monkeypatch):
     from zoneinfo import ZoneInfo
 
     from app.db.database import compose_sla_stats
-    from app.escalation_policy import (
+    from app.tickets.escalation_policy import (
         after_hours_escalation_message,
         after_hours_escalation_notice,
         business_hours_elapsed_seconds,
         evaluate_cxp_schedule,
     )
     from app.config.flags import flags
-    from app.officer_handoff import enrich_handoff
+    from app.tickets.officer_handoff import enrich_handoff
     from app.receptionist.phrases import phrase
 
     for env_name in ("CXP_FORCE_AFTER_HOURS", "CXP_OPEN_HOUR", "CXP_CLOSE_HOUR", "CXP_TIMEZONE"):

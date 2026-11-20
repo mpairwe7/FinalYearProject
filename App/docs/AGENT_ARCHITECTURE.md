@@ -387,8 +387,8 @@ default than drop it.  Invalid statuses on `update_ticket`
 Every ticket — these two, an answer the guards doubted, and the taxpayer's
 own **Talk to an officer** (`POST /v1/escalate`) — is written by
 `ChatModel._maybe_create_ticket`, and Phase 38 enriches it there once
-(`app/officer_handoff.py`): with `eq_stakes_escalation` the escalation
-policy (`app/escalation_policy.py`) sets priority and SLA from affect,
+(`app/tickets/officer_handoff.py`): with `eq_stakes_escalation` the escalation
+policy (`app/tickets/escalation_policy.py`) sets priority and SLA from affect,
 stakes, effort and confidence, reading the last three messages so the
 button's own empty message does not erase what was said before it; with
 `structured_text_handoff` the ticket carries `HandoffEnvelope` v2.1 and the

@@ -204,7 +204,7 @@ class TestVoiceAffectGateAndSlotHygiene:
 
     def test_underscore_prefixed_engine_slots_are_filtered(self, monkeypatch) -> None:
         from app.memory.resolution_ledger import ResolutionLedger
-        from app.officer_handoff import given_slot_names
+        from app.tickets.officer_handoff import given_slot_names
 
         assert given_slot_names({"slots": {"tax_type": "vat", "_tangent_count": 1, "_invalid_count": 2}}) == [
             "tax_type"

@@ -52,7 +52,7 @@ The flags are independent. `structured_text_handoff` without
 
 The AI answers all night; officers work the desk's hours — `CXP_TIMEZONE`,
 `CXP_OPEN_HOUR`/`CXP_CLOSE_HOUR` (default 07:00–23:00 `Africa/Kampala`),
-`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES` (`app/officer_hours.py`; the call
+`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES` (`app/tickets/officer_hours.py`; the call
 receptionist uses the same settings). Outside them:
 
 * **Every escalation** — the taxpayer's button, auto-escalation, the

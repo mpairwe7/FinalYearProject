@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.escalation_notify import (
+from app.tickets.escalation_notify import (
     FALLBACK_TEAM,
     build_payload,
     known_teams,
