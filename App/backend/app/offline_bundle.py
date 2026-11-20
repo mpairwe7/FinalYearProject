@@ -470,16 +470,9 @@ class BundleManager:
 # ---------------------------------------------------------------------------
 
 
-def _sha256_file(path: Path, chunk_size: int = 8192) -> str:
-    """Compute SHA-256 of a file."""
-    h = hashlib.sha256()
+def _sha256_file(path: Path) -> str:
     with open(path, "rb") as f:
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def _human_size(size_bytes: int) -> str:

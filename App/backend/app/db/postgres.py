@@ -1060,7 +1060,7 @@ def get_conversation_context(
     tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
-    from ..rag.context_manager import RollingContextManager, context_manager
+    from ..rag.context_manager import conversation_context
 
     turns = get_recent_turns(
         session_id=session_id,
@@ -1069,19 +1069,7 @@ def get_conversation_context(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
-    ctx = mgr.build_context(
-        turns,
-        conversation_id=conversation_id or session_id or "",
-    )
-    return {
-        "recent_turns": ctx.recent_turns,
-        "context_summary": ctx.context_summary,
-        "consolidated_spec": ctx.consolidated_spec,
-        "active_entities": ctx.active_entities,
-        "total_turns": ctx.total_turns,
-        "all_turns": ctx.all_turns,
-    }
+    return conversation_context(turns, conversation_id or session_id or "", recent_limit)
 
 
 def upsert_working_memory(

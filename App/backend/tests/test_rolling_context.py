@@ -248,3 +248,21 @@ class LLMContextInjectionTests(unittest.TestCase):
         context = RollingContextManager(recent_limit=2, max_total_turns=5).build_context(history)
         self.assertEqual(context.total_turns, 5)
         self.assertEqual(context.all_turns[0]["user_message"], "Question 7 about VAT")
+
+
+class StoresShareOneContextBuilderTests(unittest.TestCase):
+    """The SQLite and Postgres stores each carried the same 31-line context builder (G696)."""
+
+    def test_both_stores_return_what_the_shared_builder_returns(self) -> None:
+        from unittest import mock
+
+        from app.db import database, postgres
+        from app.rag.context_manager import conversation_context
+
+        turns = [{"user_message": f"Question {i} about VAT", "bot_reply": f"Answer {i}"} for i in range(9)]
+        for store in (database, postgres):
+            with mock.patch.object(store, "get_recent_turns", return_value=turns) as read:
+                got = store.get_conversation_context(session_id="s1", recent_limit=3, max_history=7, user_id="u", tenant_id="t")
+            self.assertEqual(got, conversation_context(turns, "s1", 3), store.__name__)
+            self.assertEqual(read.call_args.kwargs["limit"], 7)
+            self.assertEqual(len(got["recent_turns"]), 3)
