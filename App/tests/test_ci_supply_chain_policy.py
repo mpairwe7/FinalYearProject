@@ -433,6 +433,20 @@ def test_dependabot_automerge_waits_for_required_checks():
             )
 
 
+def test_dependabot_automerge_never_takes_a_major():
+    """Three groups carry no update-types (vitest, next, hf-cluster), so a grouped pull request
+    can hold a major. The step exempted grouped pull requests through `package-group`, an output
+    fetch-metadata does not have, so the exemption never applied. It is gone, so that correcting
+    the name cannot switch it on."""
+    steps = _load(ROOT / ".github" / "workflows" / "dependabot-automerge.yml")["jobs"]["dependabot-automerge"]["steps"]
+    merging = [step for step in steps if "gh pr merge" in str(step.get("run", ""))]
+    assert merging
+    for step in merging:
+        condition = " ".join(str(step.get("if", "")).split())
+        assert "steps.metadata.outputs.update-type != 'version-update:semver-major'" in condition
+        assert "||" not in condition and "group" not in condition, f"{step.get('name')}: no exemption from the major rule"
+
+
 def test_crane_cloud_requirements_install_on_the_python_they_ship_with():
     """#633 raised numpy to >=2.5.4, which needs Python 3.12, in a file the
     production image and CI install on 3.11 — so neither could install it."""
