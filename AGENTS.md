@@ -12,11 +12,11 @@ This file is the repo-wide router. Package rules live next to the code.
 | `App/evals/` | Golden sets, red-team gate, preference export | `App/evals/AGENTS.md` |
 | `App/Data/` | FAQ, PDFs, crawl, eval JSONL | `App/Data/README.md` |
 | `App/ml/` | Offline training, corpus pipelines, local ASR/MT/TTS wrappers | `App/ml/AGENTS.md` |
-| `App/infra/` | Compose overlays and example HPA (not applied) | `App/infra/AGENTS.md` |
+| `App/infra/` | Compose overlays (`compose/`) and example HPA (not applied) | `App/infra/AGENTS.md` |
 | `App/monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `App/monitoring/AGENTS.md` |
 | `App/governance/` | AI governance registry (systems, policies, evidence, controls, monitoring, audit, vendors) + compliance gate | `App/governance/AGENTS.md` |
 | `App/threat-model/` | STRIDE / OWASP / MITRE ATLAS threat model as code | `App/threat-model/AGENTS.md` |
-| `App/docs/` | Architecture, gaps, model card | `App/docs/AGENTS.md` |
+| `App/docs/` | Architecture, gaps, model card | `AGENTS.md` |
 | `App/tests/` | Pytest (agents + API e2e) | `App/tests/AGENTS.md` |
 | `App/plugins/` | System plugins (EFRIS, DTS) & connectors | `App/plugins/AGENTS.md` |
 | `App/configs/` | Prototype env | `App/configs/README.md` |
@@ -48,9 +48,10 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - A portal task in a tier that reads maps to a read-only tool, and asking to check never proposes a write. An account task is refused unless the sign-in is bound to the TIN it names (`check_subject_tin_ownership` fails closed) and has the consent the task names. A value on a confirmation card that the person did not type is `assumed`; what they typed beats what a page shows (ADR-0038).
 - Do not invent a live URA account API. Prototype defaults to `URA_ACCOUNT_API_MODE=mock` (`live=false`). Production rejects mock.
 - Production (`APP_ENV=production`) must start with `auth_required`, `multi_tenant`, `audit_ledger`, and `ticket_queue` on.
+- The working settings file is `App/.env`, beside `App/.env.example`. Nothing reads a `.env` at the repository root, and a Compose overlay goes in `App/infra/compose/`, listed after `App/docker-compose.yml` (ADR-0064 phase F).
 - Always push changes via dedicated feature/fix branches and open a PR; never push directly to `dev` or `main`.
 - Every open PR must resolve all CI check failures and all CodeRabbit AI review comments (`coderabbitai[bot]`) before merging (`gh pr checks` green + inline review findings addressed).
-- Every code, config, model, flag, route, or infrastructure change must update living documentation in the same PR per 2026 industry standards (ISO/IEC 42001 Clause 7.5, NIST AI RMF 1.0 `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, MADR 4.0 ADRs in `App/docs/adr/`, Diátaxis runbooks in `App/docs/runbooks/`, Model Cards in `App/governance/systems/ura-ai-chatbot/model_card.md`, and CycloneDX 1.6 AIBOM in `App/governance/systems/ura-ai-chatbot/manifest.yaml`; see `.claude/skills/living-docs-adr-runbooks-traceability/SKILL.md` and `.claude/skills/refresh-docs/SKILL.md`).
+- Every code, config, model, flag, route, or infrastructure change must update living documentation in the same PR per 2026 industry standards (ISO/IEC 42001 Clause 7.5, NIST AI RMF 1.0 `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, MADR 4.0 ADRs in `App/docs/adr/` and indexed in `App/docs/adr/README.md`, Diátaxis runbooks in `App/docs/runbooks/`, Model Cards in `App/governance/systems/ura-ai-chatbot/model_card.md`, and CycloneDX 1.6 AIBOM in `App/governance/systems/ura-ai-chatbot/manifest.yaml`; see `.claude/skills/living-docs-adr-runbooks-traceability/SKILL.md` and `.claude/skills/refresh-docs/SKILL.md`).
 - New FastAPI routes must land in `App/tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 - A new flag lands in `config/flags.py`, `App/docs/RAG_ARCHITECTURE.md`, and `App/.env.example`.
 - On sign-in, a guided workflow is adopted only from the anonymous session the request itself proves (`db.adopt_workflow_session`, ADR-0013). Never add candidate keys a caller could derive from a conversation id alone; "signed in" is decided per request, never read back from stored slots.

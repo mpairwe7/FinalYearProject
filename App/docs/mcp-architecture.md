@@ -197,7 +197,7 @@ on them without understanding our tool names.
 
 Every server is one `StatelessMCPServer` (`app/mcp/servers/wire.py`), so the
 wire rules and the authentication of the caller are the same everywhere.
-`App/docker-compose.mcp.yml` runs one container per server:
+`App/infra/compose/docker-compose.mcp.yml` runs one container per server:
 - **`mcp-tax-calculator`** (`:8931`): All statutory tax calculators and document auditing.
 - **`mcp-ura-account`** (`:8932`): High-risk read-only account profile and filing inquiry tools.
 - **`mcp-efris`** (`:8933`): EFRIS simulator — fiscal invoices, credit notes, stock.
@@ -207,7 +207,7 @@ wire rules and the authentication of the caller are the same everywhere.
 - **`mcp-ursb`** (`:8937`): URSB business-registry simulator.
 - **`mcp-bwims`** (`:8938`): Bonded-warehouse simulator.
 
-`App/docker-compose.connectors.yml` serves the six system connectors from a
+`App/infra/compose/docker-compose.connectors.yml` serves the six system connectors from a
 single `connectors` container instead (`python -m app.mcp.servers.gateway`,
 one endpoint per system on `:8930`).
 

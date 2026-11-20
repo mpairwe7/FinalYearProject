@@ -111,7 +111,7 @@ and the chain tries them first — but the first call to
 `sunbird._post` does not retry the same account. With only one account token
 configured (`SUNBIRD_API_TOKEN` unset, `SUNBIRD_FALLBACK_API_TOKEN` set) there
 is nothing to fail over to, so Luganda silently degrades to the English
-`en-KE-ChilembaNeural` edge-tts stand-in. `docker-compose.coverage-gpu.yml`
+`en-KE-ChilembaNeural` edge-tts stand-in. `infra/compose/docker-compose.coverage-gpu.yml`
 raises the timeout to 90 s for local runs; the real fix is the second token
 (issue #298). If `tts_voices` shows `en-KE-ChilembaNeural` for `lg`, the run
 measured the stand-in, not the product.
@@ -128,14 +128,14 @@ instead of WAV/PCM.
 
 ## Bringing up a local GPU stack to run the api/voice modes
 
-`App/docker-compose.coverage-gpu.yml` pins the two GPU consumers to specific
+`App/infra/compose/docker-compose.coverage-gpu.yml` pins the two GPU consumers to specific
 devices, which matters on a shared box. Pick idle GPUs first
 (`bash App/scripts/select_free_gpu.sh`).
 
 ```bash
 cd App
 SUNFLOWER_GPU_ID=4 API_GPU_ID=2 docker compose \
-  -f docker-compose.yml -f docker-compose.local-sunflower.yml -f docker-compose.coverage-gpu.yml \
+  -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml -f infra/compose/docker-compose.coverage-gpu.yml \
   up -d qdrant redis vllm api
 ```
 
@@ -148,8 +148,8 @@ single probe (`POST /v1/tts` should report `backend: edge_tts` or
 you are finished** — this is a shared machine:
 
 ```bash
-cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml \
-  -f docker-compose.coverage-gpu.yml down
+cd App && docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml \
+  -f infra/compose/docker-compose.coverage-gpu.yml down
 ```
 
 ## Floors, and how to change one

@@ -16,8 +16,8 @@ It aligns directly with the **enterprise BP workflow-engine architecture**:
 Run the Triton-served PP-OCRv6 profile:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-documents.yml \
-  -f docker-compose.ocr.yml --profile ocr up -d --build redis qdrant api ocr
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-documents.yml \
+  -f infra/compose/docker-compose.ocr.yml --profile ocr up -d --build redis qdrant api ocr
 ```
 
 Verify liveness and model readiness on the host:

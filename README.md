@@ -112,7 +112,7 @@ FinalYearProject/
 ├── App/Results/               # Metrics and reports
 ├── App/tests/                 # Test suite
 ├── App/docker-compose.yml          # Service orchestration (API + frontend + Qdrant + Redis)
-├── App/docker-compose.full.yml     # Overlay: the image-based, hardened variant of the same stack
+├── App/infra/compose/docker-compose.full.yml     # Overlay: the image-based, hardened variant of the same stack
 └── App/docs/                  # Documentation
 ```
 
@@ -349,7 +349,7 @@ See [App/ml/README.md](App/ml/README.md) for what's there and why.
 ## Local Development
 - Install Python deps with `uv pip install -r App/requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
-- API: build and run locally with `docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml up --build` (expects `app.main:app`). If a full stack from before ADR-0064 phase E is running, stop it first with `docker compose -p app down`, so no container stays on the old network. Qdrant runs as a first-class service via docker-compose with healthcheck.
+- API: build and run locally with `docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml up --build` (expects `app.main:app`). If a full stack from before ADR-0064 phase E is running, stop it first with `docker compose -p app down`, so no container stays on the old network. Qdrant runs as a first-class service via docker-compose with healthcheck.
 - LLM: Qwen3-8B downloads automatically on first request unless the Hugging Face cache is mounted offline. Set `LLM_LOAD_IN_4BIT=true` for NF4 4-bit loading, `LLM_DEVICE=cpu` for CPU-only inference, or `LLM_DEVICE=auto` for GPU auto-detection. Disable with `LLM_ENABLED=false` to fall back to FAQ lookup.
 
 ## Container Baseline
@@ -387,7 +387,7 @@ gh run list --workflow=ci-ml-pipeline.yml
 Start the full observability stack:
 
 ```bash
-docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile monitoring up -d
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml --profile monitoring up -d
 ```
 
 | Service | URL | Purpose |

@@ -8,8 +8,8 @@
 #
 #   export MCP_LINK_TOKEN=$(openssl rand -hex 32)
 #   docker compose -f docker-compose.yml \
-#     -f docker-compose.local-retrieval.yml -f docker-compose.local-sunflower.yml \
-#     -f docker-compose.gpu-salt.yml -f docker-compose.connectors.yml up -d
+#     -f infra/compose/docker-compose.local-retrieval.yml -f infra/compose/docker-compose.local-sunflower.yml \
+#     -f infra/compose/docker-compose.gpu-salt.yml -f infra/compose/docker-compose.connectors.yml up -d
 #
 # What this is: the connectors are SIMULATORS over the fixture databases in
 # ../data_store. The picker labels them "Demo data", every result says so,
@@ -22,7 +22,7 @@
 # unavailable — so `docker compose down` and friends still work without it.
 #
 # The six-container form of this, one server per system, is
-# ./docker-compose.mcp.yml. See App/docs/runbooks/enterprise-connectors-and-mcp.md.
+# ./infra/compose/docker-compose.mcp.yml. See App/docs/runbooks/enterprise-connectors-and-mcp.md.
 # ===========================================================================
 
 services:

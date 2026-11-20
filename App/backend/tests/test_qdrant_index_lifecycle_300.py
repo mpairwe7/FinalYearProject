@@ -158,7 +158,7 @@ def test_cpu_image_build_triggers_for_every_shipped_corpus_source() -> None:
 
 
 def test_local_compose_runs_the_staged_indexer_before_api() -> None:
-    compose = Path(__file__).resolve().parents[2] / "docker-compose.local-retrieval.yml"
+    compose = Path(__file__).resolve().parents[2] / "infra/compose/docker-compose.local-retrieval.yml"
     body = compose.read_text(encoding="utf-8")
 
     assert "qdrant-indexer:" in body

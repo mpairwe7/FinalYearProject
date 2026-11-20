@@ -9,6 +9,9 @@ Accepted, 2026-11-18. Carried out in four phases, one pull request each.
 - Phase C (done): move the root code and record folders under `App/`.
 - Phase D (done): move the root data, build and security files under `App/`, and
   remove the duplicate Trivy steps.
+- Phase E (done, 2026-11-19): merge the two Compose stacks into one base and one overlay.
+- Phase F (done, 2026-11-20): the working `.env` moves to `App/.env`, and the Compose
+  overlays move from `App/` to `App/infra/compose/`.
 
 ## Context and Problem Statement
 
@@ -126,7 +129,7 @@ Option 1, chosen by the service owner over the narrower option 2.
   `security-trivy.yml` already runs. `.gitignore` ignores `App/Model/*` except the
   three tracked files: `.gitkeep`, `README.md` and `bm25_state.json`. Compose in
   `App/` mounts the adapters from `./Model/adapters`. The full stack reads the root
-  `.env`.
+  `.env` (until phase F, below).
 
   Before the move, the Compose `postgres` service loses its committed default
   password (G672). GitGuardian reads a moved file as new and flagged it. The
@@ -186,6 +189,22 @@ Option 1, chosen by the service owner over the narrower option 2.
   May, and with it one Kiswahili FAQ row did not retrieve itself (G673). That is
   fixed in the scoring, and the acronym test runs with the state again. The image
   rebuilds its state from the corpus, so production was not affected.
+- The working settings file is `App/.env` (phase F, 2026-11-20). The templates had moved
+  in phase D and the file itself had not, so eight callers named the repository root:
+  the base stack's `env_file`, the backend's cloud settings (which read `.env` from
+  the working directory, so only when started at the root), `validate_env.py`, three
+  Space secret scripts and the ZAP job. Each now names `App/.env`. The root
+  `.dockerignore` excludes `**/.env`: a pattern there is anchored at the context root,
+  so `.env` alone would have left `App/.env` inside every build that starts at the root.
+  A checkout made before this phase must move its own file: `mv .env App/.env`.
+- `App/` holds one Compose file (phase F). The eleven overlays are in
+  `App/infra/compose/`, and a command lists them after the base:
+  `-f docker-compose.yml -f infra/compose/docker-compose.full.yml`. Compose reads the
+  paths of every file from the folder of the first one, so no path inside an overlay
+  changed. Two files that were not overlays are gone. `docker-compose.dev2.yml` served
+  a model that is in neither the model card nor the AIBOM, mounted a root folder that
+  phase C removed, and was named by nothing. `docker-compose.plugins.yml` held one
+  service, which the base now defines behind the `plugins` profile.
 
 ## Confirmation
 
@@ -215,3 +234,13 @@ Option 1, chosen by the service owner over the narrower option 2.
   has, and the pair must resolve to the hardened variant. That last test merges the two
   files with Docker Compose, and fails if an `!override` or `!reset` tag is dropped.
 - `App/tests/test_compose_build_paths.py` checks that every Compose build names a Dockerfile that exists. `docker compose config` does not check that. After phase D, four builds in `App/docker-compose.yml` and two overlays still named the root `Dockerfile`; they now name `App/Dockerfile`.
+- Phase F was checked the same way. What Compose resolves was recorded before and after
+  for 16 combinations: the base, the base with each overlay, and the four chains the
+  runbooks use. They differ in three things: the `api` service's `env_file` is
+  `App/.env`, the base defines `ura-plugins-server`, and its network exists when that
+  profile is on. With no profile the stack starts the same four services on the same
+  network. With a marker value in a scratch `App/.env`, Compose read it when started
+  from `App/`, from the root with `-f`, and from the root with `COMPOSE_FILE`.
+- `App/tests/test_compose_build_paths.py` holds the phase: no Compose file reads an env
+  file outside `App/`, the root build context excludes `.env` at any depth, the backend
+  names `App/.env`, and every build in an overlay still names a Dockerfile that exists.

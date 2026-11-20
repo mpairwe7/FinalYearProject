@@ -31,7 +31,7 @@ openssl rand -hex 32
 
 ## 2. Docker Compose Production
 
-The full stack is two files: `App/docker-compose.yml`, which defines the services, and the overlay `App/docker-compose.full.yml`, which makes them image-based and hardened. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.yml:App/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` alone is the source-built stack for local work and its overlays.) A full stack started before ADR-0064 phase E runs on the old `ura-network`: stop it once with `docker compose -p app down` before the first `up`. That needs no Compose file, stops the containers of every profile, removes the old network and keeps the volumes. It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
+The full stack is two files: `App/docker-compose.yml`, which defines the services, and the overlay `App/infra/compose/docker-compose.full.yml`, which makes them image-based and hardened. Run the commands in this guide from the repository root after `export COMPOSE_FILE=App/docker-compose.yml:App/infra/compose/docker-compose.full.yml`, which makes a bare `docker compose` mean that stack. (`App/docker-compose.yml` alone is the source-built stack for local work and its overlays.) A full stack started before ADR-0064 phase E runs on the old `ura-network`: stop it once with `docker compose -p app down` before the first `up`. That needs no Compose file, stops the containers of every profile, removes the old network and keeps the volumes. It has four services: `qdrant`, `api`, `frontend`, and `api-dev` (dev profile, ignored in production).
 
 ### Build and start
 
@@ -53,10 +53,10 @@ The API image installs `App/backend/requirements.lock.txt`, hash-checked (ADR-00
 
 ### Production overrides
 
-Create `docker-compose.prod.yml` alongside the existing file to tighten settings:
+Create `infra/compose/docker-compose.prod.yml` alongside the existing file to tighten settings:
 
 ```yaml
-# docker-compose.prod.yml
+# infra/compose/docker-compose.prod.yml
 services:
   api:
     environment:
@@ -90,7 +90,7 @@ services:
 Launch with overrides:
 
 ```bash
-docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml -f App/docker-compose.prod.yml up -d
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml -f App/infra/compose/docker-compose.prod.yml up -d
 ```
 
 Explicit `-f` options replace `COMPOSE_FILE`, so the command names all three files.
@@ -403,7 +403,7 @@ rebuild runbook for its status files, manual drill, retention, and Qdrant
 one-minor-version-at-a-time storage upgrade procedure.
 
 ```bash
-docker compose -f App/docker-compose.yml -f App/docker-compose.local-retrieval.yml \
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.local-retrieval.yml \
   exec qdrant-backup python -m app.vectorstore.qdrant_backup --restore-drill
 ```
 

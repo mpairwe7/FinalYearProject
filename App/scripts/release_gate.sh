@@ -55,10 +55,10 @@ printf 'Release gate: compose production overlay\n'
 for attempt in 1 2; do
   if command -v docker-compose >/dev/null 2>&1; then
     compose_ok=false
-    docker-compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production.example config --quiet && compose_ok=true
+    docker-compose -f docker-compose.yml -f infra/compose/docker-compose.prod.yml --env-file .env.production.example config --quiet && compose_ok=true
   else
     compose_ok=false
-    docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production.example config --quiet && compose_ok=true
+    docker compose -f docker-compose.yml -f infra/compose/docker-compose.prod.yml --env-file .env.production.example config --quiet && compose_ok=true
   fi
   if [[ "$compose_ok" == "true" ]]; then
     break

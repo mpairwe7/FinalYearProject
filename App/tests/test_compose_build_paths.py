@@ -4,7 +4,7 @@
 root Dockerfile to App/ left four builds pointing at a file that was gone, and
 nothing failed.
 
-`docker-compose.full.yml` used to define the base's four services a second
+`infra/compose/docker-compose.full.yml` used to define the base's four services a second
 time. It is now an overlay on `docker-compose.yml`, and the tests at the end
 keep it one.
 """
@@ -22,7 +22,8 @@ import pytest
 import yaml
 
 APP = Path(__file__).resolve().parents[1]
-COMPOSE_FILES = sorted(APP.glob("docker-compose*.yml"))
+OVERLAYS = APP / "infra" / "compose"
+COMPOSE_FILES = sorted(APP.glob("docker-compose*.yml")) + sorted(OVERLAYS.glob("docker-compose*.yml"))
 
 
 class _Loader(yaml.SafeLoader):
@@ -72,8 +73,8 @@ def test_the_dockerfile_of_every_build_exists(compose: str, service: str, contex
     assert target.is_file(), f"{compose}: service {service} builds from {target}, which does not exist"
 
 
-BASE, FULL = APP / "docker-compose.yml", APP / "docker-compose.full.yml"
-# `docker-compose.local-sunflower.yml` defines its own `vllm` on the base, and Compose would merge the two.
+BASE, FULL = APP / "docker-compose.yml", APP / "infra/compose/docker-compose.full.yml"
+# `infra/compose/docker-compose.local-sunflower.yml` defines its own `vllm` on the base, and Compose would merge the two.
 ONLY_IN_THE_OVERLAY = {"vllm"}
 
 

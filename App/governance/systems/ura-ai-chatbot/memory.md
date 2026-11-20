@@ -25,7 +25,7 @@ it keeps it, and who can read it. The code is in
   returns nothing.
 - **The switch.** `FLAG_MEMORY_ENABLED` decides whether personal memory facts
   reach the prompts at all. It is off in the code's registry, but
-  `App/docker-compose.prod.yml` turns it on unless the variable is set
+  `App/infra/compose/docker-compose.prod.yml` turns it on unless the variable is set
   (`${FLAG_MEMORY_ENABLED:-true}`).
 - **Erasure.** Withdrawing `personalization` consent calls
   `MemoryService.forget_user`, which clears working, episodic and semantic memory.

@@ -503,14 +503,14 @@ Both tiers above have now been brought up together with the rest of the
 stack (Redis, Qdrant, local Sunflower-14B-FP8 via vLLM), pinned to a single
 named GPU, and reached over the project's public ngrok tunnel — not just
 verified in isolation as in the two runs above. Full record, including the
-new `App/docker-compose.gpu-salt.yml` overlay and a real (not dummy-token)
+new `App/infra/compose/docker-compose.gpu-salt.yml` overlay and a real (not dummy-token)
 Spark-TTS-SALT `/v1/tts` request's timing under CPU fallback:
 `App/docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`.
 
 ### Both SALT tiers on GPU, end to end (2026-09-04)
 
 The CPU fallback the 2026-08-22 run accepted is gone. With `App/Dockerfile.gpu`'s
-matched cu128 torch/torchaudio pin, `docker-compose.gpu-salt.yml` runs
+matched cu128 torch/torchaudio pin, `infra/compose/docker-compose.gpu-salt.yml` runs
 Whisper-SALT, Spark-TTS-SALT, `bge-m3` and the reranker all on the pinned
 card. Brought up on GPU 7 and exercised over the public tunnel; full record in
 `App/docs/traceability/local-gpu-salt-ngrok-2026-09-04.md`.
