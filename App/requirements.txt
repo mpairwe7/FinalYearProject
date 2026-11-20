@@ -43,7 +43,7 @@ evaluate==0.4.6
 transformers==5.16.1
 accelerate==1.15.0
 torch>=2.13.0  # matches App/backend/requirements.txt's pin; <2.13 is flagged by SAST
-huggingface-hub==1.29.0
+huggingface-hub==2.2.0
 sentencepiece==0.2.2
 kagglehub==0.3.12
 openpyxl==3.1.5
@@ -74,7 +74,7 @@ beautifulsoup4>=4.12.0
 # `gTTS` is NOT here either, and unlike Coqui TTS it did not earn its own
 # split-out file: nothing in the tree imports it — the only `gtts` matches are
 # the substring inside `StreamingTTS`. Every published gTTS release through
-# 2.5.4 caps `click<8.2`, while huggingface-hub==1.29.0 (pinned above as part
+# 2.5.4 caps `click<8.2`, while huggingface-hub==2.2.0 (pinned above as part
 # of the transformers 5.x / CVE-2026-9856 cluster) requires `click>=8.4.2`, so
 # no version of the two can coexist. With both present this file did not
 # resolve at all, which is worse than it sounds: a `pip install -r` that never
@@ -126,7 +126,7 @@ datasketch==1.10.0
 # datasets 3.3.2 requires `pyarrow>=15.0.0` with no upper bound, so the
 # constraint noted above (datasets 4.x/5.x *forcing* pyarrow>=21) does not
 # run the other way and datasets stays put.
-pyarrow==23.0.1
+pyarrow==26.0.0
 pandera==0.33.1
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
