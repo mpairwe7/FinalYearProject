@@ -144,9 +144,7 @@ updates:
     cooldown:
       default-days: 7
       semver-major-days: 30
-    # Three, not two: a next pull request can wait for the blog's bump, and the two
-    # other groups still need a slot each.
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 2
     labels:
       - "dependencies"
       - "frontend"
