@@ -6,8 +6,10 @@ every start for about 8 hours while Hugging Face reported RUNNING (G371).
 
 The layer also edits app source at build time with ``assert old in text``. An ordinary change to
 one of those lines would pass every test here and then fail the Space's build in production, so
-these tests read the patch and check what it depends on. They parse it and never run it, and
-load the speech source it produces, because that is where a recording can leave the country.
+these tests read the patch and check what it depends on. They parse it and never run it.
+
+What the layer once pasted into the retriever and the speech service is repository code now, with
+its own tests (ADR-0068): ``test_cpu_lexical_reranker.py`` and ``test_gemini_audio_fallback.py``.
 """
 
 from __future__ import annotations
@@ -15,12 +17,8 @@ from __future__ import annotations
 import ast
 import base64
 import re
-import sys
-import types
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -77,7 +75,7 @@ PATCHED_LINES = _patched_lines()
 
 def test_the_patch_was_read() -> None:
     # Guards the parametrized test below, which would pass by running nothing.
-    assert len(PATCHED_LINES) >= 10
+    assert len(PATCHED_LINES) >= 8
 
 
 def test_the_cpu_reranker_is_the_repositorys_and_the_space_turns_it_on() -> None:
@@ -88,6 +86,16 @@ def test_the_cpu_reranker_is_the_repositorys_and_the_space_turns_it_on() -> None
     assert re.search(r"^\s*SPARSE_CPU_RERANKER=true\b", DOCKERFILE.read_text(encoding="utf-8"), re.M)
     retriever = (ROOT / "App" / "backend" / "app" / "rag" / "retriever.py").read_text(encoding="utf-8")
     assert "class _CpuLexicalReranker" in retriever
+
+
+def test_the_gemini_speech_fallback_is_the_repositorys_and_the_space_turns_it_on() -> None:
+    """The layer once inserted `_gemini_audio_transcribe` into the speech service, untraced, outside
+    the cloud deadline, and reporting a blocked response as silence (G698)."""
+    assert "speech_service.py" not in {source.name for source, _name, _text in PATCHED_LINES}
+    assert "_gemini_audio_transcribe" not in "".join(_patch_strings().values())
+    assert re.search(r"^\s*STT_FALLBACK_BACKEND=gemini\b", DOCKERFILE.read_text(encoding="utf-8"), re.M)
+    speech = (ROOT / "App" / "backend" / "app" / "speech" / "speech_service.py").read_text(encoding="utf-8")
+    assert "def _gemini_audio_transcribe" in speech
 
 
 @pytest.mark.parametrize(
@@ -108,230 +116,3 @@ def test_the_flag_that_needs_pipecat_ships_with_pipecat() -> None:
     installed = re.search(r'"(pipecat-ai\[[^"]+)"', dockerfile)
     assert installed, "the receptionist is switched on here and Pipecat is not installed: every call would be refused"
     assert installed.group(1) in RECEPTIONIST_REQUIREMENTS.read_text(encoding="utf-8")
-
-
-@pytest.fixture(scope="module")
-def built_speech():
-    """``speech/speech_service.py`` as the Space builds it, loaded beside the real one."""
-    sys.path.insert(0, str(ROOT / "App" / "backend"))
-    strings = _patch_strings()
-    source = (ROOT / "App" / "backend" / "app" / "speech/speech_service.py").read_text(encoding="utf-8")
-    for old, new in (("old_sp", "new_sp"), ("old_sp_2", "new_sp_2")):
-        source = source.replace(strings[old], strings[new], 1)
-    module = types.ModuleType("app.speech._speech_service_as_built")
-    module.__package__ = "app.speech"
-    sys.modules[module.__name__] = module
-    exec(compile(source, "speech/speech_service.py as built", "exec"), module.__dict__)  # noqa: S102 - our own source
-    yield module
-    del sys.modules[module.__name__]
-
-
-class _Answer:
-    def __init__(self, text: str = "what is the vat rate", status: int = 200) -> None:
-        self.text, self.status = text, status
-
-    def raise_for_status(self) -> None:
-        if self.status != 200:
-            raise RuntimeError(f"HTTP {self.status}")
-
-    def json(self) -> dict[str, Any]:
-        return {"candidates": [{"content": {"parts": [{"text": self.text}]}}]}
-
-
-@pytest.fixture
-def gemini_audio(built_speech, monkeypatch):
-    """Everything open, so each test closes the one gate it is about."""
-    from app.config.flags import flags
-    from app.providers import breakers, budget, gateway
-    from app.providers import config as cfg
-
-    sent: list[str] = []
-
-    def post(url: str, **_kwargs: Any) -> _Answer:
-        sent.append(url)
-        return _Answer()
-
-    monkeypatch.setenv("STT_FALLBACK_BACKEND", "gemini")
-    monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
-    monkeypatch.setattr(built_speech, "cloud_models_allowed", lambda: True)
-    monkeypatch.setattr(gateway, "cloud_models_allowed", lambda: True)
-    monkeypatch.setattr(cfg, "is_gemini_configured", lambda: True)
-    monkeypatch.setattr(budget, "try_consume_gemini_call", lambda: True)
-    monkeypatch.setattr(
-        cfg,
-        "get_cloud_settings",
-        lambda: types.SimpleNamespace(gemini_api_key=types.SimpleNamespace(get_secret_value=lambda: "test-key")),
-    )
-    monkeypatch.setattr("httpx.post", post)
-    breakers.GEMINI_BREAKER.record_success()
-    yield sent
-    breakers.GEMINI_BREAKER.record_success()
-
-
-def _transcribe(built_speech: Any, language: str | None) -> str | None:
-    return built_speech.SpeechModel._gemini_audio_transcribe(None, np.full(1600, 0.2), 16000, language)
-
-
-class TestRecordingsReachGeminiOnlyThroughItsPolicy:
-    """A recording is personal data leaving Uganda (G375)."""
-
-    def test_a_stated_english_clip_is_sent_once_opted_in(self, built_speech, gemini_audio) -> None:
-        assert _transcribe(built_speech, "en") == "what is the vat rate"
-        assert len(gemini_audio) == 1
-
-    def test_nothing_is_sent_without_opting_in(self, built_speech, gemini_audio, monkeypatch) -> None:
-        monkeypatch.setenv("STT_FALLBACK_BACKEND", "none")
-        assert _transcribe(built_speech, "en") is None
-        assert gemini_audio == []
-
-    def test_the_cloud_tier_flag_stops_it(self, built_speech, gemini_audio, monkeypatch) -> None:
-        from app.config.flags import flags
-
-        monkeypatch.setattr(flags, "is_enabled", lambda _name, **_kw: False)
-        assert _transcribe(built_speech, "en") is None
-        assert gemini_audio == []
-
-    def test_a_turn_barred_from_cloud_models_is_not_sent(self, built_speech, gemini_audio, monkeypatch) -> None:
-        # Sovereign mode and call turns, which run on local models only.
-        monkeypatch.setattr(built_speech, "cloud_models_allowed", lambda: False)
-        assert _transcribe(built_speech, "en") is None
-        assert gemini_audio == []
-
-    @pytest.mark.parametrize("language", ["lg", "nyn", "ach"])
-    def test_a_sunbird_language_is_never_sent(self, built_speech, gemini_audio, language) -> None:
-        assert _transcribe(built_speech, language) is None
-        assert gemini_audio == []
-
-    @pytest.mark.parametrize("language", [None, ""])
-    def test_a_clip_of_unknown_language_is_never_sent(self, built_speech, gemini_audio, language) -> None:
-        # gemini_allowed_for reads no language as English, and this could be Luganda.
-        assert _transcribe(built_speech, language) is None
-        assert gemini_audio == []
-
-    def test_a_spent_budget_stops_it(self, built_speech, gemini_audio, monkeypatch) -> None:
-        monkeypatch.setattr("app.providers.budget.try_consume_gemini_call", lambda: False)
-        assert _transcribe(built_speech, "en") is None
-        assert gemini_audio == []
-
-    def test_an_open_breaker_stops_it(self, built_speech, gemini_audio) -> None:
-        from app.providers import breakers
-
-        for _ in range(breakers.GEMINI_BREAKER.failure_threshold):
-            breakers.GEMINI_BREAKER.record_failure()
-        assert _transcribe(built_speech, "en") is None
-        assert gemini_audio == []
-
-    def test_a_failed_call_counts_against_the_breaker(self, built_speech, gemini_audio, monkeypatch) -> None:
-        from app.providers import breakers
-
-        monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Answer(status=500))
-        assert _transcribe(built_speech, "en") is None
-        assert breakers.GEMINI_BREAKER._failures == 1
-
-    def test_hearing_nothing_is_not_a_failure(self, built_speech, gemini_audio, monkeypatch) -> None:
-        monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Answer(text=""))
-        assert _transcribe(built_speech, "en") == ""
-
-    def test_multilingual_gemini_opt_in_allows_sunbird_locales_and_autodetect(
-        self, built_speech, gemini_audio, monkeypatch
-    ) -> None:
-        monkeypatch.setenv("STT_ALLOW_MULTILINGUAL_GEMINI", "true")
-        assert _transcribe(built_speech, "lg") == "what is the vat rate"
-        assert _transcribe(built_speech, None) == "what is the vat rate"
-        assert len(gemini_audio) == 2
-
-    def test_gemini_35_transcribe_audio_transcription_part_and_prompt_feedback_fallback(
-        self, built_speech, gemini_audio, monkeypatch
-    ) -> None:
-        calls: list[str] = []
-
-        class _TranscribeResp:
-            def __init__(self, payload: dict[str, Any]) -> None:
-                self._payload = payload
-
-            def raise_for_status(self) -> None:
-                pass
-
-            def json(self) -> dict[str, Any]:
-                return self._payload
-
-        def _fake_post(url: str, **_kw: Any) -> _TranscribeResp:
-            calls.append(url)
-            if len(calls) == 1:
-                return _TranscribeResp({"promptFeedback": {"blockReason": "OTHER"}})
-            return _TranscribeResp(
-                {
-                    "candidates": [
-                        {
-                            "content": {
-                                "parts": [
-                                    {"audioTranscription": {"text": "Omusolo gwa VAT guli ebitundu 18 ku buli kikumi."}}
-                                ]
-                            }
-                        }
-                    ]
-                }
-            )
-
-        monkeypatch.setattr("httpx.post", _fake_post)
-        assert _transcribe(built_speech, "en") == "Omusolo gwa VAT guli ebitundu 18 ku buli kikumi."
-        assert len(calls) == 2
-        assert "gemini-3.5-transcribe" in calls[0]
-        assert "gemini-2.5-flash" in calls[1]
-
-
-class _EveryTierDown:
-    """A SpeechModel with nothing to reach, shaped as in ``test_asr_no_speech.py``."""
-
-    enabled = True
-    _asr = None
-    _lang_det = None
-    _whisper_peft = None
-    _whisper_salt = None
-    _accent_detector = None
-    _whisper_adapters: dict[str, Any] = {}  # noqa: RUF012 - read only, as in the real model
-    _breakers: dict[str, Any] = {}  # noqa: RUF012 - read only, as in the real model
-    _executor = None
-
-    def __init__(self, built_speech: Any, samples: Any) -> None:
-        self._samples = samples
-        self._gemini_audio_transcribe = types.MethodType(built_speech.SpeechModel._gemini_audio_transcribe, self)
-
-    def _transcribe_whisper_peft(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    def _transcribe_faster_whisper(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    def _cf_whisper_transcribe(self, *_args: Any, **_kwargs: Any) -> str:
-        return ""
-
-    def _decode_audio_bytes(self, *_args: Any, **_kwargs: Any) -> Any:
-        return self._samples
-
-
-class TestAnOutageStaysAnOutage:
-    @pytest.fixture(autouse=True)
-    def _sunbird_down(self, monkeypatch) -> None:
-        monkeypatch.setattr("app.sunbird.is_available", lambda: False)
-
-    def _chain(self, built_speech: Any, samples: Any) -> Any:
-        model = _EveryTierDown(built_speech, samples)
-        return built_speech.SpeechModel._transcribe_chain(model, b"\x00\x00" * 1600, 16000, "en")
-
-    def test_a_silent_clip_is_not_sent_and_does_not_hide_it(self, built_speech, gemini_audio) -> None:
-        result = self._chain(built_speech, np.zeros(1600))
-        assert result.backend == "unavailable"
-        assert "All ASR backends failed" in (result.error or "")
-        assert gemini_audio == []
-
-    def test_gemini_hearing_nothing_is_not_a_failure(self, built_speech, gemini_audio, monkeypatch) -> None:
-        monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Answer(text=""))
-        result = self._chain(built_speech, np.full(1600, 0.2))
-        assert result.backend == "gemini_audio"
-        assert result.error is None
-
-    def test_speech_reaches_gemini_once_every_other_tier_has_failed(self, built_speech, gemini_audio) -> None:
-        result = self._chain(built_speech, np.full(1600, 0.2))
-        assert result.text == "what is the vat rate"
-        assert result.backend == "gemini_audio"
