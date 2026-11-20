@@ -30,12 +30,12 @@ class ClearanceDocumentsPinTests(unittest.TestCase):
         cls.model = ChatModel.__new__(ChatModel)
         cls.model._faq_index, _ = _load_faq_data(_DATA_DIR)
 
-    def _hits(self, query: str) -> list[dict]:
+    def _hits(self, query: str, locale: str | None = None) -> list[dict]:
         """What a turn keeps of the pin: two rows, as both callers ask, after the binding filter."""
         from app.rag.pipeline import _filter_unbound_faq_hits, _prepend_unique, _promote_equivalent_faq_hits
 
         hits: list[dict] = []
-        _prepend_unique(hits, self.model._priority_faq_hits(query, top_k=2), set())
+        _prepend_unique(hits, self.model._priority_faq_hits(query, top_k=2, locale=locale), set())
         return _promote_equivalent_faq_hits(query, _filter_unbound_faq_hits(query, hits))
 
     def test_an_english_question_gets_the_list_of_documents(self):
@@ -64,6 +64,28 @@ class ClearanceDocumentsPinTests(unittest.TestCase):
         ):
             with self.subTest(query=query):
                 self.assertEqual(self._hits(query)[0]["question"], row)
+
+    def test_an_english_rendering_of_the_question_gets_the_row_in_the_answer_language(self):
+        """On the Space, "Nyaraka gani ninahitaji kusafisha gari langu forodhani?" was detected as
+        Kiswahili and answered with the English list: the pin saw the message rendered in English."""
+        rendered = "What documents do I need to clear my car at customs?"
+        self.assertEqual(self._hits(rendered, locale="sw")[0]["question"], KISWAHILI_ROW)
+        self.assertEqual(self._hits(rendered, locale="lg")[0]["question"], LUGANDA_ROW)
+        for locale in (None, "en", "nyn"):
+            with self.subTest(locale=locale):
+                self.assertEqual(self._hits(rendered, locale=locale)[0]["question"], POINT_OF_ENTRY)
+        self.assertEqual(self._hits(LUGANDA_ROW, locale="en")[0]["question"], LUGANDA_ROW)
+
+    def test_the_locale_changes_nothing_for_any_other_question(self):
+        for query in (
+            "What documents do I need to license my imported car after clearing customs?",
+            "How do I file my annual tax returns?",
+            "What is the import duty on a used car?",
+        ):
+            with self.subTest(query=query):
+                plain = [h["question"] for h in self._hits(query)]
+                for locale in ("sw", "lg", "en"):
+                    self.assertEqual([h["question"] for h in self._hits(query, locale=locale)], plain)
 
     def test_a_question_with_any_other_word_is_read_as_before(self):
         """Registration after customs got the registration procedure from the old pin, and still

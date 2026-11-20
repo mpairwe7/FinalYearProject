@@ -582,6 +582,8 @@ _CLEARANCE_QUESTION_WORDS: dict[str, frozenset[str]] = {
     "nyaraka": frozenset("ni nyaraka gani zinahitajika zinazohitajika ninahitaji kusafisha gari langu lililoagizwa katika kwa forodha forodhani".split()),
 }
 _WORD_RE = re.compile(r"[a-z']+")
+# The word for "documents" in each answer language that has its own row.
+_DOCUMENTS_WORD_BY_LOCALE = {"lg": "biwandiiko", "sw": "nyaraka"}
 
 
 def _plain_clearance_documents_question(query: str) -> str | None:
@@ -7276,7 +7278,7 @@ class ChatModel:
         hits = apply_precedence(graph_hits[0], hits)
         return rrf_fuse_ranked_lists(hits, graph_hits), True
 
-    def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
+    def _priority_faq_hits(self, query: str, *, top_k: int, locale: str | None = None) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
         if _VANITY_PLATE_RE.search(query):
             candidates = []
@@ -7404,7 +7406,10 @@ class ChatModel:
             candidates = []
             asked = _plain_clearance_documents_question(query)
             if asked:
-                # The rows that answer it, the asker's language first.
+                # The rows that answer it, the answer language first. The retrieval query can be
+                # an English rendering of a Luganda or Kiswahili message, so the turn's locale
+                # decides when it has a row of its own.
+                asked = _DOCUMENTS_WORD_BY_LOCALE.get((locale or "").lower(), asked)
                 for tag in ("documents_point_of_entry", "customs_valuation", "advance_tax_transport"):
                     for entry in self._faq_index.get(tag, []):
                         if _CLEARANCE_DOCS_ROW_RE.search(entry["question"]):
@@ -12626,7 +12631,7 @@ class ChatModel:
                         binding_query=binding_query,
                         locale=locale,
                     )
-                    priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
+                    priority_hits = self._priority_faq_hits(retrieval_query, top_k=2, locale=locale) or self._priority_faq_hits(binding_query, top_k=2, locale=locale)
                     hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
                     if graph_fused:
                         retrieval_mode = "graph"
@@ -14680,7 +14685,7 @@ class ChatModel:
             hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
             if graph_fused:
                 retrieval_mode = "graph"
-            priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
+            priority_hits = self._priority_faq_hits(retrieval_query, top_k=2, locale=locale) or self._priority_faq_hits(binding_query, top_k=2, locale=locale)
             seen_texts = {h.get("text", "")[:80] for h in hits}
             if _prepend_unique(hits, priority_hits, seen_texts):
                 retrieval_mode = "faq_priority"
