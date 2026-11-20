@@ -21,7 +21,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 | [Monitoring & Observability](App/docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](App/docs/data-schema-and-eval.md) | Database models and evaluation criteria |
 | [Security Policy](.github/SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
-| [Agent repo map](AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `App/evals/`, `App/infra/`) |
+| [Agent repo map](App/AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `App/evals/`, `App/infra/`) |
 
 ## Pipeline Overview
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
@@ -35,8 +35,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 
 ```
 FinalYearProject/
-├── AGENTS.md              # Agent-monorepo router (imports still live under App/)
-├── CLAUDE.md              # Points coding agents at AGENTS.md
+├── App/AGENTS.md              # Router for coding agents; a nested guide sits beside each package
 ├── App/scripts/prototype.sh   # load demo defaults + print seed command
 ├── App/evals/                 # Eval runners + preference export
 ├── App/infra/                 # K8s stubs (not applied)

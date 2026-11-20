@@ -199,13 +199,35 @@ Option 1, chosen by the service owner over the narrower option 2.
   `.dockerignore` excludes `**/.env`: a pattern there is anchored at the context root,
   so `.env` alone would have left `App/.env` inside every build that starts at the root.
   A checkout made before this phase must move its own file: `mv .env App/.env`.
+- `App/.env` is now also the file Compose fills `${NAME}` from, in the base and in every
+  overlay. Compose reads the `.env` in the folder of the first file for that, and while
+  the settings file sat at the root it was only the `api` service's `env_file`. So a
+  value in the file now wins over a default written as `${NAME:-default}`, where before
+  the default won. That is what the documents already assumed when they say to put
+  `METRICS_TOKEN` or `POSTGRES_PASSWORD` in `.env`. An independent check of this phase
+  found it: the first comparison had used an empty file. Five values that define a
+  stack are therefore written out and no longer read from the file: the collector
+  address and JSON logs in the full overlay, the two local translation backends in the
+  GPU overlay, and `SOVEREIGN_MODE=true` in the production overlay. The file's values
+  are for a process on the host, and read into those stacks they would point the
+  container at `localhost`, turn a cloud leg back on, or switch hardening off.
+- Agent and editor files leave the repository root. `AGENTS.md` moves to
+  `App/AGENTS.md` and stays the router the governance test reads. `CLAUDE.md`,
+  `.claude/` and `.vscode/` are untracked and ignored, at the owner's request, so the
+  three project skills are no longer in review and the compliance gate no longer lists
+  one of them. A root `AGENTS.md` or `CLAUDE.md` on a developer's machine is a local
+  pointer to `App/AGENTS.md`.
+  Git removes a file from the working tree when a checkout moves to a commit that no
+  longer tracks it, so a checkout that wants its copies back restores them once:
+  `git archive 06ecc9a3 CLAUDE.md .claude .vscode | tar -x`.
 - `App/` holds one Compose file (phase F). The eleven overlays are in
   `App/infra/compose/`, and a command lists them after the base:
   `-f docker-compose.yml -f infra/compose/docker-compose.full.yml`. Compose reads the
   paths of every file from the folder of the first one, so no path inside an overlay
   changed. Two files that were not overlays are gone. `docker-compose.dev2.yml` served
   a model that is in neither the model card nor the AIBOM, mounted a root folder that
-  phase C removed, and was named by nothing. `docker-compose.plugins.yml` held one
+  phase C removed, and no command, workflow or test named it. One runbook sentence
+  mentioned it as a stack that might be left running. `docker-compose.plugins.yml` held one
   service, which the base now defines behind the `plugins` profile.
 
 ## Confirmation
@@ -246,3 +268,10 @@ Option 1, chosen by the service owner over the narrower option 2.
 - `App/tests/test_compose_build_paths.py` holds the phase: no Compose file reads an env
   file outside `App/`, the root build context excludes `.env` at any depth, the backend
   names `App/.env`, and every build in an overlay still names a Dockerfile that exists.
+- The comparison was repeated with `App/.env.example` standing in as a filled settings
+  file. After the five values were written out, the base, the GPU chain and the
+  connector and MCP overlays resolve the same with or without it. The full overlay
+  differs in three values an operator is meant to set: the frontend's
+  `NEXT_PUBLIC_API_URL` build argument and the Hugging Face token passed to vLLM under
+  two names. `test_compose_build_paths.py` fails if one of the five is read from the
+  file again, or if an agent or editor file is tracked at the root.

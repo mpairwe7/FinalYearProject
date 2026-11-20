@@ -2,7 +2,7 @@
 
 Enforces the repository's structural invariants in CI (`pytest App/tests/`):
 1. Hierarchical `AGENTS.md` Router Integrity: every path and nested guide in the
-   root `AGENTS.md` layout table exists on disk and is non-empty.
+   `App/AGENTS.md` layout table exists on disk and is non-empty.
 2. Unidirectional Layer DAG (Strict Package Boundaries):
    - `App/ml/` never imports `app.*` or `plugins.*`
    - `App/plugins/` never imports `app.*`
@@ -49,8 +49,8 @@ def _top_level_imports(py_file: Path) -> set[str]:
 
 
 def test_root_agents_md_router_table_resolves_every_path_and_guide() -> None:
-    """Every row in root AGENTS.md Layout table must point to an existing path and guide."""
-    agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    """Every row in the App/AGENTS.md Layout table must point to an existing path and guide."""
+    agents_md = (REPO_ROOT / "App" / "AGENTS.md").read_text(encoding="utf-8")
     row_re = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|$", re.M)
     rows = row_re.findall(agents_md)
     # 13 since the README-only pointer folders (agents/, apps/, packages/, prompts/, skills/) were removed.

@@ -155,7 +155,7 @@ PYTHONPATH=App/backend python3 -m pytest \
   App/backend/tests/test_statutory_projection.py -q
 ```
 
-Run `pytest App/tests/` as well before pushing. The command in `AGENTS.md`
+Run `pytest App/tests/` as well before pushing. The command in `App/AGENTS.md`
 (`App/backend/tests App/tests/agents App/tests/chaos`) does not cover the whole
 `App/tests/` tree, which CI does — a duplicate assertion living there is how a
 green local run reached a red **Lint & Unit Tests**.

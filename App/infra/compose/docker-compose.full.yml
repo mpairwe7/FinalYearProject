@@ -95,8 +95,10 @@ services:
       # Telemetry (App/docs/MONITORING.md): OTLP goes to the monitoring profile's
       # Collector when OTEL_ENABLED=true; METRICS_TOKEN comes from .env.
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
-      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Written out, not read from App/.env: that file's values are for a process on the
+      # host (localhost, text logs), and this container reaches the collector by service name.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - LOG_FORMAT=json
     read_only: true
     # Owned by the image's appuser (10001). A bare tmpfs entry mounts root:root
     # 0755 over the image's appuser-owned directory, so the API — which runs as

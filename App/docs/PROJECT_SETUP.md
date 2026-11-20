@@ -90,7 +90,7 @@ This installs 4-layer defence-in-depth secret scanning (see [.github/SECURITY.md
 cp App/.env.example App/.env
 
 # Edit with your credentials
-nano .env
+nano App/.env
 ```
 
 Required environment variables:

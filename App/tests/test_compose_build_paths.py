@@ -173,3 +173,28 @@ def test_the_backend_reads_app_env_from_any_working_directory() -> None:
     from app.providers.config import ENV_FILE
 
     assert ENV_FILE == APP / ".env"
+
+
+def test_a_value_that_defines_a_stack_is_not_read_from_the_settings_file() -> None:
+    """Compose fills `${NAME}` from the `.env` beside the base file, which is now the working
+    settings file. Its values are for a process on the host. Read into these stacks they would
+    point the container at localhost, turn a cloud leg back on, or switch production hardening off."""
+    written_out = {
+        "full": ("OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317", "LOG_FORMAT=json"),
+        "gpu-salt": ("RETRIEVAL_MT_BACKEND=local", "REPLY_MT_BACKEND=local"),
+        "prod": ("SOVEREIGN_MODE=true",),
+    }
+    for overlay, entries in written_out.items():
+        environment = _services(OVERLAYS / f"docker-compose.{overlay}.yml")["api"]["environment"]
+        for entry in entries:
+            assert entry in environment, f"{overlay}: {entry.split('=')[0]} is not written out"
+
+
+def test_no_agent_or_editor_file_is_tracked_at_the_repository_root() -> None:
+    """The repository's guide for agents is App/AGENTS.md. Root copies are local pointers."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".claude", ".cursor", ".codex", ".vscode"],
+        cwd=APP.parent, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert tracked == []
+    assert (APP / "AGENTS.md").is_file()

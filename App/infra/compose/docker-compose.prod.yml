@@ -62,7 +62,8 @@ services:
       - LLM_SERIALIZE_LOCAL_GENERATION=true
       - STORE_RAW_PROMPTS=false
       - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - SOVEREIGN_MODE=${SOVEREIGN_MODE:-true}
+      # Written out: a development settings file must not switch production hardening off.
+      - SOVEREIGN_MODE=true
     logging:
       driver: json-file
       options:

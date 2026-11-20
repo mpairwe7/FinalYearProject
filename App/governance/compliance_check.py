@@ -85,7 +85,7 @@ REQUIRED_FILES = [
     "App/backend/app/ai_disclosure.py",
     "App/ml/configs/quality_baseline.json",
     # Monorepo standardization & hierarchical agent governance (G208)
-    "AGENTS.md",
+    "App/AGENTS.md",
     "App/ml/AGENTS.md",
     "App/monitoring/AGENTS.md",
     "App/threat-model/AGENTS.md",
@@ -94,7 +94,6 @@ REQUIRED_FILES = [
     "App/docs/adr/README.md",
     "App/docs/adr/0001-monorepo-layer-dag-and-agent-governance.md",
     "App/docs/adr/0002-five-locale-multimodal-rag-and-cxp-operating-hours.md",
-    ".claude/skills/living-docs-adr-runbooks-traceability/SKILL.md",
 ]
 
 # Content keywords that MUST appear in specific files.

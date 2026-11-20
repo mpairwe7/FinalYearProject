@@ -833,7 +833,7 @@ still resident, and also when Docker cannot be queried, so a failed lookup is
 never reported as clean. It covers what a plain `docker compose down` misses:
 
 - profile-gated services (`orpheus-tts` needs `--profile multilingual`);
-- orphan containers from other compose chains (`ura-app-connectors`, the dev2 stack);
+- orphan containers from other compose chains (`ura-app-connectors`, or a `dev2` stack left running from before that file was removed);
 - host processes started from agent scratchpad worktrees.
 
 Containers are matched by their compose working-dir label (`~/Mpairwe7`), not by
