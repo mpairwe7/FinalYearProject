@@ -61,19 +61,24 @@ updates:
       - "automated"
     commit-message:
       prefix: "deps(backend)"
+    # App/requirements.txt pins these exactly, and CI installs it with the production
+    # lock as constraints, so they must move in the root list and the backend files in
+    # one PR. The /App job edits both; moved here alone they broke CI's install (#785).
+    # pydantic-core is pinned exactly by pydantic; the OpenTelemetry family moves together.
+    ignore:
+      - dependency-name: "fastapi"
+      - dependency-name: "uvicorn"
+      - dependency-name: "pydantic"
+      - dependency-name: "pydantic-core"
+      - dependency-name: "openpyxl"
+      - dependency-name: "opentelemetry-*"
+      # pipecat-ai 1.15.0 requires soundfile<0.14.
+      - dependency-name: "soundfile"
+        versions: [">=0.14"]
     groups:
       minor-and-patch:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
-      fastapi-stack:
-        patterns:
-          - "fastapi*"
-          - "uvicorn*"
-          - "starlette*"
-          - "pydantic*"
         update-types:
           - "minor"
           - "patch"
@@ -99,7 +104,23 @@ updates:
       - "automated"
     commit-message:
       prefix: "deps(python)"
+    # This job also edits the backend and crawler files under /App, so it owns the
+    # packages the root list pins exactly (see the /App/backend entry).
+    ignore:
+      # pipecat-ai 1.15.0 requires soundfile<0.14.
+      - dependency-name: "soundfile"
+        versions: [">=0.14"]
     groups:
+      # The first group whose patterns match takes the update.
+      fastapi-stack:
+        patterns:
+          - "fastapi*"
+          - "uvicorn*"
+          - "starlette*"
+          - "pydantic*"
+        update-types:
+          - "minor"
+          - "patch"
       minor-and-patch:
         patterns:
           - "*"
