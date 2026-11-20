@@ -12,7 +12,7 @@ slowapi>=0.1.10
 limits[redis]>=3.13
 
 # Distributed semantic cache + analytics backends (opt-in)
-redis>=5.0.0
+redis>=8.1.0
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.3.1
 
