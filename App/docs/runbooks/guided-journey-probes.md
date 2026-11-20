@@ -118,8 +118,8 @@ cd <branch checkout> && docker build -q -f App/Dockerfile.gpu -t app-api:gpu .
 # 3. recreate only the api, from the MAIN checkout, same GPU pinning as the stack
 cd ~/Mpairwe7/FinalYearProject/App
 GPU_ID=2 VLLM_GPU_ID=5 SUNFLOWER_GPU_ID=5 docker compose \
-  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
-  -f docker-compose.local-sunflower.yml -f docker-compose.gpu-salt.yml \
+  -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
+  -f infra/compose/docker-compose.local-sunflower.yml -f infra/compose/docker-compose.gpu-salt.yml \
   up -d --no-deps --no-build api
 ```
 

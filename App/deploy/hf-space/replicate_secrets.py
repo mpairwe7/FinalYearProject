@@ -15,7 +15,7 @@ import json, os, ssl, urllib.request, urllib.error
 
 REPO = "landwind22/ura-chatbot"
 SPACE_URL = "https://landwind22-ura-chatbot.hf.space"
-ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))  # repo-root .env
+ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))  # App/.env
 CC_APP = "b01219c6-9555-41e2-84c3-f15d764fb938"
 APPHOST = "ura-chatbot-6318a1b5.renu-01.cranecloud.io"   # valid-cert host (fallback routing)
 

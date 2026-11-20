@@ -801,9 +801,9 @@ they authorize room entry, not an active participant's maximum call duration.
 ```bash
 cd App && GPU_ID=2 VLLM_GPU_ID=5 ORPHEUS_GPU_ID=4 docker compose \
   -f docker-compose.yml \
-  -f docker-compose.local-retrieval.yml \
-  -f docker-compose.local-sunflower.yml \
-  -f docker-compose.gpu-salt.yml \
+  -f infra/compose/docker-compose.local-retrieval.yml \
+  -f infra/compose/docker-compose.local-sunflower.yml \
+  -f infra/compose/docker-compose.gpu-salt.yml \
   --profile multilingual up -d --build
 ```
 
@@ -833,7 +833,7 @@ still resident, and also when Docker cannot be queried, so a failed lookup is
 never reported as clean. It covers what a plain `docker compose down` misses:
 
 - profile-gated services (`orpheus-tts` needs `--profile multilingual`);
-- orphan containers from other compose chains (`ura-app-connectors`, the dev2 stack);
+- orphan containers from other compose chains (`ura-app-connectors`, or a `dev2` stack left running from before that file was removed);
 - host processes started from agent scratchpad worktrees.
 
 Containers are matched by their compose working-dir label (`~/Mpairwe7`), not by
@@ -1140,8 +1140,8 @@ first; the GPU overlay already sets `ORPHEUS_TTS_LANGUAGES=lg,sw,en`):
 ```bash
 cd App && GPU_ID=4 ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
   FLAG_RECEPTIONIST_LANGUAGE_DETECTION=true docker compose \
-  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
-  -f docker-compose.local-sunflower.yml -f docker-compose.gpu-salt.yml \
+  -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
+  -f infra/compose/docker-compose.local-sunflower.yml -f infra/compose/docker-compose.gpu-salt.yml \
   --profile multilingual up -d --build
 docker logs ura-app-orpheus-tts 2>&1 | grep "sidecar ready"
 docker logs <api> 2>&1 | grep "Receptionist phrase pre-warm"   # {'en': {...}, 'sw': {...}, 'lg': {'cached': N, 'failed': 0}}

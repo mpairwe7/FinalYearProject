@@ -21,7 +21,7 @@ GRAFANA_PASSWORD=$(openssl rand -base64 24)
 ALERTMANAGER_WEBHOOK_URL=https://<your chat relay / ntfy topic / incident webhook>
 OTEL_ENABLED=true                                   # traces + OTLP logs
 
-docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile monitoring up -d            # + --profile monitoring-gpu for DCGM
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml --profile monitoring up -d            # + --profile monitoring-gpu for DCGM
 ```
 
 | UI | Address (bound to 127.0.0.1 — tunnel or proxy with auth to reach it) |
