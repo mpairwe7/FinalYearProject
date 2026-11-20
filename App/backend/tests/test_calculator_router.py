@@ -913,10 +913,12 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
     """"What documents are required to clear an imported vehicle at customs?" was answered
     "The common external tariff for finished goods is 25%" on the live Space (G700).
 
-    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Six
-    versions of the fix changed that reading, and each lost real answers and was failed by an
-    independent replay. The reading is now left alone. The general tariff is withheld from one
-    closed shape, a plain paperwork question, and every case those replays found is held here.
+    "are ... clear" read as an allowance question, like "Can I clear it duty-free?". Seven
+    versions of the fix each lost real answers and were failed by an independent replay, because
+    each tried to tell from words whether the rest of the message asked for a rate. The reading
+    is now left alone, and the rest of the message is not read at all: the general tariff is
+    withheld only when the whole message is one plain paperwork question. Every case those
+    replays found is held here.
     """
 
     def _plans(self, cases) -> None:
@@ -935,7 +937,8 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
             "What documents are required to clear an imported vehicle at customs?",
             "what documents are required to clear an imported vehicle at customs",
             "Hello! What documents are required to clear an imported vehicle at customs?",
-            "I imported a car. What documents are required to clear it at customs?",
+            "Good morning, what documents are required to clear an imported vehicle at customs?",
+            "Webale. What documents are required to clear an imported vehicle at customs?",
             "What documentation is required to clear an imported vehicle at customs?",
             "What certificates are required to clear an imported vehicle at customs?",
             "Which documents are required to clear an imported car at customs?",
@@ -1034,10 +1037,15 @@ class DocumentsQuestionIsNotARateQuestionTests(unittest.TestCase):
             )
         )
 
-    def test_a_rate_question_before_the_paperwork_question_is_read_as_before(self) -> None:
-        """Version six looked only at what followed the paperwork question."""
+    def test_anything_but_a_greeting_before_the_paperwork_question_is_read_as_before(self) -> None:
+        """Version six looked only at what followed the paperwork question. Version seven looked
+        before it for a charge word, and "Are imported cars dutiable?" has none."""
         self._plans(
             (
+                ("Are imported cars dutiable? What documents are required to clear one at customs?", "customs_duty_common"),
+                ("Do I pay 25% on a car? What documents are required to clear it at customs?", "customs_duty_common"),
+                ("I need the percentage for imported cars. What documents are required to clear one at customs?", "customs_duty_common"),
+                ("I imported a car. What documents are required to clear it at customs?", "customs_duty_common"),
                 ("How much is the duty on beer? What documents are required to import it?", "excise_duty_beer_malt"),
                 ("What is the VAT on imported goods? What documents are required to clear them?", "vat_standard"),
                 ("Tell me the import duty on cars. What documents are required to clear one?", "customs_duty_common"),
