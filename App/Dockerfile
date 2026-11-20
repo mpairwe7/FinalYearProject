@@ -10,13 +10,13 @@
 # -----------------------------------------------------------------------------
 # uv comes from its own named stage, pinned by tag and digest, so the pin is a
 # FROM line Dependabot can see rather than a COPY --from=<image> it cannot.
-FROM ghcr.io/astral-sh/uv:0.7.22@sha256:629240833dd25d03949509fc01ceff56ae74f5e5f0fd264da634dd2f70e9cc70 AS uv-binary
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv-binary
 
 # Literal, patch-pinned base image: Dependabot's docker updater bumps FROM
 # lines but cannot see an ARG default, which is how this sat on 3.11.11
 # (Debian 12.10, OpenSSL 3.0.15) with 4 critical and 42 high fixable OS
 # findings in the Trivy image scan.
-FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS builder
+FROM python:3.15.2-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9 AS builder
 
 # Install uv for fast dependency resolution
 COPY --from=uv-binary /uv /usr/local/bin/uv
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------
-FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
+FROM python:3.15.2-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9 AS runtime
 
 # checkov:skip=CKV_DOCKER_9:apt below is a package upgraded for CVE-2026-109518; the command is apt-get
 # Keep OS packages current with bookworm-security errata (fixes perl-base,
