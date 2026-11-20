@@ -1,7 +1,7 @@
 # Core API backend
-fastapi==0.141.1
-uvicorn[standard]==0.52.4
-pydantic==2.13.5
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
 slowapi>=0.1.9
 limits[redis]>=3.13
 sse-starlette>=3.4.6
