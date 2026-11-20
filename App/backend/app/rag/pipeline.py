@@ -560,6 +560,41 @@ _CUSTOMS_CLEARANCE_DOCS_RE = re.compile(
     r"|\b(?:what\s+documents|biwandiiko\s+ki|nyaraka\s+gani)\b.*\b(?:customs|forodha)\b",
     re.IGNORECASE,
 )
+# The rows that answer it, by their own question: the list for goods at the point of entry, the
+# list the processing centre asks for, and the Luganda and Kiswahili rows for a vehicle.
+_CLEARANCE_DOCS_ROW_RE = re.compile(
+    r"\b(?:documents|biwandiiko|nyaraka)\b.*\b(?:point\s+of\s+entry\s+for\s+goods|for\s+clearance|okuyisa|kusafisha)\b",
+    re.IGNORECASE,
+)
+# Every word a message may hold and still be only that question, keyed by its word for
+# "documents". Any other word means "read it as before": a question about registration, plates
+# or a logbook after customs gets the registration procedure, and no list of such words is complete.
+_CLEARANCE_QUESTION_WORDS: dict[str, frozenset[str]] = {
+    "documents": frozenset(
+        "hello hi hey dear sir madam please kindly good morning afternoon evening "
+        "what which are is the do does i we you one need needs needed require requires required necessary "
+        "mandatory must have should can could would will to for of in at through when a an my our "
+        "documents clear clearing clearance import importing imported bring "
+        "vehicle vehicles car cars motor motorcycle motorcycles goods cargo used new "
+        "customs uganda ura border".split()
+    ),
+    "biwandiiko": frozenset("biwandiiko ki ebyetaagisa byetaagisa bye nneetaaga neetaaga okuyisa emmotoka yange mu ku forodha".split()),
+    "nyaraka": frozenset("ni nyaraka gani zinahitajika zinazohitajika ninahitaji kusafisha gari langu lililoagizwa katika kwa forodha forodhani".split()),
+}
+_WORD_RE = re.compile(r"[a-z']+")
+
+
+def _plain_clearance_documents_question(query: str) -> str | None:
+    """The message's word for "documents" when the whole message is the clearance question, else None."""
+    if not query.isascii():
+        return None
+    words = _WORD_RE.findall(query.lower())
+    asked = [word for word in words if word in _CLEARANCE_QUESTION_WORDS]
+    if len(asked) != 1 or not all(word in _CLEARANCE_QUESTION_WORDS[asked[0]] for word in words):
+        return None
+    return asked[0]
+
+
 _PRN_GENERATION_RE = re.compile(
     r"\b(?:prn|payment\s+slip|payment\s+registration\s+number)\b",
     re.IGNORECASE,
@@ -7367,14 +7402,27 @@ class ChatModel:
 
         if _CUSTOMS_CLEARANCE_DOCS_RE.search(query):
             candidates = []
-            for tag in ("advance_tax_transport", "customs_valuation"):
-                for entry in self._faq_index.get(tag, []):
-                    text = f"{entry['question']} {entry['answer']}".lower()
-                    if "bill of lading" in text or "ebiwandiiko ebyetaagisa" in text or "nyaraka zinazohitajika" in text:
-                        enriched = dict(entry)
-                        enriched["tag"] = tag
-                        enriched["_overlap"] = "99"
-                        candidates.append(enriched)
+            asked = _plain_clearance_documents_question(query)
+            if asked:
+                # The rows that answer it, the asker's language first.
+                for tag in ("documents_point_of_entry", "customs_valuation", "advance_tax_transport"):
+                    for entry in self._faq_index.get(tag, []):
+                        if _CLEARANCE_DOCS_ROW_RE.search(entry["question"]):
+                            enriched = dict(entry)
+                            enriched["tag"] = tag
+                            enriched["_overlap"] = "99"
+                            candidates.append(enriched)
+                candidates.sort(key=lambda e: asked not in e["question"].lower())
+            if not candidates:
+                # Read as before: every row that mentions a bill of lading, in file order.
+                for tag in ("advance_tax_transport", "customs_valuation"):
+                    for entry in self._faq_index.get(tag, []):
+                        text = f"{entry['question']} {entry['answer']}".lower()
+                        if "bill of lading" in text or "ebiwandiiko ebyetaagisa" in text or "nyaraka zinazohitajika" in text:
+                            enriched = dict(entry)
+                            enriched["tag"] = tag
+                            enriched["_overlap"] = "99"
+                            candidates.append(enriched)
             if candidates:
                 return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 

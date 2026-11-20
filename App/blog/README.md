@@ -61,7 +61,15 @@ pnpm dev
 
 The committed lockfile includes `pnpm` security overrides for vulnerable
 transitive dependencies. When changing these floors, update the lockfile with
-`pnpm install --lockfile-only` in the same change.
+`npx pnpm@10 install --lockfile-only --ignore-scripts` in the same change.
+Use pnpm 10. pnpm 11 does not read the `pnpm.overrides` in `package.json`, and
+it writes a lockfile without them.
+
+`next` must be the same version here and in `App/frontend`. Dependabot bumps
+the frontend alone, in a pull request named for the `next` group, and that
+pull request fails `test_blog_nextjs_stays_in_step_with_frontend`. To finish
+it, set the same version in `package.json` here, run the lockfile command
+above, and push both files to that branch.
 
 UI components are maintained in this repository. The `shadcn` generator
 package is intentionally excluded from the app dependency graph because its

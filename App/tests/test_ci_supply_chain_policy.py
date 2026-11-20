@@ -657,6 +657,34 @@ def test_blog_nextjs_stays_in_step_with_frontend():
     assert f"next@{frontend_next}" in blog_lock
 
 
+def test_a_next_bump_does_not_hold_the_other_frontend_updates():
+    """No Dependabot job covers App/blog, so a next bump for the frontend fails the test above
+    until the blog gets the same bump by hand. In the shared group that one failure held eight
+    other updates (#814)."""
+    from fnmatch import fnmatch
+
+    bun = next(u for u in _load(ROOT / ".github" / "dependabot.yml")["updates"] if u["package-ecosystem"] == "bun")
+    assert not any(u.get("directory") == "/App/blog" for u in _load(ROOT / ".github" / "dependabot.yml")["updates"])
+    names = ("next", "eslint-config-next", "@next/third-parties", "vitest", "zustand")
+    first = {name: next(g for g, group in bun["groups"].items() if any(fnmatch(name, p) for p in group["patterns"])) for name in names}
+    assert first == {
+        "next": "next",
+        "eslint-config-next": "next",
+        "@next/third-parties": "next",
+        "vitest": "vitest",
+        "zustand": "minor-and-patch",
+    }
+    assert "update-types" not in bun["groups"]["next"], "a major must move next and its lint config together too"
+
+
+def test_the_blog_lock_holds_every_override_the_manifest_declares():
+    """pnpm 11.20 regenerated the lock without the `overrides` block: it no longer reads
+    `pnpm.overrides` from package.json, printed one warning, and nanoid resolved from 6.0.1 to 3.3.20."""
+    declared = json.loads((ROOT / "App" / "blog" / "package.json").read_text(encoding="utf-8"))["pnpm"]["overrides"]
+    lock = _load(ROOT / "App" / "blog" / "pnpm-lock.yaml")
+    assert declared and lock["overrides"] == declared
+
+
 
 def test_the_declared_python_floor_is_the_oldest_python_a_lock_targets():
     """Dependabot resolves with the lowest Python that ``requires-python`` admits. At >=3.10 its

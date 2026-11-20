@@ -160,6 +160,14 @@ updates:
         patterns:
           - "vitest"
           - "@vitest/*"
+      # App/blog must carry the frontend's exact next (test_blog_nextjs_stays_in_step_with_frontend)
+      # and no job covers the blog, so a next bump is red until the blog gets the same bump by
+      # hand on that branch. In the shared group it held eight other updates (#814).
+      next:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+          - "@next/*"
       minor-and-patch:
         patterns:
           - "*"
