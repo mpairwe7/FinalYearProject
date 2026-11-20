@@ -10,7 +10,7 @@
 # To run the local-GPU stack instead, use App/backend/requirements.txt.
 
 # Core API
-fastapi>=0.162.5,<0.163
+fastapi>=0.162.6,<0.163
 uvicorn[standard]>=0.54.0,<0.55
 pydantic>=2.14.3,<2.15
 
