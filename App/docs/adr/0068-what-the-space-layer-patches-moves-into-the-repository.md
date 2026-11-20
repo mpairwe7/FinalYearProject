@@ -53,7 +53,7 @@ Option 1, one part at a time, each in its own pull request.
 | Part | Was in the script | Now | Landed |
 | --- | --- | --- | --- |
 | 1 | The CPU reranker class, its installation in sparse-only mode, and a replaced score loop | `_CpuLexicalReranker` and `_sparse_only_reranker` in `rag/retriever.py`, on when `RERANK_ENABLED` and `SPARSE_CPU_RERANKER` are both true. `_rerank` scores it like any reranker, and it reads the retriever's current BM25 encoder on every call | yes |
-| 2 | Attachment turns skip the calculator fast paths | the pipeline, on both the REST and the streaming path, with the foreign-jurisdiction decline kept | no |
+| 2 | On the REST path, a turn with an attachment skipped every fast path | `has_readable_document(...)` and `_maybe_handle_fast_paths(beside_document=...)` in `rag/pipeline.py`, passed at all six call sites on both paths: a fast path may answer but may not ask | yes |
 | 3 | The Gemini speech fallback | `_gemini_audio_transcribe` in `speech/speech_service.py`, the chain's last tier, on when `STT_FALLBACK_BACKEND=gemini`. Traced, under the cloud deadline, and a response with no content is not silence | yes |
 
 `SPARSE_CPU_RERANKER` is off unless set, so an image that cannot load a
@@ -77,9 +77,43 @@ lost a section of the script on an image that lacks the code replacing it.
   to an image from before this change, that image has no CPU reranker and
   serves fused order without reranking, as any torch-free image did before the
   layer existed.
-- The script still patches four files: the pipeline, the offline index, the PDF
-  export and the gateway. Part 2 removes one more section; the rest stay until
-  someone moves them too.
+- The script still patches four files: the pipeline (graph-fusion gating and
+  the identifiers read from an attachment), the offline index, the PDF export
+  and the gateway. They stay until someone moves them too.
+- **Part 2 sets one rule for a turn that carries a document, on both paths: a
+  fast path may answer but may not ask.** The owner left the choice open, to be
+  made without cost to the experience or to quality.
+  - A question that carries its own figures still gets the exact calculator
+    answer, and a rate question the rate table's. On the web app, which uses
+    the streaming path, nothing is slower or less exact than it was.
+  - A question about another country's taxes is always declined. On the REST
+    path it was not, because the script skipped the dispatcher that holds the
+    decline.
+  - The paths that ask are skipped: the calculator's request for a missing
+    figure and the guided flow it opens, the individual-or-organisation
+    question, and the bare-amount menu. The figure may be in the document, and
+    the turn goes on to the answer that reads it. On the web app this is new;
+    the REST path already behaved so.
+  - The alternatives were to skip every fast path on both routes, which gives
+    up an exact instant answer the question fully specifies, or to skip none,
+    which brings back the request for a figure the taxpayer has just uploaded.
+  - An independent run of both routes, parent against head, passed that rule and
+    added three things, which are now part of it. A document with no extracted
+    text counts as no document: a scan that could not be read cannot hold the
+    missing figure, and skipping the question left the taxpayer with nothing to
+    answer. The follow-up to a calculation no longer asks for the next figure
+    beside a document. The test file creates its own database, where it had
+    passed only after another test had.
+  - A third case was tried and dropped. When the message seemed to point at the
+    document ("the VAT rate on this invoice"), no fast path answered, so that the
+    answer came from the document and not from a table. A second independent run
+    measured the cost on the route the web app uses: a question that carries its
+    own figures and merely names a document ("the PAYE on UGX 2,000,000, as my
+    contract says", "see attached") lost its instant exact answer. Words in a
+    message cannot tell those two apart reliably. So a question that points at
+    the document is still answered from the table on both routes, as the web app
+    always did. On the REST route that is new: the Space's script used to send
+    every attachment turn to the answer that reads the document.
 - **Part 3 changes three things in the speech fallback** (G698).
   - Each call is traced with `tracing.llm_call` and reports the provider's own
     token counts, as every model client must.
@@ -117,5 +151,15 @@ lost a section of the script on an image that lacks the code replacing it.
   the module, with five more for part 3. Each of three breaks fails one: the
   pool without the turn's context, the call outside the deadline, and no
   content returned as silence.
+- `App/backend/tests/test_attachment_turn_fast_paths.py` holds part 2: the
+  decline, the exact answer and the rate answer survive an attachment; a
+  missing figure and the TIN question are not asked for; no guided flow is
+  opened; and every call to the dispatcher on both paths passes the flag. With
+  the calculator's guard removed two tests fail, and with the flag dropped from
+  one streaming call, one.
 - After the merge the Space is checked on the new image: `/ready` reports the
   reranker, the build log shows the script applied, and a live answer is read.
+- Part 2 was run twice by a verifier who did not write it, on both routes at parent
+  and head, with each commit's layer script applied. A turn with no attachment was
+  byte-identical on 132 route turns, and a document with no text behaved exactly
+  as none. The second run failed the third case described above, and it was removed.

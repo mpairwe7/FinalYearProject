@@ -48,6 +48,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
   PR otherwise, and a lookbehind, a lookahead or a `pos` argument does not satisfy it; use
   `linear_text` or a scan, and keep the old regex as the test oracle (ADR-0057).
 - Retrieval flags `hyde`, `graph_fusion`, `tool_rag` stay default off.
+- Beside a readable document a fast path may answer but may not ask. Each chat route works out `has_readable_document(attachments)` once and passes it to `_maybe_handle_fast_paths(beside_document=...)`. The declines, the exact calculator answer and the rate table still run. The paths that ask for a missing detail do not, because the detail may be in the document. A document with no extracted text counts as none, so the taxpayer is still asked. Do not make a path's answer depend on words in the message that seem to point at the document: that was tried and measured to cost self-contained questions their instant answer (ADR-0068 part 2).
 - Behaviour the HF Space needs goes in this package behind a setting, with tests, never into `HF_CPU_PATCH_B64` in `App/deploy/hf-space/Dockerfile`: no test or review reads that script, and it left two retrieval defects in production (ADR-0068).
 - Answers are generated in English and localized in **one** place
   (`localize_reply`). A new exit from `_generate_en` needs no translation call;
