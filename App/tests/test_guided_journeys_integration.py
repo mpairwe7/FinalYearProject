@@ -390,7 +390,7 @@ def test_resume_does_not_count_a_step_twice(client):
 
 def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a_handoff(client):
     from App.backend.app.text_signals import empathy_ack  # noqa: PLC0415
-    from App.backend.app.turn_guidance import GUIDE_PREFIX, HANDOFF_ACTION  # noqa: PLC0415
+    from App.backend.app.chat.turn_guidance import GUIDE_PREFIX, HANDOFF_ACTION  # noqa: PLC0415
 
     ack = empathy_ack("anxiety")
     model = mock.MagicMock()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from unittest import mock
 
-from app.documents import DocumentRecord
+from app.processing.documents import DocumentRecord
 from app.tickets.hitl_routing import assess_document_for_human_review, draft_staff_escalation_ticket
 
 
@@ -75,7 +75,7 @@ def test_uncertain_document_triggers_staff_review_draft() -> None:
 
 
 def test_table_summary_objects_and_tax_discrepancies_trigger_hitl_review() -> None:
-    from app.documents import TableSummary
+    from app.processing.documents import TableSummary
 
     doc = DocumentRecord(
         doc_id="doc_recon_fail",

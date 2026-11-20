@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sse_starlette.sse import EventSourceResponse
 from starlette.websockets import WebSocket
 
-from .. import documents
+from ..processing import documents
 from ..tickets import officer_hours
 from ..observability.analytics import metrics, record_chat_turn
 from ..auth import AuthContext, optional_user
@@ -390,7 +390,7 @@ async def chat_title(
     way ChatGPT, Claude and Gemini name a chat. A null title means no usable
     one came back; the client keeps the provisional title it already shows.
     """
-    from ..chat_title import generate_title
+    from ..chat.chat_title import generate_title
     from ..guardrails.friction import principal_key
 
     user_text = next(message.content for message in body.messages if message.role == "user")
@@ -413,12 +413,12 @@ async def chat_title(
 async def chat_stream_ws_v2(websocket: WebSocket) -> None:
     """V2 WebSocket — persistent text chat with agentic event surface.
 
-    Gated by the ``ws_chat`` feature flag.  See ``chat_ws_v2.py`` and
+    Gated by the ``ws_chat`` feature flag.  See ``chat/chat_ws_v2.py`` and
     ``docs/ws_chat_protocol.md``.  Phase 0 ships lifecycle + protocol
     negotiation only; ``response.create`` returns a ``not_implemented``
     error until Phase 1 wires the existing chat pipeline through.
     """
-    from ..chat_ws_v2 import chat_stream_ws
+    from ..chat.chat_ws_v2 import chat_stream_ws
 
     await chat_stream_ws(websocket, websocket.app)
 

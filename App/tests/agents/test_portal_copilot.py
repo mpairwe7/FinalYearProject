@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from app.auth.jwt_auth import make_dev_token
-from app.documents import diagnose_portal_screenshot
+from app.processing.documents import diagnose_portal_screenshot
 from app.config.flags import flags
 from app.main import app
 from app.middleware.rate_limiter import limiter

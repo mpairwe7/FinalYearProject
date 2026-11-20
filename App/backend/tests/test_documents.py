@@ -1,4 +1,4 @@
-"""Tests for the document attachment pipeline (``app/documents.py``).
+"""Tests for the document attachment pipeline (``app/processing/documents.py``).
 
 Covers per-type extraction (text / CSV / XLSX / DOCX / PDF), URA
 classification + field extraction, the TTL registry with session binding,
@@ -29,7 +29,7 @@ os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_ENABLED", "false")
 
 from app.db import database as db  # noqa: E402
-from app import documents  # noqa: E402
+from app.processing import documents  # noqa: E402
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 

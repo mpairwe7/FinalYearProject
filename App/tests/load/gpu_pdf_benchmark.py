@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "2")
 
 import torch
-from app import documents
+from app.processing import documents
 from app.tickets import hitl_routing
 from app.ingestion.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
 from app.vision import glyph_fusion, table_structuring

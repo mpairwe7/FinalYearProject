@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from app import documents
+from app.processing import documents
 from app.research import ephemeral_pdf_sandbox as sbx
 from app.ingestion.docling_intelligence import (
     _convert_via_docling_library,

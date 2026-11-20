@@ -137,7 +137,7 @@ class TestAGraphAnswerIsCheckedLikeAnyOther:
 
     def test_a_streamed_clarification_does_not_fail_attestation(self, chat_model, on_graph) -> None:
         # The alert on this pages someone: canned text has nothing to verify.
-        from app.turn_pipeline import attest_turn
+        from app.chat.turn_pipeline import attest_turn
 
         on_graph(_final("Which tax do you mean?", outcome=GraphOutcome.CLARIFY, hits=[], citations=[]))
         stages = {"input_guard": 1.0}

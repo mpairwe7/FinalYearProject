@@ -138,16 +138,16 @@ def _child(kind: str, data: bytes, conn: Any) -> None:
     try:
         _apply_child_sandbox_limits(apply_rlimits=True)
         if kind == "sandbox_pdf":
-            from .research.ephemeral_pdf_sandbox import _extract_pdf_pages
+            from ..research.ephemeral_pdf_sandbox import _extract_pdf_pages
 
             extraction = _extract_pdf_pages(data)
         elif kind == "sandbox_xlsx":
-            from .research.ephemeral_pdf_sandbox import _extract_xlsx_pages
+            from ..research.ephemeral_pdf_sandbox import _extract_xlsx_pages
 
             extraction = _extract_xlsx_pages(data)
         else:
             from .documents import _EXTRACTORS, UnsupportedDocumentError
-            from .guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
+            from ..guardrails.pdf import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 
             if kind == "pdf":
                 try:

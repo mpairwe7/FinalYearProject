@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover – uvicorn always present at runtime
 from pydantic import BaseModel, Field, field_validator
 
 from .db import database as db
-from . import documents
+from .processing import documents
 from .tickets import officer_hours
 from .observability.analytics import AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .observability.security_events import record_http_security_event
@@ -5392,7 +5392,7 @@ def export_artifacts(request: Request) -> dict:
     """
     require_ops_key(request)
 
-    from .artifact_export import export_all
+    from .quality.artifact_export import export_all
 
     files = export_all()
     return {

@@ -161,7 +161,7 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     """Hybrid retrieval with the same plan/corrective gates as REST."""
     # Deferred import to avoid the heavy retriever at module load
     from ...rag.corrective_rag import corrective_retrieve
-    from ...model_welfare import build_welfare_grounding_hits, match_welfare_categories
+    from ...chat.model_welfare import build_welfare_grounding_hits, match_welfare_categories
     from ...rag.retriever import HybridRetriever, get_shared_retriever
 
     query = state.rewritten_query or state.query

@@ -596,7 +596,7 @@ def test_cooldown_event_names_the_hashed_principal(chat_model, monkeypatch: pyte
 
 
 def test_the_title_route_shares_the_pause(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import chat_title
+    from app.chat import chat_title
 
     strike_tracker.reset()
     monkeypatch.setattr(chat_title.generator, "summarize_title", lambda _messages: "VAT registration")

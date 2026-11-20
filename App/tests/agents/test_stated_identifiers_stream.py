@@ -79,7 +79,7 @@ def test_the_websocket_adapter_keeps_the_stated_tin_and_redacts_another(monkeypa
     import json
     from unittest import mock
 
-    from app import chat_ws_v2
+    from app.chat import chat_ws_v2
     from app.main import app
     from starlette.testclient import TestClient
 

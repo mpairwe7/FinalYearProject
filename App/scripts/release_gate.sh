@@ -25,7 +25,7 @@ printf 'Release gate: backend syntax\n'
   backend/app/tools/ura_actions.py \
   backend/app/rag/pipeline.py \
   backend/app/main.py \
-  backend/app/chat_ws_v2.py \
+  backend/app/chat/chat_ws_v2.py \
   backend/app/confirm_tokens.py \
   backend/app/rag/generator.py
 

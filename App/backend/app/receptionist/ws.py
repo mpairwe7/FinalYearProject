@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from pydantic import BaseModel, Field
 
 from ..auth import AuthContext, require_role, revocation
-from ..chat_ws_v2 import resolve_ws_session
+from ..chat.chat_ws_v2 import resolve_ws_session
 from ..config.flags import flags
 from ..rag.query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled

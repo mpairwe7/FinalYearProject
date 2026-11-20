@@ -13,7 +13,7 @@ from app.reminders import Reminder
 from app.tools.ura_account import UraAccountProfileTool, account_api_status
 from app.tools.ura_actions import UraActionProposalTool
 from app.ura_account_mock import MOCK_PROFILES, account_mode, lookup_mock
-from app.document_worker import isolated_enabled, try_isolated
+from app.processing.document_worker import isolated_enabled, try_isolated
 
 
 @pytest.fixture

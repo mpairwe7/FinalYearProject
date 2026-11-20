@@ -233,7 +233,7 @@ def attest_turn(
     verdict = trace.verify_behavioral_integrity()
     verdict["guard_basis"] = "verified" if guarded else "no_model_text"
     try:
-        from .observability.analytics import metrics
+        from ..observability.analytics import metrics
 
         metrics.inc(
             "turn_pipeline_attestations_total",

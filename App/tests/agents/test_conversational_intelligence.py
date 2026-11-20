@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.conversational import handle_conversational_turn
+from app.chat.conversational import handle_conversational_turn
 from app.text_signals import (
     _resolve_courtesy_locale,
     get_farewell_reply,
