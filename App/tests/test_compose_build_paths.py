@@ -4,7 +4,7 @@
 root Dockerfile to App/ left four builds pointing at a file that was gone, and
 nothing failed.
 
-`docker-compose.full.yml` used to define the base's four services a second
+`infra/compose/docker-compose.full.yml` used to define the base's four services a second
 time. It is now an overlay on `docker-compose.yml`, and the tests at the end
 keep it one.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,7 +22,8 @@ import pytest
 import yaml
 
 APP = Path(__file__).resolve().parents[1]
-COMPOSE_FILES = sorted(APP.glob("docker-compose*.yml"))
+OVERLAYS = APP / "infra" / "compose"
+COMPOSE_FILES = sorted(APP.glob("docker-compose*.yml")) + sorted(OVERLAYS.glob("docker-compose*.yml"))
 
 
 class _Loader(yaml.SafeLoader):
@@ -71,8 +73,8 @@ def test_the_dockerfile_of_every_build_exists(compose: str, service: str, contex
     assert target.is_file(), f"{compose}: service {service} builds from {target}, which does not exist"
 
 
-BASE, FULL = APP / "docker-compose.yml", APP / "docker-compose.full.yml"
-# `docker-compose.local-sunflower.yml` defines its own `vllm` on the base, and Compose would merge the two.
+BASE, FULL = APP / "docker-compose.yml", APP / "infra/compose/docker-compose.full.yml"
+# `infra/compose/docker-compose.local-sunflower.yml` defines its own `vllm` on the base, and Compose would merge the two.
 ONLY_IN_THE_OVERLAY = {"vllm"}
 
 
@@ -103,7 +105,7 @@ def _resolved_full_stack(tmp_path: Path) -> dict:
     """The model Compose builds from the pair, read beside an empty `.env` so no real setting is loaded."""
     tree = tmp_path / "App"
     tree.mkdir()
-    (tmp_path / ".env").write_text("")
+    (tree / ".env").write_text("")
     for path in (BASE, FULL):
         shutil.copy(path, tree / path.name)
     done = _compose("-f", str(tree / BASE.name), "-f", str(tree / FULL.name), "config", "--no-interpolate", "--format", "json")
@@ -134,3 +136,65 @@ def test_the_full_stack_resolves_to_the_hardened_variant(tmp_path: Path) -> None
     # `!reset` drops the base's GPU reservation and host alias, which this variant never had.
     assert "deploy" not in api
     assert "extra_hosts" not in api
+
+
+def test_every_compose_file_reads_the_settings_file_inside_app() -> None:
+    """The working settings file is `App/.env`. An `env_file` that climbs out of `App/` names the
+    repository root, where the file no longer is, and Compose refuses to start without it."""
+    climbing = []
+    for path in sorted(APP.rglob("docker-compose*.yml")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if re.match(r"\s*-\s*\.\./.*\.env\b", line) or re.match(r"\s*env_file:\s*\.\./", line):
+                climbing.append(f"{path.relative_to(APP)}: {line.strip()}")
+    assert climbing == []
+
+
+def test_no_workflow_creates_a_settings_file_at_the_repository_root() -> None:
+    """A job that starts Compose makes its own settings file. `touch .env` at the root left the
+    stack without one, and the monitoring check failed on it (seen on PR #804)."""
+    at_root = re.compile(r"(?:touch|>>?|tee)\s+(?:\./)?\.env(?:\s|$)")
+    found = [
+        f"{path.name}: {line.strip()}"
+        for path in sorted((APP.parent / ".github" / "workflows").glob("*.yml"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if at_root.search(line)
+    ]
+    assert found == []
+
+
+def test_a_build_from_the_repository_root_cannot_take_the_settings_file() -> None:
+    """A `.dockerignore` pattern is anchored at the context root. `.env` alone excluded only a
+    root-level file, which would have left `App/.env` inside the context of the API image."""
+    patterns = (APP.parent / ".dockerignore").read_text(encoding="utf-8").split()
+    assert "**/.env" in patterns and "**/.env.*" in patterns
+
+
+def test_the_backend_reads_app_env_from_any_working_directory() -> None:
+    from app.providers.config import ENV_FILE
+
+    assert ENV_FILE == APP / ".env"
+
+
+def test_a_value_that_defines_a_stack_is_not_read_from_the_settings_file() -> None:
+    """Compose fills `${NAME}` from the `.env` beside the base file, which is now the working
+    settings file. Its values are for a process on the host. Read into these stacks they would
+    point the container at localhost, turn a cloud leg back on, or switch production hardening off."""
+    written_out = {
+        "full": ("OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317", "LOG_FORMAT=json"),
+        "gpu-salt": ("RETRIEVAL_MT_BACKEND=local", "REPLY_MT_BACKEND=local"),
+        "prod": ("SOVEREIGN_MODE=true",),
+    }
+    for overlay, entries in written_out.items():
+        environment = _services(OVERLAYS / f"docker-compose.{overlay}.yml")["api"]["environment"]
+        for entry in entries:
+            assert entry in environment, f"{overlay}: {entry.split('=')[0]} is not written out"
+
+
+def test_no_agent_or_editor_file_is_tracked_at_the_repository_root() -> None:
+    """The repository's guide for agents is App/AGENTS.md. Root copies are local pointers."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".claude", ".cursor", ".codex", ".vscode"],
+        cwd=APP.parent, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert tracked == []
+    assert (APP / "AGENTS.md").is_file()

@@ -1585,7 +1585,7 @@ default LLM, see [App/docs/MODEL_SWAP_GUIDE.md](./docs/MODEL_SWAP_GUIDE.md)):**
 
 ```bash
 # From App/
-docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d --build
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml up -d --build
 ```
 
 This starts Redis, Qdrant, vLLM (`Sunbird/Sunflower-14B-FP8` — gated on HF,
@@ -1597,9 +1597,9 @@ and a local model directory with `SUNFLOWER_LOCAL_MODEL_DIR`.
 Useful follow-up commands:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml ps
-docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml logs -f api vllm
-docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml down
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml ps
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml logs -f api vllm
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-sunflower.yml down
 ```
 
 Smoke checks:
@@ -1616,9 +1616,9 @@ Spark-TTS-SALT baked in, pinned to a single GPU, ngrok-exposed:**
 ```bash
 # From App/
 GPU_ID=2 docker compose \
-  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
-  -f docker-compose.local-sunflower.yml \
-  -f docker-compose.gpu-salt.yml up -d --build
+  -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
+  -f infra/compose/docker-compose.local-sunflower.yml \
+  -f infra/compose/docker-compose.gpu-salt.yml up -d --build
 ```
 
 Same as Option B, plus: builds `api` from `App/Dockerfile.gpu` (repo root)
@@ -1627,7 +1627,7 @@ instead of the base `Dockerfile` so Spark-TTS-SALT's BiCodec checkout
 `vllm`) to `${GPU_ID:-2}` instead of whatever the base files default to.
 Override `GPU_ID` to target a different free card.
 
-The command includes `docker-compose.local-retrieval.yml`: it exposes Qdrant
+The command includes `infra/compose/docker-compose.local-retrieval.yml`: it exposes Qdrant
 only on loopback, builds the corpus into the
 `ura_knowledge_base_jsonl_active` alias before the API starts, and disables
 the Cloudflare Vectorize fallback. The API consequently reports
@@ -1680,7 +1680,7 @@ the Next.js `/api` rewrite.
 
 ```bash
 # Put CADDY_DOMAIN / CADDY_ACME_EMAIL / POSTGRES_PASSWORD in .env
-docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml --profile postgres --profile vllm --profile tls up -d
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml --profile postgres --profile vllm --profile tls up -d
 ```
 
 Requires ports 80/443 free, a public domain pointing at the host,
@@ -1969,12 +1969,12 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 |---------|------|-----|-------------|
 | Backend (FastAPI) | 8083 container / 8887 local dev | API retrieval GPU mapping + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
 | Frontend (Next.js 16) | 3032 Compose / 13000 standalone | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4) | Sunbird/Sunflower-Qwen3.5-9B (262K native context window without YaRN, FP8) + tool-calling via OpenAI-compatible API |
+| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `infra/compose/docker-compose.local-sunflower.yml` (default GPU 4) | Sunbird/Sunflower-Qwen3.5-9B (262K native context window without YaRN, FP8) + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |
 
-**GPU + SALT speech variant** (`docker-compose.gpu-salt.yml`, see Option B
+**GPU + SALT speech variant** (`infra/compose/docker-compose.gpu-salt.yml`, see Option B
 above): `vllm` and `api` both pin to a single `GPU_ID` (default 2) instead
 of the default split above; `api` builds from `App/Dockerfile.gpu` and runs
 both Sunbird SALT speech tiers under CPU fallback on hosts with a

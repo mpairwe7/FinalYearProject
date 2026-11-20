@@ -125,12 +125,17 @@ tmp/
 temp/
 *.tmp
 ci-ml-pipeline.yml
-# Ignore .claude *contents* rather than the directory itself — git cannot
-# re-include a path inside an excluded directory, and project skills are
-# shared workflow definitions that belong in review. settings.local.json
-# stays ignored.
-.claude/*
-!.claude/skills/
+# Agent and assistant files at the repository root stay on the machine that
+# uses them. The repository's own guide for agents is App/AGENTS.md, with a
+# nested guide beside each package (ADR-0064 phase F).
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+.claude/
+.cursor/
+.codex/
+.gemini/
+.windsurf/
 App/Data/common_voice_*
 
 # Runtime analytics databases (conversation logs — privacy: never commit).

@@ -1,7 +1,11 @@
 # App/infra/
 
-Compose files live at the repo root and under `App/`. Kubernetes here is
-documentation only.
+`compose/` holds the Compose overlays; the one stack is `App/docker-compose.yml`.
+Kubernetes here is documentation only.
+
+- An overlay is listed after the base (`-f docker-compose.yml -f infra/compose/<file>`),
+  so its paths are read from `App/`. Do not add a second stack: a new service goes
+  in the base behind a profile, as `ura-plugins-server` does.
 
 - `k8s/hpa-chat.yaml` / `keda-chat.yaml` — examples. Measured p95:
   `App/docs/runbooks/capacity-slo.md` (2026-08-19). Do not apply until the

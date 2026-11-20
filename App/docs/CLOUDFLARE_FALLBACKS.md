@@ -203,7 +203,8 @@ to the cloud tier (`pipeline._cloud_llm_ready` widens the availability gates).
    `insert`, which errors on any id already present, and `deterministic_point_id`
    deliberately reuses the same id for an unchanged chunk so a re-run is a
    no-op for content that hasn't changed. Run once authenticated:
-   `set -a; . .env; set +a; python scripts/reindex_vectorize.py --create`
+   `set -a; . App/.env; set +a; python App/backend/scripts/reindex_vectorize.py --create`
+   (from the repository root)
    then `… --verify "What is the VAT rate?"`. Re-run (without `--create`)
    whenever the corpus changes materially — the index does not update itself.
 2. **R2 `bm25_state.json` durability** — only matters for a *Qdrant* deployment that

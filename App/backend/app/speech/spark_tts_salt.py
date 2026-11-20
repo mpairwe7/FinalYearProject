@@ -39,7 +39,7 @@ audio quality.
 
 Tool-calling is unrelated to this file, but the same verification pass
 checked it for the LLM swap sitting alongside this one — see
-``App/docker-compose.local-sunflower.yml``'s comment if relevant to your
+``App/infra/compose/docker-compose.local-sunflower.yml``'s comment if relevant to your
 change.
 
 Why :data:`SPARK_TTS_ENABLED` still needs an explicit local checkout

@@ -183,8 +183,8 @@ Two deployments of the same servers are provided:
 
 | Shape | File | Containers |
 | --- | --- | --- |
-| Single host (the local stack) | `App/docker-compose.connectors.yml` | one `connectors` gateway, `python -m app.mcp.servers.gateway`, an endpoint per system |
-| One server per system | `App/docker-compose.mcp.yml` | `mcp-efris`, `mcp-payment`, `mcp-dts`, `mcp-tin`, `mcp-ursb`, `mcp-bwims` (plus the calculator and account servers) |
+| Single host (the local stack) | `App/infra/compose/docker-compose.connectors.yml` | one `connectors` gateway, `python -m app.mcp.servers.gateway`, an endpoint per system |
+| One server per system | `App/infra/compose/docker-compose.mcp.yml` | `mcp-efris`, `mcp-payment`, `mcp-dts`, `mcp-tin`, `mcp-ursb`, `mcp-bwims` (plus the calculator and account servers) |
 
 Both bind the API with `MCP_SERVER_URL_<NAMESPACE>` and set
 `FLAG_ENTERPRISE_CONNECTORS=true`. Bring-up, verification and failure modes are

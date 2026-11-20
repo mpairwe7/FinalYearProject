@@ -17,7 +17,7 @@ The platform implements the **MCP `2026-07-28` specification**. One implementati
 - **Header-Body Integrity**: `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` are required on every POST. A missing or disagreeing header is `400` with `HeaderMismatch` (`-32020`), which prevents a gateway authorizing one operation while the server runs another.
 - **Error mapping**: unsupported protocol version → `400` / `-32022` with the supported list; unknown method → `404` / `-32601`; unknown tool, resource or prompt → `-32602`.
 - **Transport Routing**: By default, namespaces execute via `InProcessTransport`. Setting `MCP_SERVER_URL_<NAMESPACE>` binds the namespace to a remote `HttpTransport` with a persistent connection pool and W3C `traceparent` propagation. The URL must be `http(s)`, carry no credentials, and be `https` in production; an unusable URL is logged and the namespace stays in-process.
-- **Mutual TLS (mTLS) & DMZ Isolation**: Remote HTTP transports support mTLS client certificates configured per namespace via `MCP_CLIENT_CERT_<NAMESPACE>` and `MCP_CLIENT_KEY_<NAMESPACE>`. System connectors (`dts`, `payment`, `tin`, `ursb`, `bwims`, `efris`) deploy as standalone services via `App/docker-compose.mcp.yml`, or together from one process via `App/docker-compose.connectors.yml`.
+- **Mutual TLS (mTLS) & DMZ Isolation**: Remote HTTP transports support mTLS client certificates configured per namespace via `MCP_CLIENT_CERT_<NAMESPACE>` and `MCP_CLIENT_KEY_<NAMESPACE>`. System connectors (`dts`, `payment`, `tin`, `ursb`, `bwims`, `efris`) deploy as standalone services via `App/infra/compose/docker-compose.mcp.yml`, or together from one process via `App/infra/compose/docker-compose.connectors.yml`.
 
 ### 1.2 Registered Namespaces & Tools
 The system manages **79 registered tools across 19 namespaces** in development (56 in 13 namespaces in production, where the six simulator connector namespaces are not registered) (`28` in `tax_calculator`) spanning core tax calculators, 2026 statutory calculators, Cross-MDA interdependence & queue-reduction resolvers (`ADR-0009`), statutory rate lookups, knowledge search, memory, tasks, and DMZ system connectors:
@@ -243,7 +243,7 @@ PYTHONPATH=App/backend python3 -m pytest App/tests/test_all_endpoints_e2e.py -q
 To launch decoupled MCP microservices in isolated container runtimes:
 ```bash
 export MCP_LINK_TOKEN=$(openssl rand -hex 32)   # the shared secret for every link; not stored by the stack
-docker compose -f App/docker-compose.yml -f App/docker-compose.full.yml -f App/docker-compose.mcp.yml up -d \
+docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.full.yml -f App/infra/compose/docker-compose.mcp.yml up -d \
   mcp-tax-calculator mcp-ura-account mcp-efris mcp-dts mcp-payment mcp-tin mcp-ursb mcp-bwims
 ```
 
@@ -296,8 +296,8 @@ Append the overlay to whichever chain the stack runs (see `App/docs/runbooks/sal
 cd App
 export MCP_LINK_TOKEN=$(openssl rand -hex 32)
 docker compose -f docker-compose.yml \
-  -f docker-compose.local-retrieval.yml -f docker-compose.local-sunflower.yml \
-  -f docker-compose.gpu-salt.yml -f docker-compose.connectors.yml up -d
+  -f infra/compose/docker-compose.local-retrieval.yml -f infra/compose/docker-compose.local-sunflower.yml \
+  -f infra/compose/docker-compose.gpu-salt.yml -f infra/compose/docker-compose.connectors.yml up -d
 ```
 `MCP_LINK_TOKEN` is given to both ends by the overlay and is not written anywhere. Keep it exported for later `up` commands in the same chain: recreating either service without it leaves the link locked (§4.3). `down`, `ps` and `logs` work without it.
 

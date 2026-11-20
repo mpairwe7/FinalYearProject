@@ -1,9 +1,10 @@
 # =============================================================================
 # URA Chatbot App — Docker Compose (backend + frontend + deps)
 #
-# The one stack. Every other docker-compose.*.yml in this folder is an overlay
-# on this file, apart from dev2 and plugins. docker-compose.full.yml turns it
-# into the image-based, hardened variant (ADR-0064).
+# The one stack, and the only Compose file in this folder. Every file in
+# infra/compose/ is an overlay on it and is listed after it, so the paths in an
+# overlay are read from this folder. infra/compose/docker-compose.full.yml turns
+# it into the image-based, hardened variant (ADR-0064).
 # =============================================================================
 
 services:
@@ -119,7 +120,7 @@ services:
       - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
       - FLAG_SPECULATIVE_PREFETCH=true
     env_file:
-      - ../.env
+      - .env
     init: true
     security_opt:
       - no-new-privileges:true
@@ -521,6 +522,36 @@ services:
       - ALL
     networks:
       - app-network
+
+  # ---------------------------------------------------------------------------
+  # The six simulated system connectors as one HTTP server (App/plugins).
+  # Not part of the chat stack: `docker compose --profile plugins up ura-plugins-server`.
+  # ---------------------------------------------------------------------------
+  ura-plugins-server:
+    profiles: [plugins]
+    build:
+      context: ..
+      dockerfile: App/Dockerfile.plugins
+    container_name: ura-enterprise-plugins
+    ports:
+      - "8200:8200"
+    environment:
+      - PORT=8200
+      - EFRIS_DB_PATH=/app/data_store/efris_system.db
+      - DTS_DB_PATH=/app/data_store/dts_system.db
+      - URSB_DB_PATH=/app/data_store/ursb_system.db
+      - BWIMS_DB_PATH=/app/data_store/bwims_system.db
+      - TIN_DB_PATH=/app/data_store/tin_system.db
+      - PAYMENT_DB_PATH=/app/data_store/payments_system.db
+      - PLUGINS_API_KEY=${PLUGINS_API_KEY:-}
+    volumes:
+      - ../data_store:/app/data_store
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
 networks:
   app-network:

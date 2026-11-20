@@ -1,7 +1,15 @@
 # App/infra/
 
-Docker Compose lives at the repo root and under `App/`. Kubernetes stubs
-here are documentation — there is no live cluster in this checkout.
+`compose/` holds the Docker Compose overlays. The one stack is
+`App/docker-compose.yml`; an overlay is listed after it, from `App/`:
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.full.yml up -d
+```
+
+Paths inside an overlay are read from `App/`, the folder of the first file, so an
+overlay is never run alone. Kubernetes stubs here are documentation — there is
+no live cluster in this checkout.
 
 - `k8s/hpa-chat.yaml` — example HPA on chat latency. A load baseline
   exists (`App/docs/runbooks/capacity-slo.md`, 2026-08-19). Still do not
