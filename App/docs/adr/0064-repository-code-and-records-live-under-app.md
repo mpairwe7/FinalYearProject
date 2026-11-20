@@ -9,6 +9,9 @@ Accepted, 2026-11-18. Carried out in four phases, one pull request each.
 - Phase C (done): move the root code and record folders under `App/`.
 - Phase D (done): move the root data, build and security files under `App/`, and
   remove the duplicate Trivy steps.
+- Phase E (done, 2026-11-19): merge the two Compose stacks into one base and one overlay.
+- Phase F (done, 2026-11-20): the working `.env` moves to `App/.env`, and the Compose
+  overlays move from `App/` to `App/infra/compose/`.
 
 ## Context and Problem Statement
 
@@ -126,7 +129,7 @@ Option 1, chosen by the service owner over the narrower option 2.
   `security-trivy.yml` already runs. `.gitignore` ignores `App/Model/*` except the
   three tracked files: `.gitkeep`, `README.md` and `bm25_state.json`. Compose in
   `App/` mounts the adapters from `./Model/adapters`. The full stack reads the root
-  `.env`.
+  `.env` (until phase F, below).
 
   Before the move, the Compose `postgres` service loses its committed default
   password (G672). GitGuardian reads a moved file as new and flagged it. The
@@ -186,6 +189,54 @@ Option 1, chosen by the service owner over the narrower option 2.
   May, and with it one Kiswahili FAQ row did not retrieve itself (G673). That is
   fixed in the scoring, and the acronym test runs with the state again. The image
   rebuilds its state from the corpus, so production was not affected.
+- The working settings file is `App/.env` (phase F, 2026-11-20). The templates had moved
+  in phase D and the file itself had not, so eight callers named the repository root:
+  the base stack's `env_file`, the backend's cloud settings (which read `.env` from
+  the working directory, so only when started at the root), `validate_env.py`, three
+  Space secret scripts and the ZAP job. Each now names `App/.env`. A ninth, the
+  monitoring check's `touch .env`, was found by CI and not by the search, so a test
+  now fails on any workflow that creates the file at the root. The root
+  `.dockerignore` excludes `**/.env`: a pattern there is anchored at the context root,
+  so `.env` alone would have left `App/.env` inside every build that starts at the root.
+  A checkout made before this phase must move its own file: `mv .env App/.env`.
+- `App/.env` is now also the file Compose fills `${NAME}` from, in the base and in every
+  overlay. Compose reads the `.env` in the folder of the first file for that, and while
+  the settings file sat at the root it was only the `api` service's `env_file`. So a
+  value in the file now wins over a default written as `${NAME:-default}`, where before
+  the default won. That is what the documents already assumed when they say to put
+  `METRICS_TOKEN` or `POSTGRES_PASSWORD` in `.env`. An independent check of this phase
+  found it: the first comparison had used an empty file. Five values that define a
+  stack are therefore written out and no longer read from the file: the collector
+  address and JSON logs in the full overlay, the two local translation backends in the
+  GPU overlay, and `SOVEREIGN_MODE=true` in the production overlay. The file's values
+  are for a process on the host, and read into those stacks they would point the
+  container at `localhost`, turn a cloud leg back on, or switch hardening off.
+- Agent and editor files leave the repository root. `AGENTS.md` moves to
+  `App/AGENTS.md` and stays the router the governance test reads. `CLAUDE.md`,
+  `.claude/` and `.vscode/` are untracked and ignored, at the owner's request, so the
+  three project skills are no longer in review and the compliance gate no longer lists
+  one of them. A root `AGENTS.md` or `CLAUDE.md` on a developer's machine is a local
+  pointer to `App/AGENTS.md`.
+  Git removes a file from the working tree when a checkout moves to a commit that no
+  longer tracks it, so a checkout that wants its copies back restores them once, from
+  the repository root: `git archive 06ecc9a3 CLAUDE.md .claude .vscode | tar -x`. The
+  restored `CLAUDE.md` names a root `AGENTS.md` that no longer exists, so change its
+  link to `App/AGENTS.md`.
+- An ignored file is not protected the way an untracked one is. Checking out a branch
+  that still tracks these paths overwrites the local copies without a warning, and
+  checking out a newer branch again deletes them. An independent check measured both.
+  So merge `dev` into an open branch before checking it out, or keep copies of local
+  agent files outside the repository. A `CLAUDE.md` with uncommitted edits stops the
+  first move with git's own error, and nothing is lost in that case.
+- `App/` holds one Compose file (phase F). The eleven overlays are in
+  `App/infra/compose/`, and a command lists them after the base:
+  `-f docker-compose.yml -f infra/compose/docker-compose.full.yml`. Compose reads the
+  paths of every file from the folder of the first one, so no path inside an overlay
+  changed. Two files that were not overlays are gone. `docker-compose.dev2.yml` served
+  a model that is in neither the model card nor the AIBOM, mounted a root folder that
+  phase C removed, and no command, workflow or test named it. One runbook sentence
+  mentioned it as a stack that might be left running. `docker-compose.plugins.yml` held one
+  service, which the base now defines behind the `plugins` profile.
 
 ## Confirmation
 
@@ -215,3 +266,26 @@ Option 1, chosen by the service owner over the narrower option 2.
   has, and the pair must resolve to the hardened variant. That last test merges the two
   files with Docker Compose, and fails if an `!override` or `!reset` tag is dropped.
 - `App/tests/test_compose_build_paths.py` checks that every Compose build names a Dockerfile that exists. `docker compose config` does not check that. After phase D, four builds in `App/docker-compose.yml` and two overlays still named the root `Dockerfile`; they now name `App/Dockerfile`.
+- Phase F was checked the same way. What Compose resolves was recorded before and after
+  for 16 combinations: the base, the base with each overlay, and the four chains the
+  runbooks use. They differ in three things: the `api` service's `env_file` is
+  `App/.env`, the base defines `ura-plugins-server`, and its network exists when that
+  profile is on. With no profile the stack starts the same four services on the same
+  network. With a marker value in a scratch `App/.env`, Compose read it when started
+  from `App/`, from the root with `-f`, and from the root with `COMPOSE_FILE`.
+- `App/tests/test_compose_build_paths.py` holds the phase: no Compose file reads an env
+  file outside `App/`, the root build context excludes `.env` at any depth, the backend
+  names `App/.env`, and every build in an overlay still names a Dockerfile that exists.
+- The comparison was repeated with `App/.env.example` standing in as a filled settings
+  file. After the five values were written out, the base, the GPU chain and the
+  connector and MCP overlays resolve the same with or without it. The full overlay
+  differs in three values an operator is meant to set: the frontend's
+  `NEXT_PUBLIC_API_URL` build argument and the Hugging Face token passed to vLLM under
+  two names. Both need the operator's own value: the template's API URL is the
+  development port, which the full stack does not publish, and its token is a
+  placeholder. The production overlay's required `CORS_ORIGINS` is met by the
+  template's localhost value, and the API then refuses to start with a localhost
+  origin in production, so that stack still fails closed, later. A name the template
+  only carries as a comment (`REDIS_URL`, the connector and web-research flags) now
+  reaches the stacks too if someone sets it. `test_compose_build_paths.py` fails if one of the five is read from the
+  file again, or if an agent or editor file is tracked at the root.

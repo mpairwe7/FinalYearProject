@@ -11,7 +11,7 @@ the value.
 import json, os, urllib.request, urllib.error
 
 REPO = "landwind22/ura-chatbot"
-ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
+ENV = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
 def env_val(key):

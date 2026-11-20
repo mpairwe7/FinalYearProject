@@ -2,7 +2,7 @@
 
 Enforces the repository's structural invariants in CI (`pytest App/tests/`):
 1. Hierarchical `AGENTS.md` Router Integrity: every path and nested guide in the
-   root `AGENTS.md` layout table exists on disk and is non-empty.
+   `App/AGENTS.md` layout table exists on disk and is non-empty.
 2. Unidirectional Layer DAG (Strict Package Boundaries):
    - `App/ml/` never imports `app.*` or `plugins.*`
    - `App/plugins/` never imports `app.*`
@@ -49,8 +49,8 @@ def _top_level_imports(py_file: Path) -> set[str]:
 
 
 def test_root_agents_md_router_table_resolves_every_path_and_guide() -> None:
-    """Every row in root AGENTS.md Layout table must point to an existing path and guide."""
-    agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    """Every row in the App/AGENTS.md Layout table must point to an existing path and guide."""
+    agents_md = (REPO_ROOT / "App" / "AGENTS.md").read_text(encoding="utf-8")
     row_re = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*[^|]+\|\s*`([^`]+)`\s*\|$", re.M)
     rows = row_re.findall(agents_md)
     # 13 since the README-only pointer folders (agents/, apps/, packages/, prompts/, skills/) were removed.
@@ -199,8 +199,12 @@ def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
     assert rr_mod.check_expired_reviews(risks) == []
 
 
-def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
-    """Every ADR in App/docs/adr/README.md exists and follows MADR 4.0 structure, and the living-docs skill is present."""
+def test_madr_40_adr_catalog_integrity() -> None:
+    """Every ADR in App/docs/adr/README.md exists and follows MADR 4.0 structure.
+
+    This once also required a project skill under `.claude/`. Agent files at the repository root
+    are local now (ADR-0064 phase F), and it passed on the author's machine only because the
+    ignored copy was still on disk."""
     adr_readme = (REPO_ROOT / "App" / "docs" / "adr" / "README.md").read_text(encoding="utf-8")
     adr_links = re.findall(r"\[ADR-\d+\]\(([^)]+\.md)\)", adr_readme)
     assert len(adr_links) >= 2, f"Expected >= 2 ADRs in App/docs/adr/README.md, found {adr_links}"
@@ -216,10 +220,6 @@ def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
         body = adr_file.read_text(encoding="utf-8")
         for section in required_sections:
             assert section in body, f"{rel_link} missing MADR 4.0 section: {section}"
-
-    skill_file = REPO_ROOT / ".claude" / "skills" / "living-docs-adr-runbooks-traceability" / "SKILL.md"
-    assert skill_file.is_file()
-    assert skill_file.stat().st_size > 200
 
 
 def test_storage_backend_api_parity_and_flag_lifecycle_taxonomy() -> None:

@@ -13,7 +13,7 @@ The retrieval inputs are stored locally under `App/Data`:
 Use the local-only Qdrant profile after the corpus has been populated:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
   up -d --build redis qdrant api
 ```
 
@@ -46,7 +46,7 @@ documents plus its internal BM25 binding sentinel.
 Start the local services, then recreate the collection:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
   up -d --build redis qdrant api
 
 cd backend

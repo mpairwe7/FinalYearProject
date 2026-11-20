@@ -10,8 +10,8 @@ endpoint. Existing deployment files are deliberately outside this profile.
 From `App/`, start only the dependencies needed for document/PDF work:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-documents.yml \
-  -f docker-compose.ocr.yml --profile ocr up -d --build redis qdrant api ocr
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-documents.yml \
+  -f infra/compose/docker-compose.ocr.yml --profile ocr up -d --build redis qdrant api ocr
 ```
 
 The API is loopback-bound at `http://127.0.0.1:8083` by default and the OCR
@@ -39,7 +39,7 @@ request falls back to a remote provider.
 
 ## Configuration boundary
 
-`docker-compose.local-documents.yml` takes precedence over values from the
+`infra/compose/docker-compose.local-documents.yml` takes precedence over values from the
 base stack and its `env_file`. It sets the following local-only boundary:
 
 | Capability | Local profile behaviour |

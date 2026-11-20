@@ -46,6 +46,7 @@ scan:
 
   # Files to skip (local developer environments, gitignored secrets)
   skip-files:
+    - App/.env
     - .env
     - .env.local
     - App/frontend/.env.local

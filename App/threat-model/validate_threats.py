@@ -798,7 +798,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/main.py",
             "App/docker-compose.yml",
-            "App/docker-compose.full.yml",
+            "App/infra/compose/docker-compose.full.yml",
         ],
         "status": "mitigated",
     },
@@ -914,7 +914,7 @@ THREAT_REGISTRY: list[dict] = [
             "App/backend/app/api/models.py",
             "App/backend/app/documents.py",
             "App/docker-compose.yml",
-            "App/docker-compose.full.yml",
+            "App/infra/compose/docker-compose.full.yml",
         ],
         "status": "mitigated",
     },
@@ -928,7 +928,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/Dockerfile",
             "App/docker-compose.yml",
-            "App/docker-compose.full.yml",
+            "App/infra/compose/docker-compose.full.yml",
         ],
         "status": "mitigated",
     },

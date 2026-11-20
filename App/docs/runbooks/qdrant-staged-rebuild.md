@@ -20,7 +20,7 @@ the active alias already matches.
 
 ```bash
 cd App
-docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
   up -d --build qdrant qdrant-indexer qdrant-backup api
 ```
 
@@ -128,9 +128,9 @@ Inspect the durable status and trigger a manual drill when an alert fires:
 
 ```bash
 cd App
-docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
   exec qdrant-backup python -m app.vectorstore.qdrant_backup --restore-drill
-docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+docker compose -f docker-compose.yml -f infra/compose/docker-compose.local-retrieval.yml \
   logs --tail=100 qdrant-backup
 ```
 
