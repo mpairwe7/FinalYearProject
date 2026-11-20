@@ -10643,8 +10643,40 @@ class ChatModel:
             # the shipped flows — so the validator cannot be the arbiter here
             # and the interrogative opener is the whole signal.
             return True
+        if self._question_names_another_tax(session, step, user_input):
+            # A typed slot finds its value inside any sentence: "What is the PAYE on
+            # UGX 500,000 a month?" holds a number, and a turnover slot took it (G699).
+            return True
         is_valid, _, _ = validate_slot(user_input, step.validator, None)
         return not is_valid
+
+    @staticmethod
+    def _question_names_another_tax(session: WorkflowSession, step: Any, user_input: str) -> bool:
+        """Whether *user_input* names a tax and none of those the flow is about.
+
+        A question naming the flow's own tax may still be the answer ("Is 300 million
+        enough for VAT?"), and so may one naming both, so only a question about other
+        taxes alone leaves the flow. A flow that names no tax decides nothing here.
+        """
+        from .context_manager import tax_topics_named
+
+        asked = tax_topics_named(user_input)
+        if not asked:
+            return False
+        workflow = WorkflowRegistry.get(session.workflow_id)
+        own = tax_topics_named(
+            " ".join(
+                str(part or "")
+                for part in (
+                    session.workflow_id.replace("_", " "),
+                    getattr(workflow, "name", ""),
+                    getattr(workflow, "description", ""),
+                    step.question,
+                    step.validator,
+                )
+            )
+        )
+        return bool(own) and not (asked & own)
 
     def _flow_switch_target(
         self, persisted: dict[str, Any], *, message: str, rewritten: str

@@ -40,6 +40,11 @@ _TAX_TOPIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(advance\s+tax|passenger\s+commercial\s+vehicles?)\b", re.I), "Advance Tax", "advance_tax"),
 ]
 
+def tax_topics_named(text: str) -> set[str]:
+    """Keys of the tax heads *text* names ("vat", "paye", ...)."""
+    return {key for pattern, _label, key in _TAX_TOPIC_PATTERNS if pattern.search(text or "")}
+
+
 _TAXPAYER_STATUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(individual|sole\s+(?:trader|proprietor)|myself|personal)\b", re.I), "Individual / Sole Proprietor"),
     (re.compile(r"\b(company|corporation|ltd|limited|partnership|ngo|institution|business)\b", re.I), "Company / Organization"),
