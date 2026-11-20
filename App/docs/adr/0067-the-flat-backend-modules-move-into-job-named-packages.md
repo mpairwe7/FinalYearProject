@@ -49,7 +49,7 @@ Option 1, in phases of under 100 files so each pull request is reviewed.
 | Phase | Package | Modules | Landed |
 | --- | --- | --- | --- |
 | 1 | `speech/` | `speech_service`, `speech_normalization`, `accent_detector`, `orpheus_tts`, `spark_tts_salt` | yes |
-| 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` || yes |
+| 2 | `speech/` | `voice_consent`, `voice_stream`, `voice_stream_v2`, `voice_ws`, `voice_ws_v2` | yes |
 | 3 | `research/` | `web_research`, `web_search_providers`, `web_fx`, `egress`, `doh_resolver`, `ephemeral_pdf_sandbox` | yes |
 | later | `tickets/`, `quality/`, `connectors/`, `offline/` | the handoff, service-quality, connector and offline modules | no |
 
