@@ -560,6 +560,18 @@ _CUSTOMS_CLEARANCE_DOCS_RE = re.compile(
     r"|\b(?:what\s+documents|biwandiiko\s+ki|nyaraka\s+gani)\b.*\b(?:customs|forodha)\b",
     re.IGNORECASE,
 )
+# The rows that answer it, by their own question: the list for goods at the point of entry, the
+# list the processing centre asks for, and the Luganda and Kiswahili rows for a vehicle.
+_CLEARANCE_DOCS_ROW_RE = re.compile(
+    r"\b(?:documents|biwandiiko|nyaraka)\b.*\b(?:point\s+of\s+entry\s+for\s+goods|for\s+clearance|okuyisa|kusafisha)\b",
+    re.IGNORECASE,
+)
+_DOCUMENTS_WORD_RE = re.compile(r"\b(documents|biwandiiko|nyaraka)\b", re.IGNORECASE)
+_VEHICLE_REGISTRATION_CUE_RE = re.compile(
+    r"\b(?:regist\w*|number\s+plates?|log\s?book|okuwandiis\w*|kusajili|usajili)\b",
+    re.IGNORECASE,
+)
+_VEHICLE_REGISTRATION_ROW_RE = re.compile(r"motor\s+vehicle\s+registration", re.IGNORECASE)
 _PRN_GENERATION_RE = re.compile(
     r"\b(?:prn|payment\s+slip|payment\s+registration\s+number)\b",
     re.IGNORECASE,
@@ -7366,16 +7378,21 @@ class ChatModel:
                 return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
         if _CUSTOMS_CLEARANCE_DOCS_RE.search(query):
+            # A row is chosen by its question. Chosen by a "bill of lading" anywhere in its text,
+            # the first row was the registration procedure, which lists one among its uploads.
+            # A question that names registration keeps the registration procedure it always got.
+            row_re = _VEHICLE_REGISTRATION_ROW_RE if _VEHICLE_REGISTRATION_CUE_RE.search(query) else _CLEARANCE_DOCS_ROW_RE
             candidates = []
-            for tag in ("advance_tax_transport", "customs_valuation"):
+            for tag in ("documents_point_of_entry", "customs_valuation", "advance_tax_transport"):
                 for entry in self._faq_index.get(tag, []):
-                    text = f"{entry['question']} {entry['answer']}".lower()
-                    if "bill of lading" in text or "ebiwandiiko ebyetaagisa" in text or "nyaraka zinazohitajika" in text:
+                    if row_re.search(entry["question"]):
                         enriched = dict(entry)
                         enriched["tag"] = tag
                         enriched["_overlap"] = "99"
                         candidates.append(enriched)
             if candidates:
+                asked = _DOCUMENTS_WORD_RE.search(query).group(1).lower()  # the asker's language first
+                candidates.sort(key=lambda e: asked not in e["question"].lower())
                 return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
         if _PRN_GENERATION_RE.search(query):
