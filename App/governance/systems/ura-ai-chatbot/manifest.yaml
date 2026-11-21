@@ -853,7 +853,7 @@ aibom_inventory:
       provider: "Sunbird AI (api.sunbird.ai /tasks/chat/completions, OpenAI-compatible)"
       hosting: "cloud"
       locales: ["en", "lg", "sw", "nyn", "ach"]
-      limits: "Both configured accounts answered 403 ACCOUNT_SUSPENDED from 2026-11-09 until working tokens were set on 2026-11-20 (G539). The primary account reaches its quota and the fallback then serves; when both fail, Workers AI serves English and the Ugandan languages get retrieval only. A hung primary can use up the speech deadline before the fallback answers (G714). Never reached on a call turn."
+      limits: "Both configured accounts answered 403 ACCOUNT_SUSPENDED from 2026-11-09 until working tokens were set on 2026-11-20 (G539). The primary account reaches its quota and the fallback then serves; when both fail, Workers AI serves English and the Ugandan languages get retrieval only. A hung primary leaves this model's fallback at most 10 s: answer generation and Sunflower translation keep their own per-account timeouts (45 s and 30 s), unlike Sunbird speech recognition and text-to-speech, which split their 40 s deadline between the accounts (G714). Never reached on a call turn."
       verified_by:
         - "App/tests/agents/test_sunbird_primary_llm_2026_11.py"
         - "App/tests/agents/test_sunbird_judge_translation_2026_11.py"

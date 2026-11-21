@@ -1254,6 +1254,7 @@ class SpeechModel:
                     wav_buf.getvalue(),
                     language=lang_code,
                     filename="audio.wav",
+                    deadline=time.monotonic() + SPEECH_CLOUD_DEADLINE_S,
                 )
                 if stt_result and stt_result.get("text"):
                     return TranscribeResult(
@@ -2303,6 +2304,7 @@ class SpeechModel:
 
                 if not sunbird.is_available():
                     return None
+                deadline = time.monotonic() + SPEECH_CLOUD_DEADLINE_S
 
                 def _fetch():
                     # Forward the requested speaker. `voice` here is whatever the
@@ -2310,7 +2312,7 @@ class SpeechModel:
                     # by synthesize); sunbird validates it against its own
                     # per-locale catalog and ignores anything foreign, so a Piper
                     # or edge-tts voice name arriving here cannot be forwarded.
-                    tts_result = sunbird.text_to_speech(text, locale=language, voice=voice)
+                    tts_result = sunbird.text_to_speech(text, locale=language, voice=voice, deadline=deadline)
                     if not tts_result or not tts_result.get("audio_url"):
                         return None
                     import httpx

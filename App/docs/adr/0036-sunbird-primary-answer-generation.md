@@ -64,6 +64,9 @@ The cloud chain (`service._llm_cloud_fallback`) becomes **Sunbird, then Workers 
     (`SUNBIRD_WORKERS_AI_RESERVE_S`, 15 s).
   - `sunbird._post(deadline=…)` cuts each attempt's timeout to the time left and starts no
     attempt once the time is spent.
+  - Amended 2026-11-21 (G714): a caller that gives a deadline and no per-attempt timeout of its
+    own (speech recognition and text-to-speech) has the time left split evenly among the
+    accounts still to try. Answer generation keeps its 45 s per-attempt timeout.
 - **Finish reason.** A Sunflower reply stopped at the token limit (`finish_reason="length"`) is
   treated as truncated, even when it ends in punctuation. Workers AI is tried, and the reply is
   kept as the floor.
