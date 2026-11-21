@@ -289,7 +289,7 @@ _PROSE_BARE_INT_END_RE = re.compile(r"(?:^|\s)\d+\.$")
 _LEADING_CITE_RE = re.compile(r"^(\[\d+(?:\s*[,;]\s*\d+)*\]\.?)\s+(.*)$", re.DOTALL)
 
 
-_STARTS_SENTENCE_RE = re.compile(r"^(?:\*{1,2}|`|['\"(\[])*[A-Z]")
+_STARTS_SENTENCE_RE = re.compile(r"^[*`'\"(\[]*[A-Z]")
 
 
 _PROSE_CANDIDATE_SPLIT_RE = re.compile(
@@ -302,24 +302,26 @@ def _split_prose_sentences(prose: str) -> list[str]:
     pieces = [p.strip() for p in _PROSE_CANDIDATE_SPLIT_RE.split(prose.strip()) if p.strip()]
     if len(pieces) <= 1:
         return pieces
-    sentences: list[str] = []
+    # Each sentence is a list of stripped chunks. Both end checks reach back no further than the
+    # space before the last chunk, so they search that chunk; searching the joined sentence was quadratic.
+    sentences: list[list[str]] = []
     for piece in pieces:
         if sentences:
             cite_m = _LEADING_CITE_RE.match(piece)
             if cite_m:
-                sentences[-1] = f"{sentences[-1]} {cite_m.group(1)}"
+                sentences[-1].append(cite_m.group(1))
                 piece = cite_m.group(2).strip()
                 if not piece:
                     continue
         if sentences and (
             not _STARTS_SENTENCE_RE.match(piece)
-            or _PROSE_ABBR_END_RE.search(sentences[-1])
-            or _PROSE_BARE_INT_END_RE.search(sentences[-1])
+            or _PROSE_ABBR_END_RE.search(sentences[-1][-1])
+            or _PROSE_BARE_INT_END_RE.search(sentences[-1][-1])
         ):
-            sentences[-1] = f"{sentences[-1]} {piece}"
+            sentences[-1].append(piece)
         else:
-            sentences.append(piece)
-    return sentences
+            sentences.append([piece])
+    return [" ".join(chunks) for chunks in sentences]
 
 
 def _items_are_a_list(parts: list[str], *, word_limit: int) -> bool:
@@ -867,6 +869,139 @@ def _join_digit_bracket_glitches(text: str) -> str:
     return "".join(out)
 
 
+_PROTECTED_START_RE = re.compile(r"`|\[|https?://\S|www\.\S")
+
+
+_WHITESPACE_RE = re.compile(r"\s")
+
+
+def _mask_protected_spans(line: str) -> tuple[str, list[str]]:
+    """Code spans, Markdown links and URLs in *line* replaced by ``\\x00PROT<n>\\x00``.
+
+    The spans are those of ``re.finditer(r"`[^`]+`|\\[[^\\]]+\\]\\([^)]+\\)|(?:https?://|www\\.)\\S+", line)``,
+    found in one pass. That regex rescanned the rest of the line from every "[".
+    """
+    spans: list[str] = []
+    out: list[str] = []
+    n = len(line)
+    found: dict[str, int] = {}
+
+    def first(char: str, start: int) -> int:
+        # Each character's lookups only move forward, so a hit at or after *start* still holds.
+        hit = found.get(char, -1)
+        if hit < start:
+            hit = line.find(char, start)
+            found[char] = hit = n if hit < 0 else hit
+        return hit
+
+    kept = pos = 0
+    while (m := _PROTECTED_START_RE.search(line, pos)) is not None:
+        start = m.start()
+        end = -1
+        if line[start] == "`":
+            close = first("`", start + 1)
+            if start + 1 < close < n:
+                end = close + 1
+        elif line[start] == "[":
+            close = first("]", start + 1)
+            if start + 1 < close < n - 1 and line[close + 1] == "(":
+                paren = first(")", close + 2)
+                if close + 2 < paren < n:
+                    end = paren + 1
+        else:
+            space = _WHITESPACE_RE.search(line, m.end())
+            end = n if space is None else space.start()
+        if end < 0:
+            pos = start + 1
+            continue
+        spans.append(line[start:end])
+        out += (line[kept:start], f"\x00PROT{len(spans) - 1}\x00")
+        kept = pos = end
+    out.append(line[kept:])
+    return "".join(out), spans
+
+
+_INLINE_STEP_RE = re.compile(
+    r"(?i)([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])"
+)
+
+
+_INLINE_STEP_BLOCKER_RE = re.compile(
+    r"(?i)\b(?:section|sec\.|article|art\.|cap\.|schedule|form|part|rule|table|band|method|tier|page|item|ugx|usd|shs|to|and|or)\Z"
+)
+
+
+def _split_inline_steps(line: str, indent: str) -> str:
+    """The old inline-step ``re.sub`` in one pass. Its pattern was ``[ \\t]+`` then ``_INLINE_STEP_RE``,
+    behind a ``(?<!\\b<word>)`` for each word of ``_INLINE_STEP_BLOCKER_RE``; its replacement was
+    ``\\n\\n<indent>\\1. \\2``.
+
+    That regex retried a space run from every space in it. Only the run's first space can
+    follow a blocking word, so a blocked run starts one space later, as the regex did.
+    """
+    out: list[str] = []
+    kept = 0
+    for m in _INLINE_STEP_RE.finditer(line):
+        start = m.start()
+        while start > kept and line[start - 1] in " \t":
+            start -= 1
+        # The longest blocking word is 8 characters; "\b" still sees the character before pos.
+        if start < m.start() and _INLINE_STEP_BLOCKER_RE.search(line, max(0, start - 8), start):
+            start += 1
+        if start >= m.start():
+            continue
+        out += (line[kept:start], f"\n\n{indent}{m.group(1)}. {m.group(2)}")
+        kept = m.end()
+    out.append(line[kept:])
+    return "".join(out)
+
+
+def _space_after_headings(text: str) -> str:
+    """``re.sub(r"(#{1,4}\\s+[^\\n]+)\\n([^\\n#])", r"\\1\\n\\n\\2", text)`` in one pass.
+
+    That regex rescanned a line from every "#" in it. Here each run of "#" is tried once. It takes
+    the first newline after its whitespace, then, as the regex backtracked, the newlines inside
+    that whitespace from the last.
+    """
+    out: list[str] = []
+    kept = pos = 0
+    n = len(text)
+    newline = -1  # the first "\n" at or after the last lookup; lookups only move forward
+    while (mark := text.find("#", pos)) >= 0:
+        ws = mark
+        while ws < n and text[ws] == "#":
+            ws += 1
+        end = ws
+        while end < n and text[end].isspace():
+            end += 1
+        pos = end
+        if end == ws:
+            continue
+        at = -1
+        if end < n:
+            if newline < end:
+                newline = text.find("\n", end)
+                newline = n if newline < 0 else newline
+            if newline + 1 < n and text[newline + 1] not in "\n#":
+                at = newline
+        if at < 0:
+            at = next(
+                (
+                    i
+                    for i in range(end - 1, ws + 1, -1)
+                    if text[i] == "\n" and text[i - 1] != "\n" and i + 1 < n and text[i + 1] not in "\n#"
+                ),
+                -1,
+            )
+        if at < 0:
+            continue
+        out += (text[kept:at], "\n")
+        kept = at
+        pos = at + 2
+    out.append(text[kept:])
+    return "".join(out)
+
+
 class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
@@ -1143,17 +1278,7 @@ class OutputGuard:
                 unsmashed_lines.append(line)
                 continue
             if not in_fence and "|" not in line:
-                protected_spans: list[str] = []
-
-                def _mask_protected(m: re.Match[str]) -> str:
-                    protected_spans.append(m.group(0))
-                    return f"\x00PROT{len(protected_spans) - 1}\x00"
-
-                masked_line = re.sub(
-                    r"`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:https?://|www\.)\S+",
-                    _mask_protected,
-                    line,
-                )
+                masked_line, protected_spans = _mask_protected_spans(line)
                 masked_line = re.sub(r",\.(?=\s|$|[A-Z\"'\)\]])", ".", masked_line)
                 masked_line = re.sub(r"([a-zA-Z\)\]])([!?])([A-Z])", r"\1\2 \3", masked_line)
                 masked_line = re.sub(r"([a-z\)\]])\.([A-Z][a-z])", r"\1. \2", masked_line)
@@ -1162,8 +1287,15 @@ class OutputGuard:
                     r"\n\n- \1",
                     masked_line,
                 )
-                for idx, span in enumerate(protected_spans):
-                    masked_line = masked_line.replace(f"\x00PROT{idx}\x00", span)
+                if protected_spans:
+                    # One pass. A replace per span rescanned the line once per span, and a later replace
+                    # could match a "\x00PROT<n>\x00" spelled by the placeholders around the text "PROT<n>".
+                    restore = {f"\x00PROT{idx}\x00": span for idx, span in enumerate(protected_spans)}
+                    masked_line = re.sub(
+                        "\x00PROT[0-9]+\x00",
+                        lambda m, table=restore: table.get(m.group(0), m.group(0)),
+                        masked_line,
+                    )
                 line = masked_line
                 if (
                     not re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+", line)
@@ -1187,12 +1319,7 @@ class OutputGuard:
                 )
                 lead_m = re.match(r"^(\s*)1\.\s+", line)
                 if lead_m:
-                    lead_indent = lead_m.group(1)
-                    line = re.sub(
-                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])",
-                        rf"\n\n{lead_indent}\1. \2",
-                        line,
-                    )
+                    line = _split_inline_steps(line, lead_m.group(1))
             unsmashed_lines.append(line)
         text = "\n".join(unsmashed_lines)
 
@@ -1239,8 +1366,9 @@ class OutputGuard:
             split_lines[idx] = line
         text = "\n".join(split_lines)
 
-        # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
-        if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):
+        # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded.
+        # Only whether a numbered line exists matters, so one digit is enough. "\d+" retried every digit of a run.
+        if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d\.\s|\n-\s", text)):
             text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+|Ekicweka\s+\d+|Dul\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
             text = re.sub(r"\b(Income Tax Act|Value Added Tax Act|Tax Procedures Code Act|East African Community Customs Management Act|Excise Duty Act|EACCMA)\b", r"**\1**", text, flags=re.IGNORECASE)
             text = re.sub(r"\b(TIN|VAT|PAYE|EFRIS|WHT|CIT|PIT|LED|AEO|AEOI|MAAC|CRS|FATCA|WCO|ASYCUDA|DTS|PRN|NIN|URSB)\b", r"**\1**", text)
@@ -1270,11 +1398,11 @@ class OutputGuard:
                     r"**Tela me URA ma Kimoko**:\n\nMan aye tela ma pire tek loyo ma anongo ki i kama ngec me URA oa iye:",
                     text,
                 )
-            if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):
+            if "**" not in text and not re.search(r"\d\.\s|\n-\s", text):
                 text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
         # Ensure blank line before and after markdown headings
         text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
-        text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)
+        text = _space_after_headings(text)
         # Normalize excessive blank lines, then paragraph a remaining wall of text.
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = _break_long_paragraphs(text)

@@ -14,7 +14,7 @@ verbatim.
 | Training and retention | "You grant Sunbird AI a perpetual, worldwide, royalty-free license to use, store, and analyze User Content to maintain, improve, and provide the Service, including for research, model training, and analytics." "When logged in, you can choose whether your User Content is used for improving our Service or training models. Without login, all data may be used for these purposes." Account content "is retained for as long as the account remains active or as needed to provide the Service". Content "incorporated into trained AI model weights" cannot be removed individually. |
 | Location | "Data may be processed in Uganda or elsewhere." The terms state they follow Uganda's Data Protection and Privacy Act, 2019. |
 | Breach notification | None owed to the customer. The terms say Sunbird "cannot guarantee absolute security" and ask users to "Notify us at info@sunbird.ai of any security breaches". |
-| Status | Both accounts answer 403 `ACCOUNT_SUSPENDED` (G539, [incident log](../../evidence/incident_log/README.md)). |
+| Status | Both accounts answer again since 2026-11-20; they had answered 403 `ACCOUNT_SUSPENDED` from 2026-11-09 (G539, [incident log](../../evidence/incident_log/README.md)). The primary reaches its quota and the fallback then serves. A hung primary can use up the speech deadline before the fallback answers (G714). |
 | Price | Not published ([cost_per_decision.csv](../../monitoring/cost_per_decision.csv)). |
 
 Open for the owner (G665): by default the terms let Sunbird train on what the
