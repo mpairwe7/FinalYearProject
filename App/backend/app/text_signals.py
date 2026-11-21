@@ -1380,6 +1380,46 @@ LOCALIZED_CONTACT_FOOTERS = {
     ),
 }
 
+#: A whole message that turns down more help (G191), compared with punctuation
+#: and case removed. The lg/sw/nyn/ach entries are the words the voice
+#: receptionist already takes as declining an offer (``receptionist.brain``
+#: ``_OFFER_DECLINE_RE``, locales from ``receptionist.phrases._NO_WORDS``).
+_DECLINES = frozenset({
+    "no", "no thanks", "no thank you", "nope", "nothing", "nothing else",
+    "thats all", "that is all", "im good", "all good",
+    "nedda",  # lg
+    "hapana",  # sw
+    "ngaaha", "apana",  # nyn
+    "pe",  # ach
+})
+
+#: Fixed replies that end on an offer of more help, in every locale.
+_OPEN_OFFER_ENDINGS = (
+    *GREETING_REPLY_BY_LOCALE.values(),
+    *GRATITUDE_REPLY_BY_LOCALE.values(),
+    CONTACT_FOOTER,
+    *LOCALIZED_CONTACT_FOOTERS.values(),
+)
+#: A generated answer whose closing question asks this is offering more help.
+_OPEN_OFFER_QUESTION_RE = re.compile(r"\b(?:anything else|how (?:can|may) i (?:help|assist))\b")
+
+
+def declines_open_offer(message: str, previous_reply: str) -> bool:
+    """True when *message* only turns down the offer of more help *previous_reply* ended on.
+
+    Both lists are closed (G191). "No, what about PAYE?" is not a decline, and
+    a "No" after any other question (a workflow's yes/no, a clarification, an
+    officer offer) answers that question, so neither ends the conversation.
+    """
+    if " ".join(re.sub(r"[^\w\s]", "", message.lower()).split()) not in _DECLINES:
+        return False
+    reply = previous_reply.strip()
+    if reply.endswith(_OPEN_OFFER_ENDINGS):
+        return True
+    closing_sentence = re.split(r"[.!?\n]", reply[:-1])[-1]
+    return reply.endswith("?") and bool(_OPEN_OFFER_QUESTION_RE.search(closing_sentence.lower()))
+
+
 GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"
 )

@@ -202,6 +202,7 @@ from ..text_signals import (
     GROUNDED_REVISION_PREAMBLE,
     LOCALIZED_CONTACT_FOOTERS,
     NO_HITS_REPLY,
+    declines_open_offer,
     get_greeting_reply,
     get_greeting_next_actions,
     strip_conversational_prefix,
@@ -3893,17 +3894,23 @@ _FAREWELL_ONLY = re.compile(
 )
 
 
-def _closing_courtesy_reply(message: str, locale: str = "en") -> str:
+def _closing_courtesy_reply(
+    message: str, locale: str = "en", history: list[dict[str, str]] | None = None
+) -> str:
     """Reply for a gratitude/farewell turn, or "" when *message* is neither.
 
     Exact-phrase matching on purpose: mixed messages like
     "thanks, but it still fails" must fall through to distress detection
-    and retrieval rather than end the conversation on a sign-off.
+    and retrieval rather than end the conversation on a sign-off. A bare
+    "No" is a farewell only when the previous reply ended on an offer of
+    more help (``declines_open_offer``).
     """
     clean = message.strip()
     if _GRATITUDE_ONLY.match(clean):
         return GRATITUDE_REPLY
     if _FAREWELL_ONLY.match(clean):
+        return FAREWELL_REPLY
+    if history and declines_open_offer(clean, str(history[-1].get("bot_reply") or "")):
         return FAREWELL_REPLY
     return ""
 
@@ -12045,7 +12052,7 @@ class ChatModel:
 
             # 1a3. Gratitude / farewell — closing courtesy, same always-on
             # short-circuit as greetings (no retrieval, never scored).
-            closing_reply = _closing_courtesy_reply(core_msg, locale)
+            closing_reply = _closing_courtesy_reply(core_msg, locale, conversation_history)
             if closing_reply:
                 closing = {
                     "reply": closing_reply,
@@ -14204,7 +14211,7 @@ class ChatModel:
             }
 
         # Gratitude / farewell — parity with the REST path.
-        closing_reply = _closing_courtesy_reply(core_msg_s, locale)
+        closing_reply = _closing_courtesy_reply(core_msg_s, locale, conversation_history)
         if closing_reply:
             return {
                 "reply": closing_reply,
