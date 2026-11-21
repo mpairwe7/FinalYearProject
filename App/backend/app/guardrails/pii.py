@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import re
-import string
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
+
+from ..linear_text import email_spans
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -71,47 +73,9 @@ def is_official_ura_email(email: str) -> bool:
     return domain in {"ura.go.ug", "go.ug"} or domain.endswith((".ura.go.ug", ".go.ug"))
 
 
-_LOCAL_PART_CHARS = frozenset(string.ascii_letters + string.digits + "._%+-")
-_DOMAIN_CHARS = frozenset(string.ascii_letters + string.digits + ".-")
-
-
-def _at_word_boundary(text: str, i: int) -> bool:
-    """Whether ``\\b`` holds at *i*: a ``\\w`` character on one side of it only."""
-    before = i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_")
-    after = i < len(text) and (text[i].isalnum() or text[i] == "_")
-    return before != after
-
-
-def _domain_end(text: str, i: int) -> int | None:
-    """End of ``[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b`` matched at *i*, the last dot first as the regex backtracks."""
-    run_end = i
-    while run_end < len(text) and text[run_end] in _DOMAIN_CHARS:
-        run_end += 1
-    dot = text.rfind(".", i + 1, run_end)
-    while dot > i:
-        tld_end = dot + 1
-        while tld_end < len(text) and text[tld_end] in string.ascii_letters:
-            tld_end += 1
-        if tld_end - dot > 2 and _at_word_boundary(text, tld_end):
-            return tld_end
-        dot = text.rfind(".", i + 1, dot)
-    return None
-
-
-def _email_spans(text: str) -> Iterator[tuple[int, int]]:
+def email_address_spans(text: str) -> Iterator[tuple[int, int]]:
     """The spans ``re.finditer(r"\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", text)`` gives (G715)."""
-    prev_end = 0
-    at = text.find("@")
-    while at >= 0:
-        start = at
-        while start > prev_end and text[start - 1] in _LOCAL_PART_CHARS:
-            start -= 1
-        start = next((i for i in range(start, at) if _at_word_boundary(text, i)), at)
-        end = _domain_end(text, at + 1) if start < at else None
-        if end is not None:
-            yield start, end
-            prev_end = end
-        at = text.find("@", at + 1)
+    return email_spans(text, r"[A-Za-z0-9._%+-]", r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 
 _CURRENCY_INDICATORS_BEFORE = re.compile(r"(?i)\b(?:ugx|ush|shs|usd|eur|gbp|\$|€|£)\s*$")
@@ -197,7 +161,7 @@ def redact_pii_text(
     if kinds is None or "email" in kinds:
         parts: list[str] = []
         kept = 0
-        for start, end in _email_spans(result):
+        for start, end in email_address_spans(result):
             addr = result[start:end]
             if not (is_official_ura_email(addr) or addr in allowed_set):
                 parts += (result[kept:start], "[REDACTED_EMAIL]")
@@ -244,7 +208,7 @@ def _pii_matches(text: str) -> Iterator[tuple[str, str]]:
     if not text:
         return
     cleaned = _strip_hidden_pii_evasion(text)
-    for start, end in _email_spans(cleaned):
+    for start, end in email_address_spans(cleaned):
         if not is_official_ura_email(cleaned[start:end]):
             yield "email", cleaned[start:end]
     for pii_type, pattern in _PII_PATTERNS:
