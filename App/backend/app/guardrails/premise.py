@@ -217,6 +217,12 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "oil",
     "gas",
     "oil and gas",
+    # Named in App/Data/pdfs (G719): the environment levy (10580_DT_LAWS_JULY_2021),
+    # the mobile money levy (Tax-Amendments-FY-2018-19) and anti-dumping duty
+    # (East_Africa_Community_Customs_Management_Act_Revised).
+    "environment",
+    "mobile money",
+    "anti dumping",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent
@@ -228,7 +234,7 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "calculating", "calculated", "compute", "computing", "computed", "deduct", "deducting",
     "deducted", "charge", "charging", "charged", "apply", "applying", "applied", "collect",
     "collecting", "collected", "remit", "remitting", "remitted", "avoid", "evade", "evading",
-    "learn", "know", "see", "show", "tell", "check", "verify", "get", "got", "help", "want",
+    "learn", "know", "see", "show", "tell", "explain", "check", "verify", "get", "got", "help", "want",
     "need", "wish", "like", "prefer", "ask", "start", "stop", "resume",
     "order", "ordering", "ordered", "acquire", "acquiring", "acquired", "buy", "buying", "bought",
     "purchase", "purchasing", "purchased", "obtain", "obtaining", "obtained",
@@ -272,6 +278,12 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "claiming", "recover", "recovering", "recovered", "provide", "providing", "provided",
     "specify", "administer", "administering", "administered", "download", "downloading",
     "access", "resolve", "resolving", "resolved",
+    # Words that date or qualify a tax without naming it ("the latest stamp duty",
+    # "the 28-day surcharge", "bilateral tax treaties", G719). "new" and "current"
+    # are listed above; a possessive "'s" never reaches the modifier, which takes
+    # no apostrophe.
+    "latest", "recent", "updated", "prevailing", "proposed", "upcoming", "revised",
+    "present", "existing", "respective", "day", "days", "bilateral", "double",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
@@ -308,12 +320,15 @@ _INTERROGATIVE_PREFIX = re.compile(
 #: App/tests/agents/test_premise_guard_recall.py, while the benchmark it targeted
 #: stayed at 0 false positives without them (G244). Qualifiers belong in
 #: ``_STOP_AND_ACTION_WORDS`` instead, which costs no recall.
+#: The words that follow a tax noun across a hyphen ("tax-exempt"). Passage words
+#: lose their hyphens, so the passage check also tests these on their own.
+_HYPHEN_COMPOUND_FOLLOWERS = ("free", "exempt", "inclusive", "exclusive", "deductible")
 _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"^(table|tables|bracket|brackets|rate|rates|band|bands|return|returns|"
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
     r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
     r"office|offices|agent|agents|practitioner|practitioners|curriculum|curricula|"
-    r"-(?:free|exempt|inclusive|exclusive|deductible))\b",
+    r"-(?:" + "|".join(_HYPHEN_COMPOUND_FOLLOWERS) + r"))\b",
     re.IGNORECASE,
 )
 
@@ -325,6 +340,37 @@ _SINGULAR_KIND = {
     "tariffs": "tariff",
     "surcharges": "surcharge",
 }
+_PLURAL_KIND = {singular: plural for plural, singular in _SINGULAR_KIND.items()}
+
+
+def _begins(passage_word: str, word: str) -> bool:
+    # A dropped first letter is a typo too ("ncome"), but a short word would
+    # then match too much ("ax" in "tax").
+    return passage_word.startswith(word) or (len(word) >= 4 and passage_word[1:].startswith(word))
+
+
+def _passages_name(name: list[str], passage_words: list[str], nouns: tuple[str, ...] = ()) -> bool:
+    """Whether the words of *name* begin consecutive passage words, then one of *nouns* if given.
+
+    A prefix keeps a misspelt or singular name matching its tax ("custom duty"
+    in "customs duty", "capital gain" in "capital gains"); a word start keeps
+    "holding tax" out of "withholding tax". With *nouns*, the passage must name a
+    tax, not a compound ("foreign tax credit" names no "foreign tax", G719).
+    """
+    span = len(name) + (1 if nouns else 0)
+    for j in range(len(passage_words) - span + 1):
+        if not all(_begins(passage_words[j + k], word) for k, word in enumerate(name)):
+            continue
+        if not nouns:
+            return True
+        after = passage_words[j + span] if j + span < len(passage_words) else ""
+        if (
+            passage_words[j + len(name)] in nouns
+            and not _NON_TAX_NOUN_FOLLOWERS.match(after)
+            and after not in _HYPHEN_COMPOUND_FOLLOWERS
+        ):
+            return True
+    return False
 
 
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
@@ -381,16 +427,16 @@ def check_false_premise(
     if not candidates:
         return FalsePremiseResult(is_false_premise=False)
 
-    corpus_text = ""
+    passage_words: list[str] = []
     if hits:
         corpus_parts = []
         for h in hits:
             corpus_parts.append(str(h.get("text") or h.get("answer") or ""))
             corpus_parts.append(str(h.get("question") or ""))
             corpus_parts.append(str(h.get("source") or ""))
-        # Hyphens become spaces, as they do in the extracted modifier, or a
-        # hyphenated name ("pro-rata") never matches its own passage.
-        corpus_text = re.sub(r"[\s\-]+", " ", " ".join(corpus_parts).lower())
+        # Split on everything but letters and digits, as the modifier is split
+        # on hyphens, so a hyphenated name ("pro-rata") matches its own passage.
+        passage_words = re.findall(r"[a-z0-9]+", " ".join(corpus_parts).lower())
 
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
@@ -427,13 +473,12 @@ def check_false_premise(
         ):
             continue
 
-        # Check whether the exact concept phrase appears
-        # in the retrieved corpus or official rate tables
-        found_in_corpus = (
-            clean_mod in corpus_text
-            or f"{clean_mod} {kind}" in corpus_text
-        )
-        if found_in_corpus:
+        # The passages name the tax: the whole modifier, or an ending of it
+        # followed by the tax noun ("stamp duty" for "Kampala stamp duty", G719).
+        words = clean_mod.split()
+        if _passages_name(words, passage_words) or any(
+            _passages_name(words[i:], passage_words, (kind, _PLURAL_KIND[kind])) for i in range(1, len(words))
+        ):
             continue
 
         # Concept is not a known Ugandan tax and absent from retrieved passages
