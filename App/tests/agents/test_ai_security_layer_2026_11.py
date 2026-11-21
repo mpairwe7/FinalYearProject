@@ -419,11 +419,26 @@ def test_text_the_prompt_tells_the_model_to_say_is_not_a_leak(answer: str) -> No
         "[" * 20000,  # the legacy link regex rescanned from every bracket
         "[a](" + "b" * 20000,
         "a." * 10000 + "zz",
+        "No. " * 5000,  # each sentence check searched the whole merged sentence (7.7 s, G467)
+        "A 1. " * 4000,  # the same through the bare-number check (10.8 s)
+        "1. a" + " " * 20000 + "x",  # the inline-step split retried a space run from every space (4.1 s)
+        "Tax is due. " + "*" * 40 + "a",  # "(?:\*{1,2})*" backtracked exponentially on a run of stars
     ],
-    ids=["digits", "when-whitespace", "role-tabs", "brackets", "open-link", "dotted"],
+    ids=[
+        "digits",
+        "when-whitespace",
+        "role-tabs",
+        "brackets",
+        "open-link",
+        "dotted",
+        "abbreviations",
+        "bare-numbers",
+        "step-spaces",
+        "starred-sentence",
+    ],
 )
 def test_guards_stay_linear_on_hostile_third_party_text(hostile: str) -> None:
-    """A poisoned 20 KB passage or upload must not hold a worker (OWASP LLM10)."""
+    """A poisoned 20 KB passage or upload, or an answer quoting one, must not hold a worker (OWASP LLM10)."""
     import time
 
     started = time.perf_counter()
@@ -432,6 +447,7 @@ def test_guards_stay_linear_on_hostile_third_party_text(hostile: str) -> None:
     neutralize_untrusted_links(hostile)
     fence_untrusted_document_body(hostile)
     scan_retrieved_text(hostile)
+    OutputGuard.normalize_structure(hostile)
 
     assert time.perf_counter() - started < 2.0
 
