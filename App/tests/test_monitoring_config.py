@@ -7,9 +7,9 @@ error. This test builds the catalogue of metrics the API really exports (by
 reading the code that records them) and fails when a rule or dashboard panel
 names anything outside it, when an alert lacks its severity or runbook, when
 a runbook link points at a heading that does not exist, or when the rules
-drift from the SLOs in App/monitoring/slo/.
+drift from the SLOs in App/infra/monitoring/slo/.
 
-promtool unit tests for the rule logic live in App/monitoring/tests/ (CI job
+promtool unit tests for the rule logic live in App/infra/monitoring/tests/ (CI job
 "Monitoring config").
 """
 
@@ -23,7 +23,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-MONITORING = ROOT / "App" / "monitoring"
+MONITORING = ROOT / "App" / "infra" / "monitoring"
 APP = ROOT / "App" / "backend" / "app"
 REPO_URL = "https://github.com/mpairwe7/FinalYearProject/blob/dev/"
 

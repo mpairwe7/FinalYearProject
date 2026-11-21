@@ -99,7 +99,7 @@ FinalYearProject/
 │   └── lgaudio/          # Audio files
 ├── App/governance/            # AI governance registry (start at REGISTRY_README.md)
 │   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
-│   ├── policies/ evidence/ controls/ App/monitoring/ audit/ vendors/
+│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
 │   └── compliance_check.py
 ├── App/ml/                    # Production quality gates + corpus tooling
 │   ├── configs/          # RAG quality gate thresholds
@@ -110,7 +110,7 @@ FinalYearProject/
 │   ├── metrics/          # Training metrics
 │   ├── reports/          # Validation reports
 │   └── plots/            # Visualizations
-├── App/monitoring/            # Prometheus, Grafana, alerting
+├── App/infra/monitoring/            # Prometheus, Grafana, alerting
 │   ├── prometheus.yml    # Scrape config
 │   ├── alerting-rules.yml # SLO, Qdrant and audit-trail alert rules (17 rules)
 │   └── grafana/          # Provisioned dashboards + datasources
@@ -175,8 +175,8 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `App/frontend/vitest.config.ts` | Vitest test runner + V8 coverage (60% threshold) |
 | `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
 | `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
-| `App/monitoring/prometheus.yml` | Prometheus scrape targets |
-| `App/monitoring/alerting-rules.yml` | 17 alert rules (SLO, Qdrant index lifecycle, audit trail) |
+| `App/infra/monitoring/prometheus.yml` | Prometheus scrape targets |
+| `App/infra/monitoring/alerting-rules.yml` | 59 alert rules in 11 groups: availability, latency, quality, audit and compliance, security, dependencies, the Qdrant index lifecycle, the agent planner and live research, agent resilience, crawl freshness and the call receptionist |
 | `App/security/.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ### Current runtime toggles

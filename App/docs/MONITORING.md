@@ -8,7 +8,7 @@ dark end to end (gaps G99–G112 in
 no series, and nothing routed an alert anywhere.
 
 Everything below is checked in CI: rule logic by `promtool test rules`
-(`App/monitoring/tests/`), and the agreement between rules, dashboard, SLOs,
+(`App/infra/monitoring/tests/`), and the agreement between rules, dashboard, SLOs,
 runbook links and the metrics the code really emits by
 `App/tests/test_monitoring_config.py`.
 
@@ -206,7 +206,7 @@ are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="er
 ## 4. SLOs and alerting
 
 The SLOs are defined once, in OpenSLO v1:
-[`App/monitoring/slo/ura-chatbot.openslo.yaml`](../monitoring/slo/ura-chatbot.openslo.yaml).
+[`App/infra/monitoring/slo/ura-chatbot.openslo.yaml`](../infra/monitoring/slo/ura-chatbot.openslo.yaml).
 
 | SLO | Objective | Window | SLI (recording rule) |
 | --- | --- | --- | --- |
@@ -223,7 +223,7 @@ Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
 workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
 budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-`App/monitoring/alerting-rules.yml` holds 58 rules in 11 groups:
+`App/infra/monitoring/alerting-rules.yml` holds 59 rules in 11 groups:
 availability, latency, quality, audit-and-compliance, security, dependencies,
 the Qdrant index lifecycle, the agent planner and live research, agent
 resilience, crawl freshness and the call receptionist. Each carries `severity` (`critical` pages,
@@ -231,7 +231,7 @@ resilience, crawl freshness and the call receptionist. Each carries `severity` (
 runbook. Ratios aggregate with `sum()` before dividing — the old rules
 divided each error series by its own request series and saw 100%.
 
-Alertmanager (`App/monitoring/alertmanager.yml`) sends everything to the webhook
+Alertmanager (`App/infra/monitoring/alertmanager.yml`) sends everything to the webhook
 in `ALERTMANAGER_WEBHOOK_URL`, critical alerts every hour until resolved,
 warnings every four. While `UraApiDown` fires, the API's other backend alerts
 are inhibited as symptoms.
@@ -239,7 +239,7 @@ are inhibited as symptoms.
 Test rule changes before pushing:
 
 ```bash
-docker run --rm -v "$PWD/App/monitoring:/m:ro" -w /m --entrypoint promtool \
+docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" -w /m --entrypoint promtool \
   prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
 python -m pytest App/tests/test_monitoring_config.py -q
 ```
@@ -359,7 +359,7 @@ as when it misses an absolute threshold.
 
 ## 9. Dashboard
 
-`App/monitoring/grafana/dashboards/ura-chatbot-overview.json` (provisioned):
+`App/infra/monitoring/grafana/dashboards/ura-chatbot-overview.json` (provisioned):
 service health and SLOs (budget left, slow-turn share, p95 by transport and by
 mode, probes), conversations (outcomes, containment, retrieval mode,
 faithfulness, online evaluation, feedback), models and tools (tokens/s, time
@@ -596,8 +596,8 @@ its API was answering without the local LLM.
 | `App/backend/app/observability/security_events.py` | OWASP-vocabulary security events |
 | `App/backend/app/observability/client_telemetry.py` | RUM endpoints' models and recording |
 | `App/backend/app/audit/turns.py`, `audit/tsa.py` | Audit rows per turn; RFC 3161 seals |
-| `App/monitoring/prometheus.yml`, `recording-rules.yml`, `alerting-rules.yml` | Scrape, SLIs, alerts |
-| `App/monitoring/alertmanager.yml`, `blackbox.yml`, `otel-collector.yaml`, `loki.yaml` | Routing, probes, OTLP pipeline, log store |
-| `App/monitoring/slo/ura-chatbot.openslo.yaml` | SLO definitions |
-| `App/monitoring/tests/alerting-rules.test.yml` | promtool unit tests |
+| `App/infra/monitoring/prometheus.yml`, `recording-rules.yml`, `alerting-rules.yml` | Scrape, SLIs, alerts |
+| `App/infra/monitoring/alertmanager.yml`, `blackbox.yml`, `otel-collector.yaml`, `loki.yaml` | Routing, probes, OTLP pipeline, log store |
+| `App/infra/monitoring/slo/ura-chatbot.openslo.yaml` | SLO definitions |
+| `App/infra/monitoring/tests/alerting-rules.test.yml` | promtool unit tests |
 | `App/tests/test_monitoring_config.py` | Config ↔ code consistency |

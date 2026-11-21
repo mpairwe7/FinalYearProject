@@ -1,10 +1,10 @@
-# Monitoring config — every file in App/monitoring/ checked by its own tool.
+# Monitoring config — every file in App/infra/monitoring/ checked by its own tool.
 #
 # The alerting pipeline was dark for months because nothing ever loaded these
 # files: a rules file Prometheus never read, a selector on a label that did
 # not exist and an Alertmanager that was never deployed all passed review.
 # This job loads each config the way production does and runs the promtool
-# unit tests in App/monitoring/tests/. App/tests/test_monitoring_config.py (root
+# unit tests in App/infra/monitoring/tests/. App/tests/test_monitoring_config.py (root
 # suite) checks the same files against the metrics the code really exports.
 name: Monitoring config
 
@@ -12,14 +12,14 @@ on:
   push:
     branches: [main, dev, develop]
     paths:
-      - "App/monitoring/**"
+      - "App/infra/monitoring/**"
       - "App/docker-compose.yml"
       - "App/infra/compose/docker-compose.full.yml"
       - ".github/workflows/monitoring-config.yml"
   pull_request:
     branches: [main, dev, develop]
     paths:
-      - "App/monitoring/**"
+      - "App/infra/monitoring/**"
       - "App/docker-compose.yml"
       - "App/infra/compose/docker-compose.full.yml"
       - ".github/workflows/monitoring-config.yml"
@@ -46,28 +46,28 @@ jobs:
         run: |
           # check config insists the scrape credentials file exists; mount a placeholder.
           echo placeholder > "${RUNNER_TEMP}/metrics_token"
-          docker run --rm -v "$PWD/App/monitoring:/etc/prometheus:ro" \
+          docker run --rm -v "$PWD/App/infra/monitoring:/etc/prometheus:ro" \
             -v "${RUNNER_TEMP}/metrics_token:/run/secrets/ura_metrics_token:ro" \
             -w /etc/prometheus --entrypoint /bin/promtool prom/prometheus:v3.13.4 \
             check config prometheus.yml
-          docker run --rm -v "$PWD/App/monitoring:/m:ro" -w /m --entrypoint /bin/promtool \
+          docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" -w /m --entrypoint /bin/promtool \
             prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
 
       - name: Alertmanager config
         run: |
-          docker run --rm -v "$PWD/App/monitoring:/m:ro" --entrypoint /bin/amtool \
+          docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" --entrypoint /bin/amtool \
             prom/alertmanager:v0.34.1 check-config /m/alertmanager.yml
 
       - name: OpenTelemetry Collector config
         run: |
-          docker run --rm -v "$PWD/App/monitoring:/m:ro" \
+          docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" \
             otel/opentelemetry-collector-contrib:0.162.0 validate --config=/m/otel-collector.yaml
 
       - name: Loki and blackbox configs
         run: |
-          docker run --rm -v "$PWD/App/monitoring:/m:ro" grafana/loki:3.7.8 \
+          docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" grafana/loki:3.7.8 \
             -config.file=/m/loki.yaml -verify-config
-          docker run --rm -v "$PWD/App/monitoring:/m:ro" prom/blackbox-exporter:v0.28.0 \
+          docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" prom/blackbox-exporter:v0.28.0 \
             --config.file=/m/blackbox.yml --config.check
 
       - name: Compose monitoring profile resolves

@@ -13,8 +13,8 @@ An `AGENTS.md` or `CLAUDE.md` at the repository root is a local pointer to it an
 | `App/evals/` | Golden sets, red-team gate, preference export | `App/evals/AGENTS.md` |
 | `App/Data/` | FAQ, PDFs, crawl, eval JSONL | `App/Data/README.md` |
 | `App/ml/` | Offline training, corpus pipelines, local ASR/MT/TTS wrappers | `App/ml/AGENTS.md` |
-| `App/infra/` | Compose overlays (`compose/`) and example HPA (not applied) | `App/infra/AGENTS.md` |
-| `App/monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `App/monitoring/AGENTS.md` |
+| `App/infra/` | Compose overlays (`compose/`), the monitoring config (`monitoring/`) and example HPA (not applied) | `App/infra/AGENTS.md` |
+| `App/infra/monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `App/infra/monitoring/AGENTS.md` |
 | `App/governance/` | AI governance registry (systems, policies, evidence, controls, monitoring, audit, vendors) + compliance gate | `App/governance/AGENTS.md` |
 | `App/threat-model/` | STRIDE / OWASP / MITRE ATLAS threat model as code | `App/threat-model/AGENTS.md` |
 | `App/docs/` | Architecture, gaps, model card | `App/AGENTS.md` |

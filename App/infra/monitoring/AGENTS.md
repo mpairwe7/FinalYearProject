@@ -1,4 +1,4 @@
-# App/monitoring/ (Prometheus, Alertmanager & OpenSLO)
+# App/infra/monitoring/ (Prometheus, Alertmanager & OpenSLO)
 
 Owns observability configuration, recording/alerting rules, and service-level objectives.
 

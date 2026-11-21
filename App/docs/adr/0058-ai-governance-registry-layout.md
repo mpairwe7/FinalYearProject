@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, 2026-11-17. The project owner asked for the AI governance files to
+Accepted, 2026-11-17. Amended 2026-11-21: where this record names the live monitoring configuration
+(the files Prometheus loads) at `App/monitoring/`, it is now `App/infra/monitoring/`
+(ADR-0064 phase G). In the slot list below, `App/monitoring/` means the registry's
+own `monitoring/` module, `App/governance/monitoring/`. The project owner asked for the AI governance files to
 follow a governance registry layout: `systems/{system_id}/`, `policies/`,
 `evidence/`, `controls/`, `App/monitoring/`, `audit/`, `vendors/{vendor}/`, a
 registry README and an owners file.

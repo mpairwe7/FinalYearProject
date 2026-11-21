@@ -17,3 +17,8 @@ no live cluster in this checkout.
 - `k8s/keda-chat.yaml` — example KEDA scaler. Not applied.
 - `k8s/chaos-experiments.yaml` — example Chaos Mesh. Game-day only.
 - `postgres/rls.sql` — RLS template. Not auto-applied.
+- `monitoring/` — the configuration the base's `monitoring` profile mounts:
+  Prometheus scrape targets, recording and alerting rules, Alertmanager routing,
+  the OpenTelemetry Collector, Loki, the blackbox prober and Grafana provisioning.
+  It also holds the OpenSLO objectives and the `promtool` rule tests, which CI
+  checks and Compose does not mount. `App/docs/MONITORING.md` explains it.

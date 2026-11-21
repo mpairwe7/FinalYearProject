@@ -1,5 +1,5 @@
-# promtool unit tests for App/monitoring/{recording,alerting}-rules.yml.
-#   docker run --rm -v "$PWD/App/monitoring:/m:ro" -w /m --entrypoint promtool \
+# promtool unit tests for App/infra/monitoring/{recording,alerting}-rules.yml.
+#   docker run --rm -v "$PWD/App/infra/monitoring:/m:ro" -w /m --entrypoint promtool \
 #     prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
 # Each case pins a failure the old rules had (see App/docs/GAPS_AND_AGENTIC_ROADMAP.md G99).
 rule_files:
