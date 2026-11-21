@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-11-07
+Accepted — 2026-11-07. Amended 2026-11-21: `normalize_structure` runs in linear time (G467, pull request #835).
 
 ## Context and Problem Statement
 
@@ -93,7 +93,8 @@ on recognition, and it makes iterating against them expensive.
    pre-existing on `dev`. Each now has a single owner for its whitespace, maximal tokens, or bounded
    line-local classes. A test holds every guard under 2 s on six hostile shapes. The link pass now
    neutralizes an unsafe scheme behind a nested label itself, since the narrowed legacy regex no longer
-   reaches one. `OutputGuard.normalize_structure` is still super-linear on degenerate text (G467, open).
+   reaches one. `OutputGuard.normalize_structure` was still super-linear on degenerate text when this record
+   was accepted; G467 has since made it linear.
 9. **An honest gate (G459).** `redteam_corpus.jsonl` is read one row per `\n`, a row that does not parse
    fails CI, and each attack class has a floor. The corpus grew from 34 to 69 rows. The new rows are
    paraphrase, obfuscation, encoding, extraction, Kiswahili and Luganda, and `channel: retrieved` indirect
@@ -146,7 +147,7 @@ CodeRabbit's review produced 19 findings, and each was confirmed by a failing te
   `OUTPUT_LINK_ALLOWED_HOSTS` (never with a redirector). The answer's citations are unaffected.
 - Negative: `normalize_structure`, the pre-existing formatter, takes about 0.5 s on 4 KB of brackets
   (0.008 s on 4 KB of prose). It runs only on model output, which `LLM_MAX_TOKENS` bounds, and off the event
-  loop. A rewrite is tracked as G467 rather than mixed into this change.
+  loop. A rewrite was tracked as G467 rather than mixed into this change; G467 has since closed it.
 - Neutral: corpus ingest (`crawl_corpus.review_pages`, `pdf_corpus`) now also quarantines pages that
   address an AI. That matched none of the 1,139 crawled pages in the snapshot.
 
