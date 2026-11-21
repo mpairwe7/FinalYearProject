@@ -285,7 +285,10 @@ def _post(path: str, *, deadline: float | None = None, **kwargs: Any) -> httpx.R
 
     *deadline* (``time.monotonic()``) bounds the whole call, failover
     included: each attempt's timeout is cut to the time left, and no new
-    attempt starts once it has passed (ADR-0036).
+    attempt starts once it has passed (ADR-0036). A caller that gives a
+    deadline and no *timeout* has the time left split evenly among the
+    accounts still to try, so a hung primary cannot spend the fallback's
+    share (G714).
     """
     tokens = _account_tokens()
     base_timeout = kwargs.pop("timeout", None)
@@ -306,6 +309,8 @@ def _post(path: str, *, deadline: float | None = None, **kwargs: Any) -> httpx.R
                 remaining = deadline - time.monotonic()
                 if remaining < 1.0:
                     raise last_exc or httpx.TimeoutException(f"Sunbird {path}: turn budget spent")
+                if base_timeout is None:
+                    remaining /= len(active_tokens) - idx
                 timeout = min(base_timeout or SUNBIRD_TIMEOUT, remaining)
             try:
                 call_kwargs = dict(kwargs, timeout=timeout) if timeout is not None else kwargs
@@ -357,8 +362,8 @@ def _post(path: str, *, deadline: float | None = None, **kwargs: Any) -> httpx.R
                 # two identical waits on the same one first.
                 last_exc = e
                 logger.warning(
-                    "Sunbird timeout on %s (account #%d) after %ss; not retrying "
-                    "this account — failing over", path, idx + 1, SUNBIRD_TIMEOUT,
+                    "Sunbird timeout on %s (account #%d) after %.0fs; not retrying "
+                    "this account — failing over", path, idx + 1, timeout or SUNBIRD_TIMEOUT,
                 )
                 break
             except httpx.HTTPError as e:  # transport errors — a retry can help
@@ -543,8 +548,10 @@ def speech_to_text(
     audio_bytes: bytes,
     language: str = "eng",
     filename: str = "audio.wav",
+    *,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
-    """Transcribe audio via Sunbird API."""
+    """Transcribe audio via Sunbird API, within *deadline* (``time.monotonic()``) when given."""
     if not is_available():
         return None
     try:
@@ -554,7 +561,7 @@ def speech_to_text(
         # here — it used to be sent only when truthy, which would have meant
         # omitting a mandatory field rather than falling back to English.
         data: dict[str, Any] = {"language": language or "eng"}
-        resp = _post("/tasks/audio/transcriptions", files=files, data=data)
+        resp = _post("/tasks/audio/transcriptions", files=files, data=data, deadline=deadline)
         result = resp.json()
         transcription = (
             result.get("output", {}).get("audio_transcription")
@@ -583,8 +590,10 @@ def text_to_speech(
     text: str,
     locale: str = "en",
     voice: str | None = None,
+    *,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
-    """Convert text to speech via Sunbird native voices.
+    """Convert text to speech via Sunbird native voices, within *deadline* when given.
 
     *voice* names a catalog speaker for this locale; it is validated by
     `resolve_tts_voice` and ignored when it does not belong to *locale*. Until
@@ -609,7 +618,7 @@ def text_to_speech(
         }
         if lang_code:
             payload["language"] = lang_code  # orpheus-only field
-        resp = _post("/tasks/audio/speech", json=payload)
+        resp = _post("/tasks/audio/speech", json=payload, deadline=deadline)
         data = resp.json()
         audio_url = data.get("output", {}).get("audio_url") or data.get("audio_url")
         logger.info("Sunbird TTS (%s, voice %s): url=%s", locale, voice,
