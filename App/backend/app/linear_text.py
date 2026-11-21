@@ -97,7 +97,9 @@ def email_spans(
     *local_class* is one character class, and neither it nor *domain* matches "@". The regex
     restarts at every word boundary in a run of local-part characters and reads the run to its
     end each time. This reads each run once, back from its "@", and matches *domain* anchored
-    with ``\\A`` on the text up to the next "@" (G715, G716).
+    with ``\\A`` on the text up to the next "@" (G715, G716). That equality assumes Unicode
+    matching and a *domain* without anchors: under ``re.ASCII``, or with ``$`` in *domain*, the
+    result can differ from the regex. No caller passes either.
     """
     local_char = re.compile(local_class, flags)
     domain_at = re.compile(rf"\A(?:{domain})", flags)

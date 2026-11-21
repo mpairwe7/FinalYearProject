@@ -70,9 +70,9 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
   at the beginning of the field.
 
 Each replacement returns the same output as the regex it replaces, except the corrected email
-TLD class above. That was checked on
-128,999 strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both
-test trees, and fuzz.
+TLD class above. For the replacements before these amendments that was checked on 128,999
+strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both test
+trees, and fuzz. The G715 and G716 rows give their own checks.
 
 ## Consequences
 
