@@ -188,6 +188,25 @@ def test_a_compound_in_the_passages_does_not_name_a_tax() -> None:
     assert check_false_premise("What is the wealth foreign tax?", [hit]).is_false_premise
 
 
+@pytest.mark.parametrize(
+    "passage",
+    ["Foreign tax-exempt income is reported separately.", "Foreign tax-free allowances are listed."],
+)
+def test_a_hyphenated_compound_in_the_passages_does_not_name_a_tax(passage: str) -> None:
+    assert check_false_premise("What is the wealth foreign tax?", [{"answer": passage}]).is_false_premise
+
+
+@pytest.mark.parametrize(
+    ("question", "passage"),
+    [
+        ("What is the Kampala stamp duty?", "Stamp duty is charged on instruments under the Stamp Duty Act."),
+        ("What is the Kampala anti-dumping duty?", "An anti-dumping duty is imposed under section 137."),
+    ],
+)
+def test_a_tax_the_passages_name_before_other_words_still_clears(question: str, passage: str) -> None:
+    assert not check_false_premise(question, [{"answer": passage}]).is_false_premise
+
+
 def test_no_faq_question_is_challenged_when_its_answer_is_retrieved() -> None:
     rows = _faq_rows()
     assert len(rows) > 500, "FAQ corpus not found"

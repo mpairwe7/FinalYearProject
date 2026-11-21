@@ -320,12 +320,15 @@ _INTERROGATIVE_PREFIX = re.compile(
 #: App/tests/agents/test_premise_guard_recall.py, while the benchmark it targeted
 #: stayed at 0 false positives without them (G244). Qualifiers belong in
 #: ``_STOP_AND_ACTION_WORDS`` instead, which costs no recall.
+#: The words that follow a tax noun across a hyphen ("tax-exempt"). Passage words
+#: lose their hyphens, so the passage check also tests these on their own.
+_HYPHEN_COMPOUND_FOLLOWERS = ("free", "exempt", "inclusive", "exclusive", "deductible")
 _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"^(table|tables|bracket|brackets|rate|rates|band|bands|return|returns|"
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
     r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
     r"office|offices|agent|agents|practitioner|practitioners|curriculum|curricula|"
-    r"-(?:free|exempt|inclusive|exclusive|deductible))\b",
+    r"-(?:" + "|".join(_HYPHEN_COMPOUND_FOLLOWERS) + r"))\b",
     re.IGNORECASE,
 )
 
@@ -361,7 +364,11 @@ def _passages_name(name: list[str], passage_words: list[str], nouns: tuple[str, 
         if not nouns:
             return True
         after = passage_words[j + span] if j + span < len(passage_words) else ""
-        if passage_words[j + len(name)] in nouns and not _NON_TAX_NOUN_FOLLOWERS.match(after):
+        if (
+            passage_words[j + len(name)] in nouns
+            and not _NON_TAX_NOUN_FOLLOWERS.match(after)
+            and after not in _HYPHEN_COMPOUND_FOLLOWERS
+        ):
             return True
     return False
 
