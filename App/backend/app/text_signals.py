@@ -1380,6 +1380,57 @@ LOCALIZED_CONTACT_FOOTERS = {
     ),
 }
 
+#: A whole message that turns down more help (G191), per locale, compared with
+#: punctuation and case removed. The lg/sw/nyn/ach entries are the words the
+#: voice receptionist already takes as declining an offer (``receptionist.brain``
+#: ``_OFFER_DECLINE_RE``, locales from ``receptionist.phrases._NO_WORDS``).
+_DECLINES: dict[str, frozenset[str]] = {
+    "en": frozenset({
+        "no", "no thanks", "no thank you", "nope", "nothing", "nothing else",
+        "thats all", "that is all", "im good", "all good",
+    }),
+    "lg": frozenset({"nedda"}),
+    "sw": frozenset({"hapana"}),
+    "nyn": frozenset({"ngaaha", "apana"}),
+    "ach": frozenset({"pe"}),
+}
+
+#: Fixed replies that end on an offer of more help, in every locale.
+_OPEN_OFFER_ENDINGS = (
+    *GREETING_REPLY_BY_LOCALE.values(),
+    *GRATITUDE_REPLY_BY_LOCALE.values(),
+    CONTACT_FOOTER,
+    *LOCALIZED_CONTACT_FOOTERS.values(),
+)
+#: A generated answer whose closing question asks this is offering more help.
+_OPEN_OFFER_QUESTION_RE = re.compile(r"\b(?:anything else|what else can i (?:help|assist)|how (?:can|may) i (?:help|assist))\b")
+
+
+def declines_open_offer(message: str, previous_reply: str, locale: str = "en") -> bool:
+    """True when *message* only turns down the offer of more help *previous_reply* ended on.
+
+    Both lists are closed (G191), and everything else returns False, leaving the
+    turn to whatever handled it before. A message with a "?" is a question, not
+    a decline ("No?", "No, what about PAYE?"). Another language's word counts
+    only in a turn whose *locale* is that language ("PE" in English is a
+    permanent establishment); the English ones count in every turn, as in
+    ``receptionist.clarify.classify_yes_no``. The offer must be the only thing
+    the reply asks: a "?" anywhere before it (a lesson's knowledge check, a
+    workflow's yes/no, a clarifying question) means the "No" may be the answer.
+    """
+    words = " ".join(re.sub(r"[^\w\s]", "", message.lower()).split())
+    if "?" in message or not (
+        words in _DECLINES["en"] or words in _DECLINES.get(_norm_courtesy_loc(locale), frozenset())
+    ):
+        return False
+    reply = previous_reply.strip()
+    offer = next((ending for ending in _OPEN_OFFER_ENDINGS if reply.endswith(ending)), "")
+    if not offer and reply.endswith("?"):
+        closing_sentence = re.split(r"[.!?\n]", reply[:-1])[-1]
+        offer = "?" if _OPEN_OFFER_QUESTION_RE.search(closing_sentence.lower()) else ""
+    return bool(offer) and "?" not in reply[: -len(offer)]
+
+
 GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"
 )
