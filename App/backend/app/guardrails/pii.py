@@ -19,6 +19,19 @@ STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
+    # A mobile number in groups (G658): one space or hyphen after +256 and
+    # between 7XX, XXX and XXX, as the repository writes them; none after a
+    # leading 0, so a spaced amount starting "0 772" is not one. Grouped
+    # landlines are left out because every one in App/Data is a URA office
+    # line, and URA's WhatsApp line, which ends every contact footer, is not
+    # personal data.
+    (
+        "ug_phone",
+        re.compile(
+            r"(?:^|(?<=\s))(?!(?:\+256[ -]?|0)772[ -]?140[ -]?000\b)"
+            r"(?:\+256[ -]?|0)7\d{2}[ -]?\d{3}[ -]?\d{3}\b"
+        ),
+    ),
     # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
     ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
     # Ugandan National Identification Number: 14 characters, C + M/F (or R) +
@@ -243,7 +256,7 @@ _STREAM_HOLD_TAIL_RE = re.compile(
     r"(?<!\d[ -])\b1\d{2}(?:[ -]\d{3})?|"
     r"(?<!\d[ -])\b\d{4}(?:[ -]\d{4}){0,2}|"
     r"(?<!\d[ -])\b3[47]\d{2}(?:[ -]\d{6})?|"
-    r"(?:^|(?<=\s))(?:\+256|0[74]\d{0,2})(?:[ -]\d{1,3})?|"
+    r"(?:^|(?<=\s))(?:\+256|0[74]\d{0,2})(?:[ -]\d{1,3}){0,2}|"
     r"\b(?:TIN|Tax[ \t]{1,4}Identification[ \t]{1,4}Number)[ \t:#-]{0,4}"
     r")[ \t]{1,8}$"
 )
