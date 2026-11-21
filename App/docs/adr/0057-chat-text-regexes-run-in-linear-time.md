@@ -52,6 +52,10 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
   now checks them from precomputed start, keyword, `?` and newline positions, and keeps the other
   branches as a regex with no scan.
 - **Logs:** user values reach a log line through `config.flags._log_safe`, as elsewhere.
+- **Amendment, 2026-11-21 (G715).** Two patterns in `guardrails/pii.py` had these shapes. The
+  email pattern was shape 2: its local-part run restarted at every word boundary. `_email_spans`
+  now scans outward from each "@" instead. The TIN pattern's `\s*[:#-]?\s*` was shape 1 and is
+  now `\s*(?:[:#-]\s*)?`.
 
 Each replacement returns the same output as the regex it replaces. That was checked on
 128,999 strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both

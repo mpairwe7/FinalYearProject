@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import string
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -21,7 +22,6 @@ _MOBILE_START = r"(?<![\w+.,-])"
 # NOTE: Phone pattern uses (?:^|\s|[^\w]) instead of \b before +256
 #       because \b requires a word-char boundary and '+' is not a word char.
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
     # A mobile number in groups (G658): one optional _SEP after +256 and between
     # 7XX, XXX and XXX, as the repository writes them; none after a leading 0,
@@ -38,7 +38,7 @@ _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
     # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
-    ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
+    ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*(?:[:#-]\s*)?|\bTax Identification Number\s*(?:[:#-]\s*)?)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
     # Ugandan National Identification Number: 14 characters, C + M/F (or R) +
     # 12 letters and digits, the shape vision.ocr.extract_nin_numbers reads.
     # NIRA does not publish the internal layout, so none is assumed. The former
@@ -69,6 +69,49 @@ def is_official_ura_email(email: str) -> bool:
     if not sep or not domain:
         return False
     return domain in {"ura.go.ug", "go.ug"} or domain.endswith((".ura.go.ug", ".go.ug"))
+
+
+_LOCAL_PART_CHARS = frozenset(string.ascii_letters + string.digits + "._%+-")
+_DOMAIN_CHARS = frozenset(string.ascii_letters + string.digits + ".-")
+
+
+def _at_word_boundary(text: str, i: int) -> bool:
+    """Whether ``\\b`` holds at *i*: a ``\\w`` character on one side of it only."""
+    before = i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_")
+    after = i < len(text) and (text[i].isalnum() or text[i] == "_")
+    return before != after
+
+
+def _domain_end(text: str, i: int) -> int | None:
+    """End of ``[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b`` matched at *i*, the last dot first as the regex backtracks."""
+    run_end = i
+    while run_end < len(text) and text[run_end] in _DOMAIN_CHARS:
+        run_end += 1
+    dot = text.rfind(".", i + 1, run_end)
+    while dot > i:
+        tld_end = dot + 1
+        while tld_end < len(text) and text[tld_end] in string.ascii_letters:
+            tld_end += 1
+        if tld_end - dot > 2 and _at_word_boundary(text, tld_end):
+            return tld_end
+        dot = text.rfind(".", i + 1, dot)
+    return None
+
+
+def _email_spans(text: str) -> Iterator[tuple[int, int]]:
+    """The spans ``re.finditer(r"\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", text)`` gives (G715)."""
+    prev_end = 0
+    at = text.find("@")
+    while at >= 0:
+        start = at
+        while start > prev_end and text[start - 1] in _LOCAL_PART_CHARS:
+            start -= 1
+        start = next((i for i in range(start, at) if _at_word_boundary(text, i)), at)
+        end = _domain_end(text, at + 1) if start < at else None
+        if end is not None:
+            yield start, end
+            prev_end = end
+        at = text.find("@", at + 1)
 
 
 _CURRENCY_INDICATORS_BEFORE = re.compile(r"(?i)\b(?:ugx|ush|shs|usd|eur|gbp|\$|€|£)\s*$")
@@ -151,18 +194,19 @@ def redact_pii_text(
         return text
     allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
     result = _strip_hidden_pii_evasion(text)
+    if kinds is None or "email" in kinds:
+        parts: list[str] = []
+        kept = 0
+        for start, end in _email_spans(result):
+            addr = result[start:end]
+            if not (is_official_ura_email(addr) or addr in allowed_set):
+                parts += (result[kept:start], "[REDACTED_EMAIL]")
+                kept = end
+        result = "".join(parts) + result[kept:]
     for pii_type, pattern in _PII_PATTERNS:
         if kinds is not None and pii_type not in kinds:
             continue
-        if pii_type == "email":
-            def _replace_email(m: re.Match[str]) -> str:
-                addr = m.group(0)
-                if is_official_ura_email(addr) or addr in allowed_set:
-                    return addr
-                return "[REDACTED_EMAIL]"
-
-            result = pattern.sub(_replace_email, result)
-        elif pii_type == "ug_tin":
+        if pii_type == "ug_tin":
             def _replace_tin(m: re.Match[str]) -> str:
                 val = m.group(0)
                 if _is_currency_boundary(m, result):
@@ -200,11 +244,12 @@ def _pii_matches(text: str) -> Iterator[tuple[str, str]]:
     if not text:
         return
     cleaned = _strip_hidden_pii_evasion(text)
+    for start, end in _email_spans(cleaned):
+        if not is_official_ura_email(cleaned[start:end]):
+            yield "email", cleaned[start:end]
     for pii_type, pattern in _PII_PATTERNS:
         for match in pattern.finditer(cleaned):
             value = match.group(0)
-            if pii_type == "email" and is_official_ura_email(value):
-                continue
             if pii_type == "ug_tin" and _is_currency_boundary(match, cleaned):
                 continue
             if pii_type == "ug_nid" and not _is_valid_ug_nid_match(value):
