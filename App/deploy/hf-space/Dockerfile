@@ -788,7 +788,7 @@
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image. RECEPTIONIST_ALLOW_CLOUD_LLM (final-stage ENV) takes effect in the base
 # image once this pin moves to an image built with the call-scope gate.
-FROM landwind/ura-chatbot:sha-81c7d93
+FROM landwind/ura-chatbot:sha-0203baa
 
 # One replica serves the Space. Call rooms live in the memory of the call process,
 # and this is the declaration the receptionist's production gate asks for before it
