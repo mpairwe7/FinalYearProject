@@ -51,6 +51,9 @@ FABRICATED = [
     "Is a 2026 Wealth Tax payable by expatriates?",
     "What is the latest Robot Tax?",
     "What is this year's Wealth Tax?",
+    "What is the Robot Minimum Tax?",
+    "What is the Alien Land Tax?",
+    "What is the Wealth Foreign Tax?",
 ]
 
 #: Real Ugandan taxes in the same phrasings, and "<qualifier> tax <noun>"
@@ -84,6 +87,10 @@ REAL = [
     "What are the corporate tax rates?",
     "Where is the nearest tax office?",
     "How do I amend my income tax return?",
+    "What is the environment levy on old cars?",
+    "What is the mobile money levy?",
+    "What is the anti-dumping duty on steel?",
+    "How do bilateral tax treaties work?",
 ]
 
 QUALIFIED_REAL = [
@@ -94,7 +101,6 @@ QUALIFIED_REAL = [
     "What is the updated infrastructure levy?",
     "What is the prevailing presumptive tax?",
     "What is the proposed digital service tax?",
-    "What is the Kampala local service tax?",
     "Explain presumptive tax",
     "What is this year's stamp duty?",
     "What is my company's stamp duty?",
@@ -130,8 +136,10 @@ def test_a_word_before_a_real_tax_does_not_make_it_invented(question: str) -> No
 
 
 def test_a_word_before_a_tax_the_passages_name_does_not_make_it_invented() -> None:
-    hit = {"answer": "The EAC applies an anti-dumping duty on certain steel imports."}
-    assert not check_false_premise("What is the latest anti-dumping duty on steel?", [hit]).is_false_premise
+    question = "What is the Kampala stamp duty?"
+    assert check_false_premise(question, hits=[]).is_false_premise
+    hit = {"answer": "Stamp duty is charged on the transfer of land."}
+    assert not check_false_premise(question, [hit]).is_false_premise
 
 
 def test_an_invented_tax_whose_last_word_is_in_the_passages_is_still_challenged() -> None:
@@ -139,6 +147,14 @@ def test_an_invented_tax_whose_last_word_is_in_the_passages_is_still_challenged(
     result = check_false_premise("How much is the Uganda Space Exploration Tax?", [hit])
     assert result.is_false_premise
     assert result.concept == "Space Exploration Tax"
+
+
+@pytest.mark.parametrize(
+    "question", ["What is the holding tax?", "What is the wealth holding tax?", "What is the crypto holding tax?"]
+)
+def test_a_name_inside_a_longer_word_in_the_passages_is_not_a_match(question: str) -> None:
+    hit = {"answer": "Withholding tax is deducted at source on payments to suppliers."}
+    assert check_false_premise(question, [hit]).is_false_premise
 
 
 def test_no_faq_question_is_challenged_when_its_answer_is_retrieved() -> None:
