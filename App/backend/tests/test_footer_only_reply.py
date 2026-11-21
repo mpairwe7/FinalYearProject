@@ -16,8 +16,10 @@ import unittest
 import unittest.mock as mock
 from pathlib import Path
 
+from app import mt
 from app.guardrails import output_checks
 from app.rag import pipeline
+from app.research.web_research import LIVE_DISCLOSURES, LIVE_UNAVAILABLE
 from app.text_signals import (
     ABSTENTION_REPLY,
     CONTACT_FOOTER,
@@ -90,7 +92,12 @@ def _rest(reply: str, locale: str = "en") -> dict:
         return model.generate(message="I import goods from Kenya to Uganda: what customs duty?")
 
 
-def _stream(retrieval: dict, *, tokens: list[str] | None = None) -> list[tuple[str, object]]:
+def _tagged_translation(text: str, locale: str) -> str:
+    return text if text.strip() == "[1]" else f"<{locale}> {text}"
+
+
+def _stream(retrieval: dict, *, tokens: list[str] | None = None, translate=None) -> list:
+    """One streamed turn. With *translate*, the real localize_reply runs over that MT stub."""
     model = mock.MagicMock()
     model.generate_retrieval_only.return_value = retrieval
 
@@ -111,7 +118,12 @@ def _stream(retrieval: dict, *, tokens: list[str] | None = None) -> list[tuple[s
         ]
 
     patch = mock.patch.object
-    with patch(pipeline, "localize_reply", side_effect=_fake_localize), \
+    localization = (
+        patch(pipeline, "_translate_reply", side_effect=translate)
+        if translate
+        else patch(pipeline, "localize_reply", side_effect=_fake_localize)
+    )
+    with localization, \
             patch(pipeline.flags, "is_enabled", return_value=False), \
             patch(pipeline.generator_module, "is_available", return_value=True), \
             patch(pipeline, "stream_llm_tokens", return_value=iter(tokens or ())), \
@@ -214,6 +226,49 @@ class StreamFooterOnlyReplyTest(unittest.TestCase):
         events = _stream(_hybrid(), tokens=[answer, CONTACT_FOOTER])
         self.assertNotIn("revision", [kind for kind, _ in events])
         self.assertTrue(_client_shown_text(events).startswith(answer.strip()))
+
+    def test_a_localized_follow_up_or_disclosure_is_not_an_answer(self) -> None:
+        lines_after_the_footer = {
+            "follow-up": {"reply": f"[1]\n\n{CONTACT_FOOTER}\n\n{FOLLOW_UP}"},
+            "live-check disclosure": {
+                "reply": f"[1]\n\n{CONTACT_FOOTER}",
+                "_live_check_disclosure": LIVE_DISCLOSURES[LIVE_UNAVAILABLE],
+            },
+        }
+        for locale, footer in LOCALIZED_CONTACT_FOOTERS.items():
+            for label, fields in lines_after_the_footer.items():
+                with self.subTest(locale=locale, line=label):
+                    mt.cache.clear()
+                    retrieval = {**_short_circuit("", locale=locale), **fields}
+                    events = _stream(retrieval, translate=_tagged_translation)
+                    first = next(payload for kind, payload in events if kind == "token")
+                    self.assertIn(footer, first)
+                    self.assertIn(f"<{locale}> ", first)
+                    mt.cache.clear()
+                    with mock.patch.object(pipeline, "_translate_reply", side_effect=_tagged_translation):
+                        abstention = pipeline.localize_reply(ABSTENTION_REPLY, locale)
+                    self.assertNotEqual(abstention, ABSTENTION_REPLY)
+                    self.assertEqual(_client_shown_text(events), abstention)
+
+
+class ConsentedMemoryTest(unittest.TestCase):
+    def test_memory_keeps_what_the_taxpayer_was_served(self) -> None:
+        model = pipeline.ChatModel.__new__(pipeline.ChatModel)
+        cases = {
+            "footer only": (FOOTER_ONLY["lone citation marker"], ABSTENTION_REPLY),
+            "with an answer": (WITH_AN_ANSWER["one word"], WITH_AN_ANSWER["one word"]),
+        }
+        for label, (reply, kept) in cases.items():
+            with self.subTest(label):
+                memory = mock.MagicMock()
+                with mock.patch.object(pipeline, "get_memory_service", return_value=memory):
+                    model._persist_personalization_turn(
+                        user_id="u-1", tenant_id="default", conversation_id="c-1",
+                        message="customs duty from Kenya", reply=reply,
+                        agent_role="rag_answerer", personalization={"consent_granted": True},
+                    )
+                turns = memory.absorb_conversation.call_args.args[2]
+                self.assertEqual(turns[1]["content"], kept)
 
 
 class ScoredAsAnAbstentionTest(unittest.TestCase):
