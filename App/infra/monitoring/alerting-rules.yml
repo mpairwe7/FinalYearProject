@@ -1,5 +1,5 @@
-# Alerting rules — URA Chatbot. Loaded by App/monitoring/prometheus.yml; routed by
-# App/monitoring/alertmanager.yml. Unit-tested by App/monitoring/tests/*.test.yml and
+# Alerting rules — URA Chatbot. Loaded by App/infra/monitoring/prometheus.yml; routed by
+# App/infra/monitoring/alertmanager.yml. Unit-tested by App/infra/monitoring/tests/*.test.yml and
 # checked against the metrics the API really exports by
 # App/tests/test_monitoring_config.py — a rule naming a series the API never
 # emits, or a label it does not carry, fails CI instead of staying silent.

@@ -12,6 +12,13 @@ Accepted, 2026-11-18. Carried out in four phases, one pull request each.
 - Phase E (done, 2026-11-19): merge the two Compose stacks into one base and one overlay.
 - Phase F (done, 2026-11-20): the working `.env` moves to `App/.env`, and the Compose
   overlays move from `App/` to `App/infra/compose/`.
+- Phase G (done, 2026-11-21): the monitoring configuration moves from `App/monitoring/`
+  to `App/infra/monitoring/`, beside the overlays. The owner asked whether governance and
+  monitoring belonged in `App/backend`. Neither is backend code: the registry covers the
+  whole system, and Prometheus has 11 scrape jobs, and only `ura-api` reads the API's metrics. Under
+  `App/backend/**` every edit would rebuild and roll the image. Monitoring is deployment
+  configuration, so it joins `App/infra/`; `App/governance/` stays, as the auditor's entry
+  point and the path of the compliance gate.
 
 ## Context and Problem Statement
 
@@ -228,6 +235,10 @@ Option 1, chosen by the service owner over the narrower option 2.
   So merge `dev` into an open branch before checking it out, or keep copies of local
   agent files outside the repository. A `CLAUDE.md` with uncommitted edits stops the
   first move with git's own error, and nothing is lost in that case.
+- The monitoring configuration is in `App/infra/monitoring/` (phase G). The base Compose
+  file mounts it as `./infra/monitoring/...`, read from `App/` like every other path, and
+  `.github/workflows/monitoring-config.yml` checks it there. No file under the folder
+  changed except comments that name the folder.
 - `App/` holds one Compose file (phase F). The eleven overlays are in
   `App/infra/compose/`, and a command lists them after the base:
   `-f docker-compose.yml -f infra/compose/docker-compose.full.yml`. Compose reads the
@@ -266,6 +277,10 @@ Option 1, chosen by the service owner over the narrower option 2.
   has, and the pair must resolve to the hardened variant. That last test merges the two
   files with Docker Compose, and fails if an `!override` or `!reset` tag is dropped.
 - `App/tests/test_compose_build_paths.py` checks that every Compose build names a Dockerfile that exists. `docker compose config` does not check that. After phase D, four builds in `App/docker-compose.yml` and two overlays still named the root `Dockerfile`; they now name `App/Dockerfile`.
+- Phase G was checked the same way: what Compose resolves with every profile on is the
+  same before and after once the nine new mount sources are mapped back to the old
+  folder, and every source exists. `promtool check config`, `promtool test rules` and
+  `amtool check-config` pass on the new folder, run as CI runs them.
 - Phase F was checked the same way. What Compose resolves was recorded before and after
   for 16 combinations: the base, the base with each overlay, and the four chains the
   runbooks use. They differ in three things: the `api` service's `env_file` is

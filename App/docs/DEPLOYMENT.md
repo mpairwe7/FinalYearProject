@@ -482,7 +482,7 @@ ura_feedback_total{rating="up"} 312.0
 ```
 
 ```yaml
-# prometheus.yml (the monitoring profile ships App/monitoring/prometheus.yml)
+# prometheus.yml (the monitoring profile ships App/infra/monitoring/prometheus.yml)
 scrape_configs:
   - job_name: ura-api
     metrics_path: /metrics
@@ -496,7 +496,7 @@ scrape_configs:
 ### Dashboards and alerts
 
 The monitoring profile provisions the Grafana dashboard
-(`App/monitoring/grafana/dashboards/ura-chatbot-overview.json`), the SLO
+(`App/infra/monitoring/grafana/dashboards/ura-chatbot-overview.json`), the SLO
 recording and burn-rate alert rules, and Alertmanager delivering to
 `ALERTMANAGER_WEBHOOK_URL`. See [MONITORING.md](MONITORING.md) for the metric
 catalogue, SLOs and incident playbooks.

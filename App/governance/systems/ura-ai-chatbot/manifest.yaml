@@ -70,7 +70,7 @@ nist_ai_rmf:
       status: "partial"
       evidence: >
         Live: ura_locale_turns_total counts each turn's outcome by reply language and
-        UraLanguageAbstentionGap alerts on a gap against English (App/monitoring/alerting-rules.yml,
+        UraLanguageAbstentionGap alerts on a gap against English (App/infra/monitoring/alerting-rules.yml,
         App/governance/monitoring/README.md). Offline: App/scripts/bias_fairness_audit.py (language +
         taxpayer type parity).
       verified_by:
@@ -87,7 +87,7 @@ nist_ai_rmf:
         UraEvalRegression).
       verified_by:
         - "App/tests/test_ml_pipeline.py::test_regression_below_baseline_fails_even_above_the_floor"
-        - "App/monitoring/tests/alerting-rules.test.yml"
+        - "App/infra/monitoring/tests/alerting-rules.test.yml"
 
   manage:
     - control: "MANAGE 1.1 – Deployment approval with risk review"
@@ -99,7 +99,7 @@ nist_ai_rmf:
     - control: "MANAGE 3.1 – Incidents logged and responded to"
       status: "implemented"
       evidence: >
-        App/monitoring/alerting-rules.yml routed by App/monitoring/alertmanager.yml; security events
+        App/infra/monitoring/alerting-rules.yml routed by App/infra/monitoring/alertmanager.yml; security events
         (App/backend/app/observability/security_events.py); incident playbooks in App/docs/MONITORING.md §10.
       verified_by:
         - "App/backend/tests/test_observability_endpoints.py::test_denied_metrics_scrape_is_a_logged_counted_event"
@@ -107,7 +107,7 @@ nist_ai_rmf:
     - control: "MANAGE 4.1 – Post-deployment monitoring, incident response and decommissioning"
       status: "partial"
       evidence: >
-        SLOs (App/monitoring/slo/ura-chatbot.openslo.yaml), burn-rate alerts, Grafana dashboard,
+        SLOs (App/infra/monitoring/slo/ura-chatbot.openslo.yaml), burn-rate alerts, Grafana dashboard,
         real-user monitoring (/v1/telemetry/*), App/docs/MONITORING.md. Containerised, can be stopped.
       verified_by:
         - "App/tests/test_monitoring_config.py::test_slo_objectives_match_the_burn_rate_rules"

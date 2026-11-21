@@ -1,6 +1,8 @@
 # App/infra/
 
 `compose/` holds the Compose overlays; the one stack is `App/docker-compose.yml`.
+`monitoring/` holds the Prometheus, Alertmanager, Loki, OpenTelemetry and Grafana
+configuration the base mounts; its own guide is `monitoring/AGENTS.md`.
 Kubernetes here is documentation only.
 
 - An overlay is listed after the base (`-f docker-compose.yml -f infra/compose/<file>`),

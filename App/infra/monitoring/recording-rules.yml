@@ -1,6 +1,6 @@
 # Recording rules — the SLIs the alerts and dashboards read.
 #
-# SLOs (App/monitoring/slo/ura-chatbot.openslo.yaml is the source of truth):
+# SLOs (App/infra/monitoring/slo/ura-chatbot.openslo.yaml is the source of truth):
 #   * availability  99.9 % of API requests are not 5xx           (30 days)
 #   * chat latency  95 % of chat turns finish within 3 s (NFR-01) (30 days)
 # Error-budget burn rates use the multi-window, multi-burn-rate method from

@@ -1,8 +1,8 @@
 # Prometheus configuration — URA Chatbot
 # Used by the `monitoring` profile in docker-compose.yml. See App/docs/MONITORING.md.
 #
-# Rules:   App/monitoring/recording-rules.yml (SLIs) + App/monitoring/alerting-rules.yml
-# Tests:   promtool test rules App/monitoring/tests/*.test.yml  (CI: monitoring-config.yml)
+# Rules:   App/infra/monitoring/recording-rules.yml (SLIs) + App/infra/monitoring/alerting-rules.yml
+# Tests:   promtool test rules App/infra/monitoring/tests/*.test.yml  (CI: monitoring-config.yml)
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -14,7 +14,7 @@ rule_files:
   - "alerting-rules.yml"
 
 # Firing alerts go to Alertmanager, which routes them to the on-call webhook
-# (App/monitoring/alertmanager.yml). Without this block Prometheus evaluates rules
+# (App/infra/monitoring/alertmanager.yml). Without this block Prometheus evaluates rules
 # and tells no one.
 alerting:
   alertmanagers:

@@ -415,7 +415,7 @@ def build_infra_section(story: list) -> None:
         ["Container signing", _status(True), "container-sign-provenance.yml: cosign + SLSA"],
         ["OWASP ZAP DAST", _status(True), "devsecops-sast-dast.yml with App/security/.zap-rules.tsv"],
         ["Monitoring stack", _status(True), "docker-compose profile: Prometheus + Grafana + Jaeger"],
-        ["Alerting rules", _status(True), "5 SLO rules in App/monitoring/alerting-rules.yml"],
+        ["Alerting rules", _status(True), "5 SLO rules in App/infra/monitoring/alerting-rules.yml"],
         ["Grafana dashboards", _status(True), "8-panel overview dashboard auto-provisioned"],
         ["SBOM (CycloneDX 1.6)", _status(True), "26 components, all dependsOn refs valid"],
         ["Production env gate", _status(True), "Startup refuses on insecure defaults"],

@@ -5,7 +5,7 @@ reach the logs, if at all, as free-text INFO lines ("JWT rejected: …") that
 no alert could select. Each is now one structured WARNING record with a fixed
 ``event`` name from the OWASP Logging Vocabulary and one increment of
 ``ura_security_events_total{event}`` (OWASP ASVS 5.0 V16). The alerts that
-watch it are in ``App/monitoring/alerting-rules.yml`` (group ``ura-security``):
+watch it are in ``App/infra/monitoring/alerting-rules.yml`` (group ``ura-security``):
 ``AuthenticationFailureSpike``, ``AuthorizationFailureSpike``,
 ``GuardrailProbingCampaign`` and ``IndirectInjectionOrUntrustedLinkSpike``.
 An event no rule selects still reaches the dashboard and the logs, but pages

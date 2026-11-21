@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, 2026-11-17. The project owner asked for the AI governance files to
+Accepted, 2026-11-17. Amended 2026-11-21: the live monitoring configuration this record
+calls `App/monitoring/` is now `App/infra/monitoring/` (ADR-0064 phase G). The project owner asked for the AI governance files to
 follow a governance registry layout: `systems/{system_id}/`, `policies/`,
 `evidence/`, `controls/`, `App/monitoring/`, `audit/`, `vendors/{vendor}/`, a
 registry README and an owners file.

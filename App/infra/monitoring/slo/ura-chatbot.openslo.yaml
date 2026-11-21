@@ -1,5 +1,5 @@
 # Service level objectives for the URA chatbot, in OpenSLO v1.
-# The recording and alerting rules (App/monitoring/*.yml) implement these;
+# The recording and alerting rules (App/infra/monitoring/*.yml) implement these;
 # App/tests/test_monitoring_config.py fails if their objectives drift apart.
 apiVersion: openslo/v1
 kind: Service

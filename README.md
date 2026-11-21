@@ -91,7 +91,7 @@ FinalYearProject/
 │       └── rag_eval_lg.jsonl   # Luganda eval (12 samples)
 ├── App/governance/            # AI governance registry (start at REGISTRY_README.md)
 │   ├── systems/ura-ai-chatbot/ # manifest.yaml (NIST AI RMF + ISO 42001 + OWASP + EU AI Act), model card, DPIA
-│   ├── policies/ evidence/ controls/ App/monitoring/ audit/ vendors/
+│   ├── policies/ evidence/ controls/ App/infra/monitoring/ audit/ vendors/
 │   ├── OWNERS.md               # Who answers for what
 │   └── compliance_check.py     # CI gate for governance artifacts
 ├── App/ml/                    # Production quality gates + corpus tooling
@@ -395,7 +395,7 @@ docker compose -f App/docker-compose.yml -f App/infra/compose/docker-compose.ful
 | Grafana | http://localhost:3001 | Pre-built dashboards (8 panels) |
 | Jaeger | http://localhost:16686 | Distributed tracing (OTel OTLP) |
 
-Dashboards and datasources are auto-provisioned via `App/monitoring/grafana/provisioning/`.
+Dashboards and datasources are auto-provisioned via `App/infra/monitoring/grafana/provisioning/`.
 
 ## Next Steps
 - Set repository secrets in GitHub settings before running workflows
