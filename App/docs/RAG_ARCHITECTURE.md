@@ -1032,14 +1032,23 @@ no abstention marker, so both scoring harnesses counted it as an answer.
 `pipeline._is_footer_only` reads a reply line by line, without citation markers
 and Markdown. A reply is footer-only when it has a contact footer (English or
 localized) and each other line is empty or is a line that a turn adds beside an
-answer: the follow-up suggestion, the comparison caveat, or a degraded-turn or
-live-check disclosure. Such a reply is served as `ABSTENTION_REPLY`, with
-`retrieval_mode: "abstained"` and no sources, citations or resources. REST
-does this in `_generate_localized`, before localization. The stream does it in
-`run_chat_turn` at the `done` frame: it sends a `revision` with the localized
-abstention and a `grounding` frame that withdraws the sources, and the turn's
-log frame records the abstention. A reply with any other line, even one word,
-is served unchanged.
+answer: the follow-up suggestion (English or the localized lead that
+`localize_reply` writes, both from `_FOLLOW_UP_LEADS`), the comparison caveat,
+or a degraded-turn or live-check disclosure. A line is classified by how it
+opens, so an answer written on the same line as one of these leads is not seen;
+the pipeline writes each of them on a line of its own. Such a reply is served
+as `ABSTENTION_REPLY`, with `retrieval_mode: "abstained"` and no sources,
+citations or resources.
+
+REST does this in `_generate_localized`, before localization, and
+`_persist_personalization_turn` stores the abstention, not the footer, in
+consented memory. The stream does it in `run_chat_turn` at the `done` frame:
+it sends a `revision` with the localized abstention and a `grounding` frame
+that withdraws the sources, and the turn's log frame records the abstention.
+Machine translation rewrites a caveat or disclosure into words no fixed lead
+matches, so when the text the stream sent is exactly what `localize_reply`
+made of an English reply, the English reply decides. A reply with any other
+line, even one word, is served unchanged.
 
 ### Withholding a contradicted answer
 
