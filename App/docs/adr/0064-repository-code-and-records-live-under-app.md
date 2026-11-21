@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, 2026-11-18. Carried out in four phases, one pull request each.
+Accepted, 2026-11-18. Carried out in phases, one pull request each.
 
 - Phase A (done): remove the root pointer folders and the fine-tuning code, and move `configs/`.
 - Phase B (done): remove the byte-identical duplicate PDFs from `App/Data/pdfs`.
@@ -15,7 +15,7 @@ Accepted, 2026-11-18. Carried out in four phases, one pull request each.
 - Phase G (done, 2026-11-21): the monitoring configuration moves from `App/monitoring/`
   to `App/infra/monitoring/`, beside the overlays. The owner asked whether governance and
   monitoring belonged in `App/backend`. Neither is backend code: the registry covers the
-  whole system, and Prometheus has 11 scrape jobs, and only `ura-api` reads the API's metrics. Under
+  whole system, and Prometheus has 11 scrape jobs. Two read the API's metrics, `ura-api` directly and `otel-collector-genai` through the OpenTelemetry Collector; the others watch the rest of the stack. Under
   `App/backend/**` every edit would rebuild and roll the image. Monitoring is deployment
   configuration, so it joins `App/infra/`; `App/governance/` stays, as the auditor's entry
   point and the path of the compliance gate.

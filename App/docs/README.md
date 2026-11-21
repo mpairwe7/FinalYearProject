@@ -99,7 +99,7 @@ FinalYearProject/
 │   └── lgaudio/          # Audio files
 ├── App/governance/            # AI governance registry (start at REGISTRY_README.md)
 │   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
-│   ├── policies/ evidence/ controls/ App/infra/monitoring/ audit/ vendors/
+│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
 │   └── compliance_check.py
 ├── App/ml/                    # Production quality gates + corpus tooling
 │   ├── configs/          # RAG quality gate thresholds

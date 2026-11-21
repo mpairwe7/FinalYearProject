@@ -4,7 +4,7 @@ Each signal the URA AI Chatbot emits, whether it can hold personal data, who can
 read it and how long it is kept. The code is in
 [`App/backend/app/observability/`](../../backend/app/observability/analytics.py)
 and [`middleware/logger.py`](../../backend/app/middleware/logger.py)
-(ADR-0060); the configuration is the top-level [App/infra/monitoring/](../../infra/monitoring/AGENTS.md)
+(ADR-0060); the configuration is in [App/infra/monitoring/](../../infra/monitoring/AGENTS.md)
 folder. Checked against the code on 2026-11-18.
 
 | Signal | What it records | Personal data | Read through | Kept |

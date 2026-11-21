@@ -1,6 +1,6 @@
-# App/infra/monitoring/
+# monitoring/
 
-The live monitoring configuration is the top-level [App/infra/monitoring/](../../infra/monitoring/AGENTS.md)
+The live monitoring configuration is in [App/infra/monitoring/](../../infra/monitoring/AGENTS.md)
 folder. Prometheus and `.github/workflows/monitoring-config.yml` read it there.
 
 | Slot | State | Artifact |

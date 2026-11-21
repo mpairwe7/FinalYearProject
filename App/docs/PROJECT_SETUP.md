@@ -770,7 +770,7 @@ FinalYearProject/
 ├── App/governance/              # AI governance registry (start at REGISTRY_README.md)
 │   ├── compliance_check.py # CI gate (NIST/ISO/OWASP/EU AI Act)
 │   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
-│   └── policies/ evidence/ controls/ App/infra/monitoring/ audit/ vendors/
+│   └── policies/ evidence/ controls/ monitoring/ audit/ vendors/
 │
 ├── App/ml/                      # Production quality gates + corpus tooling
 │   ├── configs/

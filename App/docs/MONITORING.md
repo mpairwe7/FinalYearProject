@@ -223,7 +223,7 @@ Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
 workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
 budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-`App/infra/monitoring/alerting-rules.yml` holds 58 rules in 11 groups:
+`App/infra/monitoring/alerting-rules.yml` holds 59 rules in 11 groups:
 availability, latency, quality, audit-and-compliance, security, dependencies,
 the Qdrant index lifecycle, the agent planner and live research, agent
 resilience, crawl freshness and the call receptionist. Each carries `severity` (`critical` pages,
