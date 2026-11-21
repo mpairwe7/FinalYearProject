@@ -54,6 +54,10 @@ FABRICATED = [
     "What is the Robot Minimum Tax?",
     "What is the Alien Land Tax?",
     "What is the Wealth Foreign Tax?",
+    "What is the land holding tax?",
+    "What is the sea port duty?",
+    "Is there a Wealth Tax treaty between Uganda and Kenya?",
+    "What is the Wealth Tax agreement?",
 ]
 
 #: Real Ugandan taxes in the same phrasings, and "<qualifier> tax <noun>"
@@ -91,6 +95,7 @@ REAL = [
     "What is the mobile money levy?",
     "What is the anti-dumping duty on steel?",
     "How do bilateral tax treaties work?",
+    "Does Uganda have a double tax treaty with Kenya?",
 ]
 
 QUALIFIED_REAL = [
@@ -150,11 +155,37 @@ def test_an_invented_tax_whose_last_word_is_in_the_passages_is_still_challenged(
 
 
 @pytest.mark.parametrize(
-    "question", ["What is the holding tax?", "What is the wealth holding tax?", "What is the crypto holding tax?"]
+    "question",
+    [
+        "What is the holding tax?",
+        "What is the wealth holding tax?",
+        "What is the crypto holding tax?",
+        "What is the land holding tax?",
+    ],
 )
 def test_a_name_inside_a_longer_word_in_the_passages_is_not_a_match(question: str) -> None:
     hit = {"answer": "Withholding tax is deducted at source on payments to suppliers."}
     assert check_false_premise(question, [hit]).is_false_premise
+
+
+@pytest.mark.parametrize(
+    ("question", "passage"),
+    [
+        ("What is the custom duty on used cars?", "Customs duty on used cars is charged on the dutiable value."),
+        ("What is the infrastructur levy?", "The infrastructure levy is charged on imports."),
+        ("What is the capital gain tax on land?", "Capital gains tax applies to business assets."),
+        ("How is value add tax charged?", "The standard value added tax rate is 18%."),
+        ("How is ncome tax charged?", "Income tax is charged on chargeable income."),
+    ],
+)
+def test_a_misspelt_name_matches_the_tax_its_passage_names(question: str, passage: str) -> None:
+    result = check_false_premise(question, [{"answer": passage}])
+    assert not result.is_false_premise, f"{question!r} challenged as {result.concept!r}"
+
+
+def test_a_compound_in_the_passages_does_not_name_a_tax() -> None:
+    hit = {"answer": "A resident may claim a foreign tax credit against Ugandan tax."}
+    assert check_false_premise("What is the wealth foreign tax?", [hit]).is_false_premise
 
 
 def test_no_faq_question_is_challenged_when_its_answer_is_retrieved() -> None:
