@@ -1047,8 +1047,9 @@ it sends a `revision` with the localized abstention and a `grounding` frame
 that withdraws the sources, and the turn's log frame records the abstention.
 Machine translation rewrites a caveat or disclosure into words no fixed lead
 matches, so when the text the stream sent is exactly what `localize_reply`
-made of an English reply, the English reply decides. A reply with any other
-line, even one word, is served unchanged.
+made of an English reply, the English reply decides; a translated line is then
+replaced if its English source held only the footer and those leads. Otherwise a
+reply with any other line, even one word, is served unchanged.
 
 ### Withholding a contradicted answer
 
