@@ -393,8 +393,11 @@ def check_false_premise(
         corpus_text = re.sub(r"[\s\-]+", " ", " ".join(corpus_parts).lower())
 
     for clean_mod, kind in candidates:
-        # Check against legitimate taxes
-        if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
+        words = clean_mod.split()
+        possible_names = [" ".join(words[i:]) for i in range(len(words))]
+        if clean_mod in corpus_text or any(
+            name in _LEGITIMATE_TAX_MODIFIERS or f"{name} {kind}" in corpus_text for name in possible_names
+        ):
             continue
 
         # If the candidate ends with a known legitimate statutory base
@@ -425,15 +428,6 @@ def check_false_premise(
                 "betting",
             )
         ):
-            continue
-
-        # Check whether the exact concept phrase appears
-        # in the retrieved corpus or official rate tables
-        found_in_corpus = (
-            clean_mod in corpus_text
-            or f"{clean_mod} {kind}" in corpus_text
-        )
-        if found_in_corpus:
             continue
 
         # Concept is not a known Ugandan tax and absent from retrieved passages
