@@ -91,3 +91,33 @@ corrected with a test that pins the property the original test missed.
 across the 105-scenario benchmark" still holds, and is now stated with its recall
 (19/19 and 8/12 on two independent fabricated sets). Provenance now means *cited
 sources*, not a file hash.
+
+---
+
+## Amendment 2 — 2026-11-22: a word before a real tax's name (G719)
+
+**Context.** The guard read every word between the tax noun and the nearest stop
+word as the tax's name. "latest" and "recent" are not stop words, so on the Space
+"What is the latest fuel levy this year?" was rejected with the reply that URA
+imposes no "Latest Fuel Levy". Run locally, the guard rejected real taxes after
+"updated", "prevailing", "proposed" and a place name ("the Kampala local
+service tax") the same way.
+
+**Decision.** The stop-word list stays as it is. The tax's name ends the
+modifier, so a candidate is cleared when any trailing part of it ("latest
+stamp", then "stamp") is in `_LEGITIMATE_TAX_MODIFIERS`, or appears in the
+retrieved passages followed by the tax noun ("anti dumping duty"). The whole
+modifier still clears it when the passages contain it. A shorter ending found
+anywhere in the passages does not: with that rule "Space Exploration Tax" passed
+whenever a mining passage mentioned exploration.
+
+**Consequences.** An invented tax whose name ends in a real tax's name ("Moon
+Fuel Levy") is no longer rejected and goes to normal retrieval. That is the
+cheaper error: a missed rejection costs a retrieval answer, a wrong rejection
+tells a taxpayer a real tax does not exist. No question that was not rejected
+before is rejected now, because every check the old rule made is still made.
+
+**Confirmation.** `App/tests/agents/test_premise_guard_recall.py` pins the
+qualified real taxes, a passage-named tax behind a qualifier, an invented tax
+whose last word is in the passage, and the 21 fabricated-tax questions. The
+differential over the dataset, eval and test questions is in G719.
