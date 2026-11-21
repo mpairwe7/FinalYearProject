@@ -7,6 +7,7 @@ seconds; these take milliseconds.
 
 from __future__ import annotations
 
+import random
 import re
 import time
 
@@ -223,6 +224,61 @@ def test_first_number_prefix_matches_the_regex(text):
     assert mt._prefix_first_number(text, "UGX ") == expected
 
 
+_EMAIL_ORACLE = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+
+
+def _email_oracle(text: str) -> str:
+    return re.sub(
+        _EMAIL_ORACLE,
+        lambda m: m.group(0) if pii.is_official_ura_email(m.group(0)) else "[REDACTED_EMAIL]",
+        text,
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Write to jane.doe@gmail.com or services@ura.go.ug.",
+        "x@a.bc.d@e.fg",
+        "a.b.c@d.e.fg.h a@b..co a@.co @b.co a@@b.co a@b@c.co",
+        "_a@b.co é@b.co a@b.coé a@b.co_x a@b.co1 a@b.c1 1@2.ab",
+        "[mail](mailto:john+tax@yahoo.co.uk) <UPPER@EXAMPLE.COM> (a_b%c-d@mail.example.org)",
+        "x@ura.go.ug.evil.com x@mail.ura.go.ug -a@b.co .a@b.co a.@b.co",
+    ],
+)
+def test_email_redaction_matches_the_regex(text):
+    assert pii.redact_pii_text(text, kinds=frozenset({"email"})) == _email_oracle(text)
+
+
+def test_email_redaction_matches_the_regex_on_fuzz():
+    rng = random.Random(715)
+    alphabet = ["@", ".", "_", "%", "+", "-", " ", "a", "Z", "co", "1", "é", "(", "ura.go.ug", "\n"]
+    for _ in range(3_000):
+        text = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 30)))
+        assert pii.redact_pii_text(text, kinds=frozenset({"email"})) == _email_oracle(text), text
+
+
+def test_address_stops_before_a_table_pipe():
+    assert pii.redact_pii_text("| jane@x.com|Kampala |") == "| [REDACTED_EMAIL]|Kampala |"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "TIN: 1000123456, TIN  # 1000123457, TIN   1000123458 and tin 1000123452",
+        "Tax Identification Number - 1000123459, tax identification number:1000123450",
+        "TIN : 100012345 TIN:\t\n1000123451x TIN# 1234567890 TIN:: 1000123456 TIN -1000123456",
+        "TIN      x 100-012-3456 1000123456",
+    ],
+)
+def test_tin_pattern_matches_the_regex(text):
+    old = (
+        r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b"
+        r"|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b"
+    )
+    assert pii._UG_TIN_RE.sub(r"<\1>", text) == re.sub(old, r"<\1>", text)
+
+
 @pytest.mark.parametrize(
     ("fn", "slow"),
     [
@@ -264,6 +320,12 @@ def test_first_number_prefix_matches_the_regex(text):
         (pii.redact_pii_text, "+256 772 140 00 " * (N // 16)),
         (pii.redact_pii_text, "0772-123-45 " * (N // 12)),
         (pii.redact_pii_text, "(0772\u00a0123\u00a045" * (N // 13)),
+        (pii.redact_pii_text, "+256" * (N // 4)),
+        (pii.redact_pii_text, "0772-123-" * (N // 9)),
+        (pii.redact_pii_text, "a." * (N // 2)),
+        (pii.contains_pii, "x@" + "a." * (N // 2)),
+        (pii.redact_pii_text, "TIN" + " " * (N // 5) + "x"),
+        (pii.contains_pii, "Tax Identification Number" + " " * (N // 5) + "x"),
         (pii._STREAM_HOLD_TAIL_RE.search, " 0772 1" * (N // 7) + "x"),
         (pii._STREAM_CONTIGUOUS_TAIL_RE.search, "+2\u00a0" * (N // 3) + "x"),
     ],
