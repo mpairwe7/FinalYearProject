@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from app.guardrails.pii import StreamingDLPFilter, user_stated_identifiers
+from app.text_signals import CONTACT_FOOTER, LOCALIZED_CONTACT_FOOTERS
 
 
 class TestStreamingDLPFilter(unittest.TestCase):
@@ -124,6 +125,28 @@ class TestStreamingDLPFilter(unittest.TestCase):
             ("1000000001", "220000123456"),
         )
         self.assertEqual(user_stated_identifiers(""), ())
+
+    def test_every_grouped_mobile_shape_is_masked_at_every_chunk_size(self) -> None:
+        separators = ("", " ", "-", "\u00a0", "\u202f")
+        prefixes = ("0", "+256", *(f"+256{s}" for s in separators[1:]))
+        shapes = [f"{p}772{a}123{b}456" for p in prefixes for a in separators for b in separators]
+        leaks = []
+        for template in ("Call me on {} today.", "Reach me via Tel/WhatsApp:{}, thanks."):
+            for shape in shapes:
+                text, want = template.format(shape), template.format("[REDACTED_UG_PHONE]")
+                leaks += [(size, got) for size in range(1, 21) if (got := _stream(text, size)) != want]
+        self.assertEqual(len(leaks), 0, leaks[:5])
+
+    def test_the_contact_footers_stream_through_unchanged_at_every_chunk_size(self) -> None:
+        for footer in (CONTACT_FOOTER, *LOCALIZED_CONTACT_FOOTERS.values()):
+            for size in range(1, 21):
+                self.assertEqual(_stream(footer, size), footer, size)
+
+
+def _stream(text: str, size: int) -> str:
+    dlp = StreamingDLPFilter()
+    chunks = [text[i : i + size] for i in range(0, len(text), size)]
+    return "".join([dlp.process_chunk(c) for c in chunks] + [dlp.flush()])
 
 
 if __name__ == "__main__":
