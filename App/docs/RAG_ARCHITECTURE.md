@@ -1021,6 +1021,26 @@ abstention line) are byte-identical every time. Entries hold a digest of the
 text, never the text itself: taxpayer questions reach this cache and can carry
 a TIN or a name.
 
+### A reply that is only the contact footer (G47)
+
+`_add_conversational_frame` puts the contact footer, and often a follow-up
+question, after an extractive or generated reply. When that reply had no text
+of its own (a model that wrote only `[1]`, or a passage that was only a PDF
+page footer), the taxpayer got the footer and nothing else. The reply carried
+no abstention marker, so both scoring harnesses counted it as an answer.
+
+`pipeline._is_footer_only` reads a reply line by line, without citation markers
+and Markdown. A reply is footer-only when it has a contact footer (English or
+localized) and each other line is empty or is a line that a turn adds beside an
+answer: the follow-up suggestion, the comparison caveat, or a degraded-turn or
+live-check disclosure. Such a reply is served as `ABSTENTION_REPLY`, with
+`retrieval_mode: "abstained"` and no sources, citations or resources. REST
+does this in `_generate_localized`, before localization. The stream does it in
+`run_chat_turn` at the `done` frame: it sends a `revision` with the localized
+abstention and a `grounding` frame that withdraws the sources, and the turn's
+log frame records the abstention. A reply with any other line, even one word,
+is served unchanged.
+
 ### Withholding a contradicted answer
 
 `entailment.numeric_contradiction` is a deliberately high-precision check: a
