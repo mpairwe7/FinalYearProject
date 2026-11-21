@@ -1280,6 +1280,38 @@ def _with_degraded_disclosure(reply: str, reasons: Iterable[str]) -> str:
     return reply
 
 
+_FOOTER_LEADS = tuple(
+    footer.partition(":")[0] for footer in (CONTACT_FOOTER, *LOCALIZED_CONTACT_FOOTERS.values())
+)
+_FOLLOW_UP_LEAD = "You might also want to know:"
+_NOT_AN_ANSWER_LEADS = (
+    *_FOOTER_LEADS,
+    _FOLLOW_UP_LEAD,
+    "This covers Uganda only",
+    *DEGRADED_DISCLOSURES.values(),
+)
+_CITATION_MARKER_RE = re.compile(r"\[\d{1,3}\]")
+_MARKDOWN_AND_SPACE = " \t*_>#-|"
+
+
+def _is_footer_only(reply: str) -> bool:
+    """Whether *reply* has the contact footer and no answer: markers and Markdown do not count."""
+    from ..research.web_research import split_live_disclosures
+
+    body, _ = split_live_disclosures(reply)
+    lines = [
+        _CITATION_MARKER_RE.sub("", line).strip(_MARKDOWN_AND_SPACE) for line in body.splitlines()
+    ]
+    answer_lines = [line for line in lines if not line.startswith(_NOT_AN_ANSWER_LEADS)]
+    return any(line.startswith(_FOOTER_LEADS) for line in lines) and not any(
+        ch.isalnum() for line in answer_lines for ch in line
+    )
+
+
+def _abstained_fields() -> dict[str, Any]:
+    return {"retrieval_mode": "abstained", "sources": [], "citations": [], "resources": []}
+
+
 def _mark_stage(name: str, started: float) -> None:
     """Record a streamed stage. REST turns do this through ``trace_stage`` timings."""
     stages = _TURN_STAGES.get()
@@ -2523,6 +2555,7 @@ async def run_chat_turn(
     started = time.perf_counter()
     # What the taxpayer has actually been sent, for a turn that never finishes.
     sent = ""
+    abstention = ""
     progress: dict[str, Any] = {}
     usage = None
     closing = {
@@ -2560,7 +2593,26 @@ async def run_chat_turn(
                     sent += payload
                 elif event_type == "revision" and isinstance(payload, str):
                     sent = payload
+                elif event_type == "done" and _is_footer_only(sent):
+                    # Every branch ends here, after the footer may already be on screen (G47).
+                    result = progress.get("result") or {}
+                    locale = str(result.get("locale") or kwargs.get("locale") or "en")
+                    abstention = await asyncio.to_thread(localize_reply, ABSTENTION_REPLY, locale)
+                    sent = abstention
+                    yield "revision", abstention
+                    yield "grounding", _abstained_fields()
                 elif event_type == "_log" and isinstance(payload, dict):
+                    if abstention:
+                        payload = {
+                            **payload,
+                            "full_reply": abstention,
+                            "english_reply": ABSTENTION_REPLY,
+                            "result": {
+                                **(payload.get("result") or {}),
+                                **_abstained_fields(),
+                                "reply": abstention,
+                            },
+                        }
                     finished = True
                     await asyncio.to_thread(
                         _finish_streamed_turn,
@@ -5987,7 +6039,7 @@ class ChatModel:
         follow_up = self._related_question(query, hits)
         if not follow_up:
             return f"{body}\n\n{CONTACT_FOOTER}"
-        return f"{body}\n\n{CONTACT_FOOTER}\n\nYou might also want to know: {follow_up}"
+        return f"{body}\n\n{CONTACT_FOOTER}\n\n{_FOLLOW_UP_LEAD} {follow_up}"
 
     # A suggestion has to be *related*, not merely retrievable. Below this the
     # best candidate is noise and no suggestion is better than a random one.
@@ -11392,6 +11444,9 @@ class ChatModel:
             portal_context=portal_context,
             portal_task_submission=portal_task_submission,
         )
+        # Every exit of _generate_en arrives here, before localization (G47).
+        if isinstance(result, dict) and _is_footer_only(str(result.get("reply") or "")):
+            result = {**result, **_abstained_fields(), "reply": ABSTENTION_REPLY}
         if isinstance(result, dict) and turn_out.get("source"):
             # Why the reply is in this language: the client keeps a detected
             # language as a hint and only an explicit one as the user's choice.
