@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 from .faq_corpus import CorpusValidationError
 from ..guardrails.input_checks import injection_present
 from ..guardrails.pii import redact_pii_text
+from ..linear_text import sub_emails
 from .pdf_corpus import TRUST_MANIFEST, normalise_extracted_text, normalise_heading
 
 if TYPE_CHECKING:
@@ -74,10 +75,12 @@ _FOREIGN_BODY = re.compile(r"internet archive", re.IGNORECASE)
 #: Identifiers that a taxpayer asking about tax never needs back. The helpline
 #: has the ``ug_phone`` shape, so phones stay; ``kinds`` keeps them out of this.
 _CORPUS_REDACTED_KINDS = frozenset({"ug_tin", "ug_nid"})
-#: Official partner addresses (``sct@kra.go.ke``) stay; a personal mailbox does not.
-_PERSONAL_WEBMAIL = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@(?:gmail|googlemail|yahoo|hotmail|outlook|live|icloud|proton|protonmail)\.[a-z]{2,}(?:\.[a-z]{2,})?\b",
-    re.IGNORECASE,
+#: Official partner addresses (``sct@kra.go.ke``) stay; a personal mailbox does not. The local
+#: part and the domain of ``\b[A-Za-z0-9._%+-]+@(?:gmail|…)\.[a-z]{2,}(?:\.[a-z]{2,})?\b``,
+#: case-insensitive, for ``linear_text.sub_emails`` (G716).
+_PERSONAL_WEBMAIL = (
+    r"[A-Za-z0-9._%+-]",
+    r"(?:gmail|googlemail|yahoo|hotmail|outlook|live|icloud|proton|protonmail)\.[a-z]{2,}(?:\.[a-z]{2,})?\b",
 )
 
 #: Pages shorter than this are navigation furniture, not guidance.
@@ -288,7 +291,7 @@ def minimise_identifiers(text: str) -> str:
     whole: that also removes ``0772140000``, URA's own WhatsApp helpline.
     """
     redacted = redact_pii_text(text, kinds=_CORPUS_REDACTED_KINDS)
-    return _PERSONAL_WEBMAIL.sub("[REDACTED_EMAIL]", redacted)
+    return sub_emails(redacted, "[REDACTED_EMAIL]", *_PERSONAL_WEBMAIL, flags=re.IGNORECASE)
 
 
 def split_qa_digest(body: str) -> list[tuple[str, str]]:

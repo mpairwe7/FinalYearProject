@@ -59,11 +59,20 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
   with one correction: its TLD class `[A-Z|a-z]` also took "|", so an address followed by a table
   pipe swallowed the next cell (`jane@x.com|Kampala` was one address). The scan, and its oracle,
   use `[A-Za-z]`. The same shape remains outside `pii.py` (G716).
+- **Amendment, 2026-11-21 (G716).** Three more patterns had the email shape: the crawler's
+  personal-webmail redaction, the email scrub in `scrub_query_pii_for_web`, and the email search
+  in `portal_copilot.extract_task_entities`. `linear_text.email_spans` now holds the scan. It takes
+  a pattern's local-part class, domain and flags, reads each local-part run once back from its
+  "@", and matches the domain `\A`-anchored on the text up to the next "@". `sub_emails` replaces
+  what it finds. The three sites and `pii.email_address_spans`, which replaces `_email_spans`, each
+  pass their own class, domain and flags, so `\w` stays Unicode in the web scrub and the crawler
+  stays case-insensitive. `portal_copilot._EMAIL_RE` stays for its `fullmatch`, which starts only
+  at the beginning of the field.
 
 Each replacement returns the same output as the regex it replaces, except the corrected email
-TLD class above. That was checked on
-128,999 strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both
-test trees, and fuzz.
+TLD class above. For the replacements before these amendments that was checked on 128,999
+strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both test
+trees, and fuzz. The G715 and G716 rows give their own checks.
 
 ## Consequences
 

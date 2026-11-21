@@ -8,6 +8,10 @@ These functions give the same result as the regex they replace, from one pass ov
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def strip_spans(
@@ -74,5 +78,54 @@ def strip_blocks(
             end = close.end()
         out.append(text[kept : m.start()])
         kept = pos = end
+    out.append(text[kept:])
+    return "".join(out)
+
+
+def _at_word_boundary(text: str, i: int) -> bool:
+    """Whether ``\\b`` holds at *i*: a ``\\w`` character on one side of it only."""
+    before = i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_")
+    after = i < len(text) and (text[i].isalnum() or text[i] == "_")
+    return before != after
+
+
+def email_spans(
+    text: str, local_class: str, domain: str, flags: int = 0
+) -> Iterator[tuple[int, int]]:
+    """The spans ``re.finditer(r"\\b" + local_class + "+@" + domain, text, flags)`` gives.
+
+    *local_class* is one character class, and neither it nor *domain* matches "@". The regex
+    restarts at every word boundary in a run of local-part characters and reads the run to its
+    end each time. This reads each run once, back from its "@", and matches *domain* anchored
+    with ``\\A`` on the text up to the next "@" (G715, G716). That equality assumes Unicode
+    matching and a *domain* without anchors: under ``re.ASCII``, or with ``$`` in *domain*, the
+    result can differ from the regex. No caller passes either.
+    """
+    local_char = re.compile(local_class, flags)
+    domain_at = re.compile(rf"\A(?:{domain})", flags)
+    prev_end = 0
+    at = text.find("@")
+    while at >= 0:
+        nxt = text.find("@", at + 1)
+        start = at
+        while start > prev_end and local_char.fullmatch(text[start - 1]):
+            start -= 1
+        start = next((i for i in range(start, at) if _at_word_boundary(text, i)), at)
+        # "@" is not a word character, so a closing \b reads the slice's end as it reads the "@".
+        m = domain_at.match(text[at + 1 : nxt if nxt >= 0 else None]) if start < at else None
+        if m:
+            prev_end = at + 1 + m.end()
+            yield start, prev_end
+        at = nxt
+
+
+def sub_emails(text: str, repl: str, local_class: str, domain: str, flags: int = 0) -> str:
+    """``re.sub(r"\\b" + local_class + "+@" + domain, repl, text, flags=flags)`` for a *repl*
+    without backslashes, at the spans :func:`email_spans` gives."""
+    out: list[str] = []
+    kept = 0
+    for start, end in email_spans(text, local_class, domain, flags):
+        out += (text[kept:start], repl)
+        kept = end
     out.append(text[kept:])
     return "".join(out)

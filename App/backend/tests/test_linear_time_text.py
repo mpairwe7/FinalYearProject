@@ -14,11 +14,14 @@ import time
 import pytest
 from app.tax import calculator_router
 from app import mt
+from app.connectors import portal_copilot
 from app.guardrails import output_checks, pii
+from app.ingestion import crawl_corpus
 from app.memory.case_facts import extract_all_money
-from app.linear_text import strip_blocks, strip_spans
+from app.linear_text import strip_blocks, strip_spans, sub_emails
 from app.rag import entailment, pipeline
 from app.rag.context_manager import extract_conversation_entities
+from app.research import web_research
 
 N = 100_000
 BUDGET_S = 0.5
@@ -262,6 +265,48 @@ def test_address_stops_before_a_table_pipe():
     assert pii.redact_pii_text("| jane@x.com|Kampala |") == "| [REDACTED_EMAIL]|Kampala |"
 
 
+_WEBMAIL_ORACLE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@(?:gmail|googlemail|yahoo|hotmail|outlook|live|icloud|proton|protonmail)"
+    r"\.[a-z]{2,}(?:\.[a-z]{2,})?\b",
+    re.IGNORECASE,
+)
+_QUERY_EMAIL_ORACLE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
+_EMAIL_EDGES = [
+    "Mail Jane.Doe@GMAIL.COM, bob@yahoo.co.uk, x@googlemail.co.uk.x or sct@kra.go.ke.",
+    "a@gmail.c a@gmail.com1 a@gmail.com_x a@gmail.coé a@gmail.co.u a@gmail.co.ukx1 a@hotmail.",
+    "[me](mailto:ann+tax@outlook.com) <UPPER@LIVE.COM> (a_b%c-d@icloud.com) a@protonmail.ch",
+    "a@b@gmail.com x@@yahoo.com .a@gmail.com a.@gmail.com -a@gmail.com _a@gmail.com",
+    "https://x.com/u/me@gmail.com?q=1 | me@gmail.com|Kampala |",
+    "jürgen@gmail.com é@b.co ü.x@dö-main.de x@ура.рф a@b.c٣ a@b_c.d",
+    "\u212a@gmail.com \u017fa@yahoo.com a@gma\u0130l.com a@gma\u0131l.com",
+    "x@a.bc.d@e.fg a@b..co a@.co @b.co a@b-.co- a@gmail.com.b@gmail.com",
+    "",
+]
+
+
+def _email_fuzz() -> list[str]:
+    rng = random.Random(716)
+    tokens = ["@", ".", "_", "%", "+", "-", " ", "a", "Z", "1", "é", "\u212a", "gmail", "YAHOO", "co", "uk", "|"]
+    return ["".join(rng.choice(tokens) for _ in range(rng.randint(1, 30))) for _ in range(3_000)]
+
+
+def test_crawled_page_webmail_matches_the_regex():
+    for text in _EMAIL_EDGES + _email_fuzz():
+        kept = pii.redact_pii_text(text, kinds=crawl_corpus._CORPUS_REDACTED_KINDS)
+        assert crawl_corpus.minimise_identifiers(text) == _WEBMAIL_ORACLE.sub("[REDACTED_EMAIL]", kept), text
+
+
+def test_web_query_email_scrub_matches_the_regex():
+    for text in _EMAIL_EDGES + _email_fuzz():
+        assert sub_emails(text, " ", *web_research._QUERY_EMAIL) == _QUERY_EMAIL_ORACLE.sub(" ", text), text
+
+
+def test_portal_task_email_matches_the_regex():
+    for text in _EMAIL_EDGES + _email_fuzz():
+        found = portal_copilot._EMAIL_RE.search(text)
+        assert portal_copilot.extract_task_entities(text).get("email") == (found and found.group(1)), text
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -324,6 +369,9 @@ def test_tin_pattern_matches_the_regex(text):
         (pii.redact_pii_text, "0772-123-" * (N // 9)),
         (pii.redact_pii_text, "a." * (N // 2)),
         (pii.contains_pii, "x@" + "a." * (N // 2)),
+        (crawl_corpus.minimise_identifiers, "a." * (N // 2)),
+        (web_research.scrub_query_pii_for_web, "a." * (N // 2)),
+        (portal_copilot.extract_task_entities, "a." * (N // 2)),
         (pii.redact_pii_text, "TIN" + " " * (N // 5) + "x"),
         (pii.contains_pii, "Tax Identification Number" + " " * (N // 5) + "x"),
         (pii._STREAM_HOLD_TAIL_RE.search, " 0772 1" * (N // 7) + "x"),

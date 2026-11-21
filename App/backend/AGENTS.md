@@ -45,7 +45,7 @@ PYTHONPATH=App/backend python3 -m app.db.seed_prototype   # development only
 | `memory/` | Working, episodic, semantic and procedural memory and the resolution ledger; `case_facts.py` (facts the taxpayer stated in this conversation) and `language_state.py` (the conversation's answer language) (ADR-0060); `topics.py` (the task a conversation is about) |
 | `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer while `audit_ledger` is on; a failed append is counted and logged, never retried), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
-| `linear_text.py` | `strip_spans`, `strip_blocks`: one-pass scans that replace a regex exactly (ADR-0057) |
+| `linear_text.py` | `strip_spans`, `strip_blocks`, `email_spans`, `sub_emails`: one-pass scans that replace a regex exactly (ADR-0057) |
 | `config/` | `flags.py` (registry + rollout; do not add a flag here only) and `settings.py` (the API's title and version) |
 
 ## Rules

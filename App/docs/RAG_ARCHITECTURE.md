@@ -466,7 +466,7 @@ App/backend/app/
 │
 ├── memory/topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── guardrails/        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
-├── linear_text.py       # strip_spans, strip_blocks: one-pass scans for regexes slow on chat text (ADR-0057)
+├── linear_text.py       # strip_spans, strip_blocks, email_spans, sub_emails: one-pass scans for regexes slow on chat text (ADR-0057)
 ├── ingestion/crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── research/web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── research/web_search_providers.py # Search backends with failover and breakers (ADR-0021)

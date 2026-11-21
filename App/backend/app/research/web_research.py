@@ -61,7 +61,7 @@ from urllib.parse import urlparse
 from ..db import database as db
 from ..guardrails.input_checks import AI_ORGANISATION_SUFFIX, scan_retrieved_text
 from ..guardrails.pii import redact_pii_text
-from ..linear_text import strip_spans
+from ..linear_text import strip_spans, sub_emails
 from ..tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
 from .web_search_providers import (
@@ -1049,6 +1049,10 @@ def _domain_terms(text: str) -> list[str]:
     return list(seen)
 
 
+#: The local part and the domain of ``\b[\w.+-]+@[\w-]+\.[\w.-]+\b``, for ``linear_text.sub_emails`` (G716).
+_QUERY_EMAIL = (r"[\w.+-]", r"[\w-]+\.[\w.-]+\b")
+
+
 def scrub_query_pii_for_web(text: str) -> str:
     """Strip all PII, TINs, NINs, phone numbers, emails, and user/company names from *text*."""
     scrubbed = redact_pii_text(str(text or ""))
@@ -1057,7 +1061,7 @@ def scrub_query_pii_for_web(text: str) -> str:
     # Remove Uganda NIN patterns (CM/CF + 12 alphanumeric chars)
     scrubbed = re.sub(r"\b(?:CM|CF)[A-Z0-9]{10,14}\b", " ", scrubbed, flags=re.IGNORECASE)
     # Remove email addresses and URLs
-    scrubbed = re.sub(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b", " ", scrubbed)
+    scrubbed = sub_emails(scrubbed, " ", *_QUERY_EMAIL)
     scrubbed = re.sub(r"https?://\S+", " ", scrubbed)
     # Remove "[REDACTED_...]" placeholders inserted by redact_pii_text
     scrubbed = strip_spans(scrubbed, "[REDACTED", "]", " ", ignore_case=True)

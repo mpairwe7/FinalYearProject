@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..db import database as db
+from ..guardrails.pii import email_address_spans
 from ..mcp import mrtr
 from ..tools import ToolRegistry
 from ..tools.portal_navigator_data import (
@@ -1496,9 +1497,9 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     if plate_m:
         entities["vehicle_registration_number"] = re.sub(r"\s+", " ", plate_m.group(1).upper())
 
-    email_m = _EMAIL_RE.search(text)
-    if email_m:
-        entities["email"] = email_m.group(1)
+    for start, end in email_address_spans(text):
+        entities["email"] = text[start:end]
+        break
 
     phone_m = _PHONE_RE.search(text)
     if phone_m:
