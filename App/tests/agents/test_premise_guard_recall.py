@@ -49,6 +49,8 @@ FABRICATED = [
     "Is the Inheritance Tax refund taxable?",
     "Pay my omitted Inheritance Tax now",
     "Is a 2026 Wealth Tax payable by expatriates?",
+    "What is the latest Robot Tax?",
+    "What is this year's Wealth Tax?",
 ]
 
 #: Real Ugandan taxes in the same phrasings, and "<qualifier> tax <noun>"
@@ -84,6 +86,20 @@ REAL = [
     "How do I amend my income tax return?",
 ]
 
+QUALIFIED_REAL = [
+    "What is the latest fuel levy this year?",
+    "What is the latest stamp duty?",
+    "What is the latest digital service tax?",
+    "What is the recent infrastructure levy?",
+    "What is the updated infrastructure levy?",
+    "What is the prevailing presumptive tax?",
+    "What is the proposed digital service tax?",
+    "What is the Kampala local service tax?",
+    "Explain presumptive tax",
+    "What is this year's stamp duty?",
+    "What is my company's stamp duty?",
+]
+
 
 def _faq_rows() -> list[tuple[str, str]]:
     rows = []
@@ -105,6 +121,24 @@ def test_a_tax_uganda_does_not_levy_is_challenged(question: str) -> None:
 def test_a_real_tax_is_not_challenged(question: str) -> None:
     result = check_false_premise(question, hits=[])
     assert not result.is_false_premise, f"{question!r} challenged as {result.concept!r}"
+
+
+@pytest.mark.parametrize("question", QUALIFIED_REAL)
+def test_a_word_before_a_real_tax_does_not_make_it_invented(question: str) -> None:
+    result = check_false_premise(question, hits=[])
+    assert not result.is_false_premise, f"{question!r} challenged as {result.concept!r}"
+
+
+def test_a_word_before_a_tax_the_passages_name_does_not_make_it_invented() -> None:
+    hit = {"answer": "The EAC applies an anti-dumping duty on certain steel imports."}
+    assert not check_false_premise("What is the latest anti-dumping duty on steel?", [hit]).is_false_premise
+
+
+def test_an_invented_tax_whose_last_word_is_in_the_passages_is_still_challenged() -> None:
+    hit = {"answer": "Equipment for direct and exclusive use in mining exploration is exempt from import duty."}
+    result = check_false_premise("How much is the Uganda Space Exploration Tax?", [hit])
+    assert result.is_false_premise
+    assert result.concept == "Space Exploration Tax"
 
 
 def test_no_faq_question_is_challenged_when_its_answer_is_retrieved() -> None:
