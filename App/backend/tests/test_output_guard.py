@@ -491,8 +491,8 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
 
 
 class NormalizeStructureKeepsPlaceholderTextTests(unittest.TestCase):
-    """The old per-span restore searched the whole answer for its own placeholder, so text that
-    spelled ``PROT`` and a number between two protected spans came back with NUL bytes, stray
+    """The old per-span restore searched each line for its own placeholder, so text that spelled
+    ``PROT`` and a number between two protected spans came back with NUL bytes, stray
     placeholders and lost spans (G467)."""
 
     def test_text_that_spells_the_placeholder_comes_back_unchanged(self) -> None:
