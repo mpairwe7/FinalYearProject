@@ -176,7 +176,7 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
 | `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
 | `App/infra/monitoring/prometheus.yml` | Prometheus scrape targets |
-| `App/infra/monitoring/alerting-rules.yml` | 17 alert rules (SLO, Qdrant index lifecycle, audit trail) |
+| `App/infra/monitoring/alerting-rules.yml` | 59 alert rules in 11 groups: availability, latency, quality, audit and compliance, security, dependencies, the Qdrant index lifecycle, the agent planner and live research, agent resilience, crawl freshness and the call receptionist |
 | `App/security/.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ### Current runtime toggles
