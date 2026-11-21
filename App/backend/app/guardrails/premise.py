@@ -279,10 +279,11 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "specify", "administer", "administering", "administered", "download", "downloading",
     "access", "resolve", "resolving", "resolved",
     # Words that date or qualify a tax without naming it ("the latest stamp duty",
-    # "the 28-day surcharge", G719). "new" and "current" are listed above; a
-    # possessive "'s" never reaches the modifier, which takes no apostrophe.
+    # "the 28-day surcharge", "bilateral tax treaties", G719). "new" and "current"
+    # are listed above; a possessive "'s" never reaches the modifier, which takes
+    # no apostrophe.
     "latest", "recent", "updated", "prevailing", "proposed", "upcoming", "revised",
-    "present", "existing", "respective", "day", "days",
+    "present", "existing", "respective", "day", "days", "bilateral", "double",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
@@ -324,7 +325,6 @@ _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
     r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
     r"office|offices|agent|agents|practitioner|practitioners|curriculum|curricula|"
-    r"treaty|treaties|agreement|agreements|convention|conventions|"
     r"-(?:free|exempt|inclusive|exclusive|deductible))\b",
     re.IGNORECASE,
 )
@@ -338,6 +338,32 @@ _SINGULAR_KIND = {
     "surcharges": "surcharge",
 }
 _PLURAL_KIND = {singular: plural for plural, singular in _SINGULAR_KIND.items()}
+
+
+def _begins(passage_word: str, word: str) -> bool:
+    # A dropped first letter is a typo too ("ncome"), but a short word would
+    # then match too much ("ax" in "tax").
+    return passage_word.startswith(word) or (len(word) >= 4 and passage_word[1:].startswith(word))
+
+
+def _passages_name(name: list[str], passage_words: list[str], nouns: tuple[str, ...] = ()) -> bool:
+    """Whether the words of *name* begin consecutive passage words, then one of *nouns* if given.
+
+    A prefix keeps a misspelt or singular name matching its tax ("custom duty"
+    in "customs duty", "capital gain" in "capital gains"); a word start keeps
+    "holding tax" out of "withholding tax". With *nouns*, the passage must name a
+    tax, not a compound ("foreign tax credit" names no "foreign tax", G719).
+    """
+    span = len(name) + (1 if nouns else 0)
+    for j in range(len(passage_words) - span + 1):
+        if not all(_begins(passage_words[j + k], word) for k, word in enumerate(name)):
+            continue
+        if not nouns:
+            return True
+        after = passage_words[j + span] if j + span < len(passage_words) else ""
+        if passage_words[j + len(name)] in nouns and not _NON_TAX_NOUN_FOLLOWERS.match(after):
+            return True
+    return False
 
 
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
@@ -394,18 +420,16 @@ def check_false_premise(
     if not candidates:
         return FalsePremiseResult(is_false_premise=False)
 
-    corpus_text = ""
+    passage_words: list[str] = []
     if hits:
         corpus_parts = []
         for h in hits:
             corpus_parts.append(str(h.get("text") or h.get("answer") or ""))
             corpus_parts.append(str(h.get("question") or ""))
             corpus_parts.append(str(h.get("source") or ""))
-        # Everything but letters and digits becomes a space, as hyphens do in the
-        # extracted modifier, so a hyphenated name ("pro-rata") matches its own
-        # passage and a name matches whole words only ("holding tax" is not in
-        # "withholding tax", G719).
-        corpus_text = f" {re.sub(r'[^a-z0-9]+', ' ', ' '.join(corpus_parts).lower())} "
+        # Split on everything but letters and digits, as the modifier is split
+        # on hyphens, so a hyphenated name ("pro-rata") matches its own passage.
+        passage_words = re.findall(r"[a-z0-9]+", " ".join(corpus_parts).lower())
 
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
@@ -445,10 +469,8 @@ def check_false_premise(
         # The passages name the tax: the whole modifier, or an ending of it
         # followed by the tax noun ("stamp duty" for "Kampala stamp duty", G719).
         words = clean_mod.split()
-        if f" {clean_mod} " in corpus_text or any(
-            f" {' '.join(words[i:])} {noun} " in corpus_text
-            for i in range(len(words))
-            for noun in (kind, _PLURAL_KIND[kind])
+        if _passages_name(words, passage_words) or any(
+            _passages_name(words[i:], passage_words, (kind, _PLURAL_KIND[kind])) for i in range(1, len(words))
         ):
             continue
 
