@@ -96,28 +96,35 @@ sources*, not a file hash.
 
 ## Amendment 2 — 2026-11-22: a word before a real tax's name (G719)
 
-**Context.** The guard read every word between the tax noun and the nearest stop
-word as the tax's name. "latest" and "recent" are not stop words, so on the Space
-"What is the latest fuel levy this year?" was rejected with the reply that URA
-imposes no "Latest Fuel Levy". Run locally, the guard rejected real taxes after
-"updated", "prevailing", "proposed" and a place name ("the Kampala local
-service tax") the same way.
+**Context.** The guard reads every word between the tax noun and the nearest
+stop word as the tax's name. "latest" and "recent" were not stop words, so on the
+Space "What is the latest fuel levy this year?" was rejected with the reply that
+URA imposes no "Latest Fuel Levy". Run locally, the guard rejected real taxes
+after "updated", "prevailing" and "proposed" the same way.
 
-**Decision.** The stop-word list stays as it is. The tax's name ends the
-modifier, so a candidate is cleared when any trailing part of it ("latest
-stamp", then "stamp") is in `_LEGITIMATE_TAX_MODIFIERS`, or appears in the
-retrieved passages followed by the tax noun ("anti dumping duty"). The whole
-modifier still clears it when the passages contain it. A shorter ending found
-anywhere in the passages does not: with that rule "Space Exploration Tax" passed
-whenever a mining passage mentioned exploration.
+**Decision.** Words that date or qualify a tax without naming it end the name,
+as "new" and "current" already did: latest, recent, updated, prevailing,
+proposed, upcoming, revised, present, existing, respective, day and days. The
+allow-list check takes the whole remaining name, as before. The retrieved
+passages clear a candidate when they contain its whole name, or an ending of it
+followed by the tax noun ("stamp duty" for "Kampala stamp duty"), as whole
+words. A first version cleared a candidate when any ending of it was on the
+allow-list. Many entries are generic words ("minimum", "land", "foreign"), so it
+rejected 360 of 11,160 built invented names where dev rejects 6,720, and an
+independent check failed it. It also matched passages inside longer words
+("holding tax" in "withholding tax").
 
-**Consequences.** An invented tax whose name ends in a real tax's name ("Moon
-Fuel Levy") is no longer rejected and goes to normal retrieval. That is the
-cheaper error: a missed rejection costs a retrieval answer, a wrong rejection
-tells a taxpayer a real tax does not exist. No question that was not rejected
-before is rejected now, because every check the old rule made is still made.
+**Consequences.** With no passages, every built invented name that dev rejects
+is still rejected. With the top 5 BM25 rows of the dataset as passages, 1,156 of
+the 6,480 that dev rejects end in a tax the passages name ("robot stamp duty";
+"wealth foreign tax" when a passage says "foreign tax credit") and go to normal
+retrieval. A real tax after a qualifier outside the list ("Kampala",
+"effective") is still rejected unless the passages name it. Whole-word matching
+ends dev's matches inside longer words, so a misspelt name that reaches the
+guard ("incom tax") is no longer cleared by "income" in a passage; the default
+query rewrite corrects that spelling first.
 
 **Confirmation.** `App/tests/agents/test_premise_guard_recall.py` pins the
-qualified real taxes, a passage-named tax behind a qualifier, an invented tax
-whose last word is in the passage, and the 21 fabricated-tax questions. The
-differential over the dataset, eval and test questions is in G719.
+qualified real taxes, the three levies added from `App/Data/pdfs`, a qualifier
+the passages clear, an invented tax whose last word is in the passage, names
+inside longer words, and 24 fabricated-tax questions. The counts are in G719.
