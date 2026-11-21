@@ -3910,7 +3910,7 @@ def _closing_courtesy_reply(
         return GRATITUDE_REPLY
     if _FAREWELL_ONLY.match(clean):
         return FAREWELL_REPLY
-    if history and declines_open_offer(clean, str(history[-1].get("bot_reply") or "")):
+    if history and declines_open_offer(clean, str(history[-1].get("bot_reply") or ""), locale):
         return FAREWELL_REPLY
     return ""
 
