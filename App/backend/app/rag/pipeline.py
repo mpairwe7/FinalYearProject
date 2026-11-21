@@ -1283,10 +1283,16 @@ def _with_degraded_disclosure(reply: str, reasons: Iterable[str]) -> str:
 _FOOTER_LEADS = tuple(
     footer.partition(":")[0] for footer in (CONTACT_FOOTER, *LOCALIZED_CONTACT_FOOTERS.values())
 )
-_FOLLOW_UP_LEAD = "You might also want to know:"
+_FOLLOW_UP_LEADS = {
+    "en": "You might also want to know:",
+    "lg": "Oyinz'okwagala okumanya:",
+    "sw": "Unaweza pia kutaka kujua:",
+    "nyn": "Noobaasa n'okwenda kumanya:",
+    "ach": "Itwero bene mito ngeyo:",
+}
 _NOT_AN_ANSWER_LEADS = (
     *_FOOTER_LEADS,
-    _FOLLOW_UP_LEAD,
+    *_FOLLOW_UP_LEADS.values(),
     "This covers Uganda only",
     *DEGRADED_DISCLOSURES.values(),
 )
@@ -1306,6 +1312,16 @@ def _is_footer_only(reply: str) -> bool:
     return any(line.startswith(_FOOTER_LEADS) for line in lines) and not any(
         ch.isalnum() for line in answer_lines for ch in line
     )
+
+
+def _streamed_footer_only(sent: str, progress: dict[str, Any]) -> bool:
+    """Whether a streamed turn sent a footer-only reply, judged before translation when it can be.
+
+    Machine translation rewrites a disclosure or caveat into words no fixed lead matches, so
+    when what was sent is exactly a translation, the English it was made from decides.
+    """
+    english, localized = progress.get("localized") or ("", None)
+    return _is_footer_only(sent) or (sent == localized and _is_footer_only(english))
 
 
 def _abstained_fields() -> dict[str, Any]:
@@ -2593,7 +2609,7 @@ async def run_chat_turn(
                     sent += payload
                 elif event_type == "revision" and isinstance(payload, str):
                     sent = payload
-                elif event_type == "done" and _is_footer_only(sent):
+                elif event_type == "done" and _streamed_footer_only(sent, progress):
                     # Every branch ends here, after the footer may already be on screen (G47).
                     result = progress.get("result") or {}
                     locale = str(result.get("locale") or kwargs.get("locale") or "en")
@@ -2826,7 +2842,10 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     def _localized(text: str) -> str:
         nonlocal english_reply
         english_reply = text
-        return localize_reply(text, locale)
+        localized = localize_reply(text, locale)
+        if progress is not None:
+            progress["localized"] = (text, localized)
+        return localized
     cancel_event = cancel_event or threading.Event()
     deadline_s = turn_deadline_s if turn_deadline_s is not None else _resolve_turn_deadline()
     set_turn_deadline(deadline_s if deadline_s > 0 else None)
@@ -4526,7 +4545,7 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
 
     # Handle follow-up suggestions separately so optional suggestions do not cause
     # figure mismatch or truncation in the primary answer.
-    suggestion_sep = "\n\nYou might also want to know:"
+    suggestion_sep = f"\n\n{_FOLLOW_UP_LEADS['en']}"
     if suggestion_sep in text:
         body_part, _, follow_part = text.partition(suggestion_sep)
         loc_body = (
@@ -4535,15 +4554,9 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
             else localize_reply(body_part.strip(), locale)
         )
         if loc_body and loc_body != body_part.strip():
-            _follow_prefixes = {
-                "lg": "\n\nOyinz'okwagala okumanya:",
-                "sw": "\n\nUnaweza pia kutaka kujua:",
-                "nyn": "\n\nNoobaasa n'okwenda kumanya:",
-                "ach": "\n\nItwero bene mito ngeyo:",
-            }
-            prefix = _follow_prefixes.get(locale, "\n\nUnaweza pia kutaka kujua:")
+            prefix = _FOLLOW_UP_LEADS.get(locale, _FOLLOW_UP_LEADS["sw"])
             loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
-            return f"{loc_body}{prefix} {loc_follow}"
+            return f"{loc_body}\n\n{prefix} {loc_follow}"
 
     # Handle canned URA contact footer separately so contact numbers (0800...)
     # are never mangled by MT and never falsely trigger figure-change guards.
@@ -6039,7 +6052,7 @@ class ChatModel:
         follow_up = self._related_question(query, hits)
         if not follow_up:
             return f"{body}\n\n{CONTACT_FOOTER}"
-        return f"{body}\n\n{CONTACT_FOOTER}\n\n{_FOLLOW_UP_LEAD} {follow_up}"
+        return f"{body}\n\n{CONTACT_FOOTER}\n\n{_FOLLOW_UP_LEADS['en']} {follow_up}"
 
     # A suggestion has to be *related*, not merely retrievable. Below this the
     # best candidate is noise and no suggestion is better than a random one.
@@ -9045,6 +9058,9 @@ class ChatModel:
         """
         if not allowed or not user_id or not personalization or not personalization.get("consent_granted"):
             return
+        if _is_footer_only(reply):
+            # Called before _generate_localized replaces it: keep what the taxpayer is served (G47).
+            reply = ABSTENTION_REPLY
         try:
             from ..memory.service import topic_label
 
