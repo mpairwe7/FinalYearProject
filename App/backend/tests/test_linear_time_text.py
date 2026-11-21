@@ -14,11 +14,14 @@ import time
 import pytest
 from app.tax import calculator_router
 from app import mt
+from app.connectors import portal_copilot
 from app.guardrails import output_checks, pii
+from app.ingestion import crawl_corpus
 from app.memory.case_facts import extract_all_money
 from app.linear_text import strip_blocks, strip_spans
 from app.rag import entailment, pipeline
 from app.rag.context_manager import extract_conversation_entities
+from app.research import web_research
 
 N = 100_000
 BUDGET_S = 0.5
@@ -324,6 +327,9 @@ def test_tin_pattern_matches_the_regex(text):
         (pii.redact_pii_text, "0772-123-" * (N // 9)),
         (pii.redact_pii_text, "a." * (N // 2)),
         (pii.contains_pii, "x@" + "a." * (N // 2)),
+        (crawl_corpus.minimise_identifiers, "a." * (N // 2)),
+        (web_research.scrub_query_pii_for_web, "a." * (N // 2)),
+        (portal_copilot.extract_task_entities, "a." * (N // 2)),
         (pii.redact_pii_text, "TIN" + " " * (N // 5) + "x"),
         (pii.contains_pii, "Tax Identification Number" + " " * (N // 5) + "x"),
         (pii._STREAM_HOLD_TAIL_RE.search, " 0772 1" * (N // 7) + "x"),
