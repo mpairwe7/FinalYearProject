@@ -599,6 +599,8 @@ class GroupedPhoneNumberTests(unittest.TestCase):
                 {"role": "assistant", "text": f"Your return is due on the 15th.\n\n{CONTACT_FOOTER}"},
             ],
         )
+
+
 class NormalizeStructureKeepsPlaceholderTextTests(unittest.TestCase):
     """The old per-span restore searched each line for its own placeholder, so text that spelled
     ``PROT`` and a number between two protected spans came back with NUL bytes, stray
