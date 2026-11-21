@@ -38,7 +38,7 @@ FinalYearProject/
 ├── App/AGENTS.md              # Router for coding agents; a nested guide sits beside each package
 ├── App/scripts/prototype.sh   # load demo defaults + print seed command
 ├── App/evals/                 # Eval runners + preference export
-├── App/infra/                 # Compose overlays, monitoring config, K8s stubs (not applied)
+├── App/infra/                 # Compose overlays, monitoring config, K8s stubs (not applied), RLS template
 ├── .github/workflows/     # CI/CD, security, frontend, mobile, and MLOps workflows
 ├── App/                   # Application code
 │   ├── backend/          # FastAPI backend

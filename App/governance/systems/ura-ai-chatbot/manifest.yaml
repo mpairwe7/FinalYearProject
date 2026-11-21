@@ -853,7 +853,7 @@ aibom_inventory:
       provider: "Sunbird AI (api.sunbird.ai /tasks/chat/completions, OpenAI-compatible)"
       hosting: "cloud"
       locales: ["en", "lg", "sw", "nyn", "ach"]
-      limits: "Both configured accounts answered 403 ACCOUNT_SUSPENDED on 2026-11-09; until restored, Workers AI serves English and the Ugandan languages get retrieval only. Never reached on a call turn."
+      limits: "Both configured accounts answered 403 ACCOUNT_SUSPENDED from 2026-11-09 until working tokens were set on 2026-11-20 (G539). The primary account reaches its quota and the fallback then serves; when both fail, Workers AI serves English and the Ugandan languages get retrieval only. A hung primary can use up the speech deadline before the fallback answers (G714). Never reached on a call turn."
       verified_by:
         - "App/tests/agents/test_sunbird_primary_llm_2026_11.py"
         - "App/tests/agents/test_sunbird_judge_translation_2026_11.py"
