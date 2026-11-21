@@ -98,6 +98,11 @@ OPEN_OFFERS = {
         "Where is my TIN?",
         "Your TIN is on the certificate URA emailed you. How can I help you further?",
     ),
+    # G191's own wording, also the receptionist's "offer_declined" phrase.
+    "what else can I help": (
+        "How do I pay?",
+        "You pay with a PRN at any URA-designated bank. What else can I help you with?",
+    ),
 }
 
 

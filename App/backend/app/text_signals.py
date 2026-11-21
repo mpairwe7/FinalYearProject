@@ -1403,7 +1403,7 @@ _OPEN_OFFER_ENDINGS = (
     *LOCALIZED_CONTACT_FOOTERS.values(),
 )
 #: A generated answer whose closing question asks this is offering more help.
-_OPEN_OFFER_QUESTION_RE = re.compile(r"\b(?:anything else|how (?:can|may) i (?:help|assist))\b")
+_OPEN_OFFER_QUESTION_RE = re.compile(r"\b(?:anything else|what else can i (?:help|assist)|how (?:can|may) i (?:help|assist))\b")
 
 
 def declines_open_offer(message: str, previous_reply: str, locale: str = "en") -> bool:
