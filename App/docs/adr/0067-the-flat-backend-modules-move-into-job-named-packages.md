@@ -154,7 +154,7 @@ so merging them would change how a reported number is reproduced.
 - The test files a phase changes pass locally; CI runs both full suites.
 - `App/tests/test_hf_space_layer.py` reads the Space layer's script and checks
   that every line it edits still exists in the file it edits, at the path the
-  script's `_app_source` call resolves. When phase 1 landed, the script also
+  script names or its `_app_source` call resolves. When phase 1 landed, the script also
   inserted the Gemini speech fallback and the test ran it; that fallback has
   been in the repository since #801, and the test file now holds 10 tests.
 - After each merge the Space is checked on the new image: `/ready`, the startup
