@@ -127,8 +127,9 @@ treaty?".
 
 **Consequences.** With no passages, every built invented name that dev rejects
 is still rejected. With the top 5 BM25 rows of the dataset as passages, 1,073 of
-the 6,480 that dev rejects end in a tax the passages name ("alien advance tax")
-and go to normal retrieval. A real tax after a qualifier outside the list
+the 6,480 that dev rejects end in words the passages put directly before the same
+tax noun, usually a real tax ("alien advance tax") but any such words count
+("robot relevant tax", from "the relevant tax"), and go to normal retrieval. A real tax after a qualifier outside the list
 ("Kampala", "effective") is still rejected unless the passages name it. On the
 built invented names, the qualifier probe, 112 misspellings of real names and
 the dataset, eval and test-literal questions, nothing dev clears is rejected.
