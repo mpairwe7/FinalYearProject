@@ -55,9 +55,13 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
 - **Amendment, 2026-11-21 (G715).** Two patterns in `guardrails/pii.py` had these shapes. The
   email pattern was shape 2: its local-part run restarted at every word boundary. `_email_spans`
   now scans outward from each "@" instead. The TIN pattern's `\s*[:#-]?\s*` was shape 1 and is
-  now `\s*(?:[:#-]\s*)?`.
+  now `\s*(?:[:#-]\s*)?`, which matches the same strings. The email scan reproduces the old regex
+  with one correction: its TLD class `[A-Z|a-z]` also took "|", so an address followed by a table
+  pipe swallowed the next cell (`jane@x.com|Kampala` was one address). The scan, and its oracle,
+  use `[A-Za-z]`. The same shape remains outside `pii.py` (G716).
 
-Each replacement returns the same output as the regex it replaces. That was checked on
+Each replacement returns the same output as the regex it replaces, except the corrected email
+TLD class above. That was checked on
 128,999 strings for each fix: the URA FAQ corpus, the eval sets, every string literal in both
 test trees, and fuzz.
 
@@ -68,7 +72,8 @@ test trees, and fuzz.
 - `app/linear_text.py` holds scans that replace a regex exactly. It is not a place for general
   text helpers.
 - The scans are longer than the regexes they replace. Each docstring names its regex, and
-  `App/backend/tests/test_linear_time_text.py` keeps that regex as the test oracle.
+  `App/backend/tests/test_linear_time_text.py` keeps that regex as the test oracle (for the email
+  scan, the regex with the corrected TLD class).
 
 ## Confirmation
 
