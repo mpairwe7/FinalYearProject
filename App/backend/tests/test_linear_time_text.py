@@ -129,6 +129,38 @@ def test_strip_blocks_matches_the_regex(text):
             ["[[English] x]] y", "a[Luganda\nb", "[swahili]", "[[[acholi", "[Engl"],
         ),
         (
+            output_checks._space_after_headings,
+            r"(#{1,4}\s+[^\n]+)\n([^\n#])",
+            r"\1\n\n\2",
+            0,
+            [
+                "## Title\nBody",
+                "# a # b\n#c\nd",
+                "##### deep\nx",
+                "# \t\n x\n#",
+                "#\n\nx",
+                "# a\n\n#b",
+                "# a\nb # c\nd",
+                "#  \n\n \n z",
+                "x # \n",
+            ],
+        ),
+        (
+            lambda s: output_checks._split_inline_steps(s, "  "),
+            r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])",
+            r"\n\n  \1. \2",
+            0,
+            [
+                "1. Register 2. File 3) Pay",
+                "1. See Section 2. The Act",
+                "1. See Section  2. The Act",
+                "1. into 2. x or 3. y",
+                "1. Due 12. May then 11. **Pay",
+                "1. a\t\t13. B 10. c",
+                "1. per sec. 4. Then",
+            ],
+        ),
+        (
             entailment._join_decimal_gaps,
             r"(\d+)\.\s+(\d+)",
             r"\1.\2",
@@ -147,6 +179,33 @@ def test_strip_blocks_matches_the_regex(text):
 def test_scans_match_the_regex(scan, pattern, repl, flags, texts):
     for text in texts:
         assert scan(text) == re.sub(pattern, repl, text, flags=flags), text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "see `code` and [the form](https://ura.go.ug/x) or www.ura.go.ug now",
+        "[[a](b) [x]y](z) [](q) [a]() ``",
+        "`a` http:// https://x y www. [a](b",
+        "[ `c` ](d) [unclosed `e`",
+        "[a](b)`c`www.d",
+    ],
+)
+def test_protected_spans_match_the_regex(text):
+    spans: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        spans.append(m.group(0))
+        return f"\x00PROT{len(spans) - 1}\x00"
+
+    masked = re.sub(r"`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:https?://|www\.)\S+", keep, text)
+    assert output_checks._mask_protected_spans(text) == (masked, spans)
+
+
+@pytest.mark.parametrize("text", ["**Tax", "*`'\"([A", "** a", "", "A", "***", "(x"])
+def test_sentence_start_matches_the_regex(text):
+    expected = re.match(r"^(?:\*{1,2}|`|['\"(\[])*[A-Z]", text)
+    assert bool(output_checks._STARTS_SENTENCE_RE.match(text)) == bool(expected)
 
 
 @pytest.mark.parametrize(
@@ -181,6 +240,15 @@ def test_first_number_prefix_matches_the_regex(text):
         ),
         (output_checks._join_digit_bracket_glitches, "0" * N + "x"),
         (output_checks._strip_language_tags, "[" * N),
+        (output_checks._mask_protected_spans, "[" * N),
+        (output_checks._mask_protected_spans, "[a](" * (N // 4)),
+        (lambda s: output_checks._split_inline_steps(s, ""), "1. a" + " " * N + "x"),
+        (output_checks._space_after_headings, "# " * (N // 2)),
+        (output_checks._split_prose_sentences, "No. " * (N // 4)),
+        (output_checks._STARTS_SENTENCE_RE.match, "*" * 60 + "a"),
+        # Whole function at half size: the digit search and the span restore are inline.
+        (output_checks.OutputGuard.normalize_structure, "a " * 40 + "1" * (N // 2)),
+        (output_checks.OutputGuard.normalize_structure, "`a` " * (N // 8)),
         (entailment._join_decimal_gaps, "0" * N + "x"),
         (entailment._amount_figures, "0" * N + "x"),
         (lambda s: mt._prefix_first_number(s, "UGX "), "a " + "0" * N + "x"),

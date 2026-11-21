@@ -488,3 +488,16 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("[REDACTED_INSTRUCTION]", summary)
         self.assertNotIn("CM92018100123A", summary)
         self.assertIn("[REDACTED_UG_NID]", summary)
+
+
+class NormalizeStructureKeepsPlaceholderTextTests(unittest.TestCase):
+    """The old per-span restore searched each line for its own placeholder, so text that spelled
+    ``PROT`` and a number between two protected spans came back with NUL bytes, stray
+    placeholders and lost spans (G467)."""
+
+    def test_text_that_spells_the_placeholder_comes_back_unchanged(self) -> None:
+        for text in ("`z` `a`PROT0`b`", "`a`PROT1`b` and `c`", "Order PROT1 via `x`"):
+            with self.subTest(text=text):
+                out = OutputGuard.normalize_structure(text)
+                self.assertNotIn("\x00", out)
+                self.assertEqual(out, text)
