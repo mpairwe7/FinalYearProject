@@ -195,7 +195,9 @@ def test_first_number_prefix_matches_the_regex(text):
         ),
         (pii.redact_pii_text, "+256 772 140 00 " * (N // 16)),
         (pii.redact_pii_text, "0772-123-45 " * (N // 12)),
+        (pii.redact_pii_text, "(0772\u00a0123\u00a045" * (N // 13)),
         (pii._STREAM_HOLD_TAIL_RE.search, " 0772 1" * (N // 7) + "x"),
+        (pii._STREAM_CONTIGUOUS_TAIL_RE.search, "+2\u00a0" * (N // 3) + "x"),
     ],
 )
 def test_slow_input_stays_fast(fn, slow):

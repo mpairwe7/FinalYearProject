@@ -13,23 +13,28 @@ if TYPE_CHECKING:
 STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 
 
+#: At most one space, no-break space (U+00A0, U+202F) or hyphen between the parts of a grouped mobile number.
+_SEP = r"[ \u00a0\u202f-]?"
+_MOBILE_START = r"(?<![\w+.,-])"
+
 # Uganda-specific PII patterns (LLM02)
 # NOTE: Phone pattern uses (?:^|\s|[^\w]) instead of \b before +256
 #       because \b requires a word-char boundary and '+' is not a word char.
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
-    # A mobile number in groups (G658): one space or hyphen after +256 and
-    # between 7XX, XXX and XXX, as the repository writes them; none after a
-    # leading 0, so a spaced amount starting "0 772" is not one. Grouped
-    # landlines are left out because every one in App/Data is a URA office
-    # line, and URA's WhatsApp line, which ends every contact footer, is not
-    # personal data.
+    # A mobile number in groups (G658): one optional _SEP after +256 and between
+    # 7XX, XXX and XXX, as the repository writes them; none after a leading 0,
+    # so a spaced amount starting "0 772" is not one. It may follow punctuation
+    # ("Tel:", "(", "/") but not a word, "+", or the ".", "," or "-" that join
+    # figures and references. Grouped landlines are left out because every one
+    # in App/Data is a URA office line, and URA's WhatsApp line, which ends
+    # every contact footer, is not personal data.
     (
         "ug_phone",
         re.compile(
-            r"(?:^|(?<=\s))(?!(?:\+256[ -]?|0)772[ -]?140[ -]?000\b)"
-            r"(?:\+256[ -]?|0)7\d{2}[ -]?\d{3}[ -]?\d{3}\b"
+            rf"{_MOBILE_START}(?!(?:\+256{_SEP}|0)772{_SEP}140{_SEP}000\b)"
+            rf"(?:\+256{_SEP}|0)7\d\d{_SEP}\d\d\d{_SEP}\d\d\d\b"
         ),
     ),
     # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
@@ -253,17 +258,17 @@ def user_stated_identifiers(message: str) -> tuple[str, ...]:
 _STREAM_HOLD_TAIL_RE = re.compile(
     r"(?i)(?:"
     r"\bC[MFR][0-9A-Z -]{0,15}|"
-    r"(?<!\d[ -])\b1\d{2}(?:[ -]\d{3})?|"
-    r"(?<!\d[ -])\b\d{4}(?:[ -]\d{4}){0,2}|"
-    r"(?<!\d[ -])\b3[47]\d{2}(?:[ -]\d{6})?|"
-    r"(?:^|(?<=\s))(?:\+256|0[74]\d{0,2})(?:[ -]\d{1,3}){0,2}|"
+    r"(?<!\d[ \u00a0\u202f-])\b1\d{2}(?:[ -]\d{3})?|"
+    r"(?<!\d[ \u00a0\u202f-])\b\d{4}(?:[ -]\d{4}){0,2}|"
+    r"(?<!\d[ \u00a0\u202f-])\b3[47]\d{2}(?:[ -]\d{6})?|"
+    rf"{_MOBILE_START}(?:\+256(?:{_SEP}7\d\d(?:{_SEP}\d\d\d)?)?|07\d\d(?:{_SEP}\d\d\d)?)|"
     r"\b(?:TIN|Tax[ \t]{1,4}Identification[ \t]{1,4}Number)[ \t:#-]{0,4}"
     r")[ \t]{1,8}$"
 )
 
 
 _STREAM_CONTIGUOUS_TAIL_RE = re.compile(
-    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\b[A-Z]{2}\d{1,7}|\+\d[\d-]{0,14}|\b\d[\d-]{0,18})$"
+    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\b[A-Z]{2}\d{1,7}|\+\d[\d\u00a0\u202f-]{0,14}|\b\d[\d\u00a0\u202f-]{0,18})$"
 )
 
 
