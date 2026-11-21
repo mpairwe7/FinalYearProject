@@ -26,6 +26,7 @@ from app.text_signals import (
     GREETING_REPLY_BY_LOCALE,
     LOCALIZED_CONTACT_FOOTERS,
 )
+from app.tools.education import LEVELS, explain, format_education_reply
 
 
 class ClosingCourtesyFlowTests(unittest.TestCase):
@@ -133,13 +134,15 @@ class DeclineAfterOfferTests(unittest.TestCase):
         answers = []
         for message in turns:
             answers.append(path(message=message, conversation_id=thread, session_id=session))
-            self.db.log_conversation(session, thread, message, answers[-1]["reply"])
+            self.db.log_conversation(
+                session, thread, message, answers[-1]["reply"], locale=answers[-1]["locale"]
+            )
         return answers
 
-    def reply_after(self, path, asked, previous_reply, message):
-        """The answer to *message* when the previous turn was *asked* answered by *previous_reply*."""
+    def reply_after(self, path, asked, previous_reply, message, locale="en"):
+        """The answer to *message* after *asked* was answered by *previous_reply* in *locale*."""
         thread, session = str(uuid.uuid4()), str(uuid.uuid4())
-        self.db.log_conversation(session, thread, asked, previous_reply)
+        self.db.log_conversation(session, thread, asked, previous_reply, locale=locale)
         return path(message=message, conversation_id=thread, session_id=session)
 
     def assertFarewell(self, out):
@@ -174,7 +177,48 @@ class DeclineAfterOfferTests(unittest.TestCase):
                 for kind, offer in offers.items():
                     for name, path in self.paths.items():
                         with self.subTest(decline=decline, offer=kind, path=name):
-                            self.assertFarewell(self.reply_after(path, "", offer, decline))
+                            out = self.reply_after(path, "", offer, decline, locale=locale)
+                            self.assertEqual(out["locale"], locale)
+                            self.assertFarewell(out)
+
+    def test_another_languages_decline_is_unchanged_in_an_english_turn(self) -> None:
+        # "PE" is also a permanent establishment.
+        for decline in ("PE", "pe", "ngaaha", "apana"):
+            for name, path in self.paths.items():
+                with self.subTest(decline=decline, path=name):
+                    out = self.reply_after(path, "Hello", GREETING_REPLY, decline)
+                    self.assertEqual(out["locale"], "en")
+                    self.assertNotEqual(out["reply"], FAREWELL_REPLY)
+
+    def test_a_decline_asked_as_a_question_is_unchanged(self) -> None:
+        cases = (("No?", "en"), ("Nothing?", "en"), ("that's all?", "en"), ("No?!", "en"), ("pe?", "ach"))
+        for message, locale in cases:
+            offer = GREETING_REPLY_BY_LOCALE[locale]
+            for name, path in self.paths.items():
+                with self.subTest(message=message, path=name):
+                    out = self.reply_after(path, "Hello", offer, message, locale=locale)
+                    self.assertNotEqual(out["reply"], FAREWELL_REPLY)
+
+    def test_no_after_every_lesson_answers_its_knowledge_check(self) -> None:
+        # A lesson ends on a question for the taxpayer, then the contact footer
+        # (_maybe_handle_education); "No" may be the right answer.
+        for topic in explain("")["available_topics"]:
+            for level in LEVELS:
+                for reveal in (False, True):
+                    lesson = format_education_reply(explain(topic, level=level, reveal_answer=reveal), reveal)
+                    for name, path in self.paths.items():
+                        with self.subTest(topic=topic, level=level, reveal=reveal, path=name):
+                            out = self.reply_after(path, topic, f"{lesson}\n\n{CONTACT_FOOTER}", "No")
+                            self.assertNotEqual(out["reply"], FAREWELL_REPLY)
+
+    def test_no_after_a_lesson_from_the_pipeline_is_unchanged(self) -> None:
+        for question in ("What is EFRIS?", "What is VAT registration?"):
+            for name, path in self.paths.items():
+                with self.subTest(question=question, path=name):
+                    lesson, answered = self.converse(path, (question, "No"))
+                    self.assertEqual(lesson["retrieval_mode"], "education")
+                    self.assertIn("Knowledge Check", lesson["reply"])
+                    self.assertNotEqual(answered["reply"], FAREWELL_REPLY)
 
     def test_no_that_answers_another_question_is_unchanged(self) -> None:
         questions = {
