@@ -217,6 +217,12 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "oil",
     "gas",
     "oil and gas",
+    # Named in App/Data/pdfs (G719): the environment levy (10580_DT_LAWS_JULY_2021),
+    # the mobile money levy (Tax-Amendments-FY-2018-19) and anti-dumping duty
+    # (East_Africa_Community_Customs_Management_Act_Revised).
+    "environment",
+    "mobile money",
+    "anti dumping",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent
@@ -228,7 +234,7 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "calculating", "calculated", "compute", "computing", "computed", "deduct", "deducting",
     "deducted", "charge", "charging", "charged", "apply", "applying", "applied", "collect",
     "collecting", "collected", "remit", "remitting", "remitted", "avoid", "evade", "evading",
-    "learn", "know", "see", "show", "tell", "check", "verify", "get", "got", "help", "want",
+    "learn", "know", "see", "show", "tell", "explain", "check", "verify", "get", "got", "help", "want",
     "need", "wish", "like", "prefer", "ask", "start", "stop", "resume",
     "order", "ordering", "ordered", "acquire", "acquiring", "acquired", "buy", "buying", "bought",
     "purchase", "purchasing", "purchased", "obtain", "obtaining", "obtained",
@@ -272,6 +278,11 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "claiming", "recover", "recovering", "recovered", "provide", "providing", "provided",
     "specify", "administer", "administering", "administered", "download", "downloading",
     "access", "resolve", "resolving", "resolved",
+    # Words that date or qualify a tax without naming it ("the latest stamp duty",
+    # "the 28-day surcharge", G719). "new" and "current" are listed above; a
+    # possessive "'s" never reaches the modifier, which takes no apostrophe.
+    "latest", "recent", "updated", "prevailing", "proposed", "upcoming", "revised",
+    "present", "existing", "respective", "day", "days",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
@@ -313,6 +324,7 @@ _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
     r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
     r"office|offices|agent|agents|practitioner|practitioners|curriculum|curricula|"
+    r"treaty|treaties|agreement|agreements|convention|conventions|"
     r"-(?:free|exempt|inclusive|exclusive|deductible))\b",
     re.IGNORECASE,
 )
@@ -325,6 +337,7 @@ _SINGULAR_KIND = {
     "tariffs": "tariff",
     "surcharges": "surcharge",
 }
+_PLURAL_KIND = {singular: plural for plural, singular in _SINGULAR_KIND.items()}
 
 
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
@@ -388,16 +401,15 @@ def check_false_premise(
             corpus_parts.append(str(h.get("text") or h.get("answer") or ""))
             corpus_parts.append(str(h.get("question") or ""))
             corpus_parts.append(str(h.get("source") or ""))
-        # Hyphens become spaces, as they do in the extracted modifier, or a
-        # hyphenated name ("pro-rata") never matches its own passage.
-        corpus_text = re.sub(r"[\s\-]+", " ", " ".join(corpus_parts).lower())
+        # Everything but letters and digits becomes a space, as hyphens do in the
+        # extracted modifier, so a hyphenated name ("pro-rata") matches its own
+        # passage and a name matches whole words only ("holding tax" is not in
+        # "withholding tax", G719).
+        corpus_text = f" {re.sub(r'[^a-z0-9]+', ' ', ' '.join(corpus_parts).lower())} "
 
     for clean_mod, kind in candidates:
-        words = clean_mod.split()
-        possible_names = [" ".join(words[i:]) for i in range(len(words))]
-        if clean_mod in corpus_text or any(
-            name in _LEGITIMATE_TAX_MODIFIERS or f"{name} {kind}" in corpus_text for name in possible_names
-        ):
+        # Check against legitimate taxes
+        if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
             continue
 
         # If the candidate ends with a known legitimate statutory base
@@ -427,6 +439,16 @@ def check_false_premise(
                 "pool betting",
                 "betting",
             )
+        ):
+            continue
+
+        # The passages name the tax: the whole modifier, or an ending of it
+        # followed by the tax noun ("stamp duty" for "Kampala stamp duty", G719).
+        words = clean_mod.split()
+        if f" {clean_mod} " in corpus_text or any(
+            f" {' '.join(words[i:])} {noun} " in corpus_text
+            for i in range(len(words))
+            for noun in (kind, _PLURAL_KIND[kind])
         ):
             continue
 
