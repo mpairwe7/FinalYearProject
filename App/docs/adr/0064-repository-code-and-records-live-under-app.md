@@ -15,7 +15,7 @@ Accepted, 2026-11-18. Carried out in phases, one pull request each.
 - Phase G (done, 2026-11-21): the monitoring configuration moves from `App/monitoring/`
   to `App/infra/monitoring/`, beside the overlays. The owner asked whether governance and
   monitoring belonged in `App/backend`. Neither is backend code: the registry covers the
-  whole system, and Prometheus has 11 scrape jobs. Two read the API's metrics, `ura-api` directly and `otel-collector-genai` through the OpenTelemetry Collector; the others watch the rest of the stack. Under
+  whole system, and Of Prometheus's 11 scrape jobs, two read the API's metrics (`ura-api`, and `otel-collector-genai` through the OpenTelemetry Collector) and `blackbox-http` probes the API's health routes and the frontend. The other eight are `qdrant`, `redis`, `node-exporter`, `vllm`, `dcgm`, `otel-collector`, `alertmanager` and `prometheus`. Under
   `App/backend/**` every edit would rebuild and roll the image. Monitoring is deployment
   configuration, so it joins `App/infra/`; `App/governance/` stays, as the auditor's entry
   point and the path of the compliance gate.
