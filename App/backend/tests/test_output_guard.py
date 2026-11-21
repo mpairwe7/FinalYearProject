@@ -506,10 +506,31 @@ class GroupedPhoneNumberTests(unittest.TestCase):
             "+256-772-123-456",
             "+256772 123 456",
             "+256 772123456",
+            "0772\u00a0123\u00a0456",
+            "+256\u202f772\u202f123\u202f456",
         ):
             with self.subTest(phone=phone):
                 self.assertEqual(redact_pii_text(f"Call me on {phone} today."), "Call me on [REDACTED_UG_PHONE] today.")
                 self.assertTrue(contains_pii(phone))
+
+    def test_a_number_after_punctuation_is_redacted(self) -> None:
+        for text, redacted in (
+            ("(0772 123 456)", "([REDACTED_UG_PHONE])"),
+            ("Tel:0772 123 456", "Tel:[REDACTED_UG_PHONE]"),
+            ("WhatsApp:+256 772 123 456", "WhatsApp:[REDACTED_UG_PHONE]"),
+            ("+256 772 123 456/0701 234 567", "[REDACTED_UG_PHONE]/[REDACTED_UG_PHONE]"),
+            ("Call **0772 123 456**.", "Call **[REDACTED_UG_PHONE]**."),
+            ("Tel:0772123456", "Tel:[REDACTED_UG_PHONE]"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(redact_pii_text(text), redacted)
+
+    def test_a_following_digit_group_does_not_stop_the_match(self) -> None:
+        # A redactor errs toward hiding; the unspaced pattern treats "0772123456 789" the same way.
+        self.assertEqual(redact_pii_text("Account 0772 123 456 789"), "Account [REDACTED_UG_PHONE] 789")
+        self.assertEqual(
+            redact_pii_text("Call 0772 123 456 0701 234 567"), "Call [REDACTED_UG_PHONE] [REDACTED_UG_PHONE]"
+        )
 
     def test_an_unspaced_number_is_redacted_as_before(self) -> None:
         self.assertEqual(
@@ -530,6 +551,13 @@ class GroupedPhoneNumberTests(unittest.TestCase):
             "Reference 0772 123 4567 is closed.",
             "Reference 0772.123.456 is closed.",
             "Landline 0414 123 456 in Kampala.",
+            "The bill was UGX(772 123 456).",
+            "Pay Shs.0 772 123 now.",
+            "Total 1,077,212,345 paid.",
+            "Rate 1.0772123456 applies.",
+            "Invoice INV-0772123456 is paid.",
+            "Reference 2024-0772-123-456 is closed.",
+            "Call the toll-free line (0800 117 000).",
         ):
             with self.subTest(text=text):
                 self.assertEqual(redact_pii_text(text), text)
@@ -537,7 +565,9 @@ class GroupedPhoneNumberTests(unittest.TestCase):
 
     def test_a_spaced_tin_or_nin_keeps_its_own_marker(self) -> None:
         self.assertEqual(redact_pii_text("TIN 100 012 3456"), "TIN [REDACTED_UG_TIN]")
+        self.assertEqual(redact_pii_text("TIN:100 012 3456"), "TIN:[REDACTED_UG_TIN]")
         self.assertEqual(redact_pii_text("NIN CM93 0039 182LIR"), "NIN [REDACTED_UG_NID]")
+        self.assertEqual(redact_pii_text("(NIN CM930772123456)"), "(NIN [REDACTED_UG_NID])")
 
     def test_uras_own_numbers_are_kept(self) -> None:
         for text in (
@@ -547,6 +577,9 @@ class GroupedPhoneNumberTests(unittest.TestCase):
             "WhatsApp +256 772 140000 or 0772-140-000",
             "telephone at +256 417 442 221, or 0417 444 602",
             "Telephone: 0417-443-150 or +256-417-442042",
+            "WhatsApp:0772 140 000 (0772 140 000)",
+            "Follow us:0772140000",
+            "WhatsApp\u00a0+256\u00a0772\u00a0140\u00a0000",
         ):
             with self.subTest(text=text[:40]):
                 self.assertEqual(redact_pii_text(text), text)
