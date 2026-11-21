@@ -104,27 +104,37 @@ after "updated", "prevailing" and "proposed" the same way.
 
 **Decision.** Words that date or qualify a tax without naming it end the name,
 as "new" and "current" already did: latest, recent, updated, prevailing,
-proposed, upcoming, revised, present, existing, respective, day and days. The
-allow-list check takes the whole remaining name, as before. The retrieved
-passages clear a candidate when they contain its whole name, or an ending of it
-followed by the tax noun ("stamp duty" for "Kampala stamp duty"), as whole
-words. A first version cleared a candidate when any ending of it was on the
-allow-list. Many entries are generic words ("minimum", "land", "foreign"), so it
-rejected 360 of 11,160 built invented names where dev rejects 6,720, and an
-independent check failed it. It also matched passages inside longer words
-("holding tax" in "withholding tax").
+proposed, upcoming, revised, present, existing, respective, day, days, bilateral
+and double, with the verb "explain". The allow-list check takes the whole
+remaining name, as before. The retrieved passages clear a candidate when each
+word of its name begins a passage word, in order, or when an ending of the name
+does so followed by the tax noun, singular or plural, with no follower noun
+after it ("foreign tax credit" names no "foreign tax"). A word of four or more
+letters may also match after a dropped first letter. Dev matched the name
+anywhere in the passages, so "holding tax" matched inside "withholding tax";
+the word start ends that, and the prefix keeps the tolerance real questions
+relied on ("custom duty" in "customs duty", "capital gain tax" in "capital gains
+tax"). The allow-list check stays exact: a prefix there would clear short
+invented words ("pet tax" from "petroleum").
+
+Two earlier versions were failed by an independent check. The first cleared a
+candidate when any ending of it was on the allow-list; many entries are generic
+words ("minimum", "land", "foreign"), so it rejected 360 of 11,160 built invented
+names where dev rejects 6,720. The second matched passages by whole word, which
+rejected real names that dev clears ("custom duty"), and it read "treaty" and
+"agreement" after the tax noun as compounds, which hid "Is there a Wealth Tax
+treaty?".
 
 **Consequences.** With no passages, every built invented name that dev rejects
-is still rejected. With the top 5 BM25 rows of the dataset as passages, 1,156 of
-the 6,480 that dev rejects end in a tax the passages name ("robot stamp duty";
-"wealth foreign tax" when a passage says "foreign tax credit") and go to normal
-retrieval. A real tax after a qualifier outside the list ("Kampala",
-"effective") is still rejected unless the passages name it. Whole-word matching
-ends dev's matches inside longer words, so a misspelt name that reaches the
-guard ("incom tax") is no longer cleared by "income" in a passage; the default
-query rewrite corrects that spelling first.
+is still rejected. With the top 5 BM25 rows of the dataset as passages, 1,073 of
+the 6,480 that dev rejects end in a tax the passages name ("alien advance tax")
+and go to normal retrieval. A real tax after a qualifier outside the list
+("Kampala", "effective") is still rejected unless the passages name it. On the
+built invented names, the qualifier probe, 112 misspellings of real names and
+the dataset, eval and test-literal questions, nothing dev clears is rejected.
 
 **Confirmation.** `App/tests/agents/test_premise_guard_recall.py` pins the
 qualified real taxes, the three levies added from `App/Data/pdfs`, a qualifier
-the passages clear, an invented tax whose last word is in the passage, names
-inside longer words, and 24 fabricated-tax questions. The counts are in G719.
+the passages clear, misspelt names matching their passages, names inside longer
+words, a compound in the passages, and 28 fabricated-tax questions. The counts
+are in G719.
