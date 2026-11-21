@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from app.guardrails.pii import StreamingDLPFilter, user_stated_identifiers
+from app.text_signals import CONTACT_FOOTER
 
 
 class TestStreamingDLPFilter(unittest.TestCase):
@@ -124,6 +125,22 @@ class TestStreamingDLPFilter(unittest.TestCase):
             ("1000000001", "220000123456"),
         )
         self.assertEqual(user_stated_identifiers(""), ())
+
+    def test_a_grouped_mobile_split_across_chunks_is_masked(self) -> None:
+        for chunks in (
+            ["Call me on 0772 ", "123 ", "456 today."],
+            ["Call me on +256 772 123 ", "456 today."],
+            ["Call me on +256 ", "772 ", "123456 today."],
+        ):
+            dlp = StreamingDLPFilter()
+            full = "".join([dlp.process_chunk(c) for c in chunks] + [dlp.flush()])
+            self.assertEqual(full, "Call me on [REDACTED_UG_PHONE] today.", chunks)
+
+    def test_the_contact_footer_streams_through_unchanged(self) -> None:
+        words = CONTACT_FOOTER.split(" ")
+        dlp = StreamingDLPFilter()
+        streamed = [dlp.process_chunk(w + " ") for w in words[:-1]] + [dlp.process_chunk(words[-1]), dlp.flush()]
+        self.assertEqual("".join(streamed), CONTACT_FOOTER)
 
 
 if __name__ == "__main__":

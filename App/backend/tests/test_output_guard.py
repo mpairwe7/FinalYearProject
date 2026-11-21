@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from app.guardrails.output_checks import OutputGuard
+from app.guardrails.pii import contains_pii, redact_pii_text
+from app.text_signals import CONTACT_FOOTER, LOCALIZED_CONTACT_FOOTERS
 
 
 class OutputGuardSanitizerTests(unittest.TestCase):
@@ -488,3 +490,79 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("[REDACTED_INSTRUCTION]", summary)
         self.assertNotIn("CM92018100123A", summary)
         self.assertIn("[REDACTED_UG_NID]", summary)
+
+
+class GroupedPhoneNumberTests(unittest.TestCase):
+    """G658: a mobile number written in groups is personal data; spaced figures and URA's own lines are not."""
+
+    def test_a_grouped_mobile_number_is_redacted(self) -> None:
+        for phone in (
+            "0772 123 456",
+            "0772-123-456",
+            "0772 123456",
+            "0701 234 567",
+            "+256 772 123456",
+            "+256 772 123 456",
+            "+256-772-123-456",
+            "+256772 123 456",
+            "+256 772123456",
+        ):
+            with self.subTest(phone=phone):
+                self.assertEqual(redact_pii_text(f"Call me on {phone} today."), "Call me on [REDACTED_UG_PHONE] today.")
+                self.assertTrue(contains_pii(phone))
+
+    def test_an_unspaced_number_is_redacted_as_before(self) -> None:
+        self.assertEqual(
+            redact_pii_text("Call 0772123456, +256772123456 or 0414123456."),
+            "Call [REDACTED_UG_PHONE], [REDACTED_UG_PHONE] or [REDACTED_UG_PHONE].",
+        )
+
+    def test_figures_written_with_spaces_are_not_phone_numbers(self) -> None:
+        for text in (
+            "The threshold is UGX 1 200 000 a year.",
+            "The bill was UGX 772 123 456.",
+            "Pay Shs 0 772 123 now.",
+            "Pay Shs 0 772 123 456 now.",
+            "Returns for 2024 2025 and 2026.",
+            "Due on 07 12 2025 or 2025-07-12.",
+            "Under section 77 (1) (a) of the Act.",
+            "Reference 10772 123 456 is closed.",
+            "Reference 0772 123 4567 is closed.",
+            "Reference 0772.123.456 is closed.",
+            "Landline 0414 123 456 in Kampala.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(redact_pii_text(text), text)
+                self.assertFalse(contains_pii(text))
+
+    def test_a_spaced_tin_or_nin_keeps_its_own_marker(self) -> None:
+        self.assertEqual(redact_pii_text("TIN 100 012 3456"), "TIN [REDACTED_UG_TIN]")
+        self.assertEqual(redact_pii_text("NIN CM93 0039 182LIR"), "NIN [REDACTED_UG_NID]")
+
+    def test_uras_own_numbers_are_kept(self) -> None:
+        for text in (
+            CONTACT_FOOTER,
+            *LOCALIZED_CONTACT_FOOTERS.values(),
+            "WhatsApp Support: +256 772 140 000 (0772 140 000)",
+            "WhatsApp +256 772 140000 or 0772-140-000",
+            "telephone at +256 417 442 221, or 0417 444 602",
+            "Telephone: 0417-443-150 or +256-417-442042",
+        ):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(redact_pii_text(text), text)
+                self.assertFalse(contains_pii(text))
+
+    def test_a_ticket_hides_the_callers_grouped_number_and_keeps_the_footer(self) -> None:
+        from app.db.database import _redact_ticket_value
+
+        turns = [
+            {"role": "user", "text": "Call me back on +256 772 123 456"},
+            {"role": "assistant", "text": f"Your return is due on the 15th.\n\n{CONTACT_FOOTER}"},
+        ]
+        self.assertEqual(
+            _redact_ticket_value(turns),
+            [
+                {"role": "user", "text": "Call me back on [REDACTED_UG_PHONE]"},
+                {"role": "assistant", "text": f"Your return is due on the 15th.\n\n{CONTACT_FOOTER}"},
+            ],
+        )
