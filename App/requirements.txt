@@ -17,12 +17,12 @@ numpy>=1.26,<2.5
 # there. 3.4.1 caps `transformers<5.0.0`, so it could not stay while the CVE
 # fix required moving to 5.x.
 sentence-transformers==6.0.1
-langchain==1.3.18
+langchain==1.5.0
 langchain-community==0.4.2
 langchain-core>=1.3.2,<2.0.0
-langchain-text-splitters==1.1.2
+langchain-text-splitters==1.1.3
 langchain-qdrant==1.1.0
-qdrant-client>=1.17.1,<2.0.0
+qdrant-client>=1.20.0,<2.0.0
 # Deliberately NOT moved with the cluster below. datasets 4.x/5.x all require
 # pyarrow>=21.0.0, so bumping it would drag a third unrelated package along.
 # (pyarrow itself has since moved to 23.0.1 for CVE-2026-25087 -- see its own
@@ -42,9 +42,9 @@ evaluate==0.4.6
 # Changing transformers alone does not resolve.
 transformers==5.16.1
 accelerate==1.15.0
-torch>=2.13.0  # matches App/backend/requirements.txt's pin; <2.13 is flagged by SAST
+torch>=2.15.0  # matches App/backend/requirements.txt's pin; <2.13 is flagged by SAST
 huggingface-hub==1.29.0
-sentencepiece==0.2.2
+sentencepiece==0.2.3
 kagglehub==0.3.12
 openpyxl==3.1.5
 
@@ -127,7 +127,7 @@ datasketch==1.10.0
 # constraint noted above (datasets 4.x/5.x *forcing* pyarrow>=21) does not
 # run the other way and datasets stays put.
 pyarrow==23.0.1
-pandera==0.33.1
+pandera==0.36.0
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
 # rouge-score / nltk are deliberately absent. Nothing imports either one.
