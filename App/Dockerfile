@@ -10,7 +10,7 @@
 # -----------------------------------------------------------------------------
 # uv comes from its own named stage, pinned by tag and digest, so the pin is a
 # FROM line Dependabot can see rather than a COPY --from=<image> it cannot.
-FROM ghcr.io/astral-sh/uv:0.7.22@sha256:629240833dd25d03949509fc01ceff56ae74f5e5f0fd264da634dd2f70e9cc70 AS uv-binary
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv-binary
 
 # Literal, patch-pinned base image: Dependabot's docker updater bumps FROM
 # lines but cannot see an ARG default, which is how this sat on 3.11.11

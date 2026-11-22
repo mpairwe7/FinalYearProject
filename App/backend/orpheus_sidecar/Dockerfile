@@ -1,7 +1,7 @@
 # Orpheus-3B TTS sidecar for the receptionist's Luganda voice.
 # vLLM brings its own torch/transformers; that is why this is a separate
 # image rather than a dependency of the api image. See app.py's docstring.
-FROM vllm/vllm-openai:v0.17.1@sha256:0dc46f74eb0e630675d83101dc66c6441c4475cceedcf9235ee42b87c3affd23
+FROM vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
 
 COPY requirements.txt /srv/requirements.txt
 RUN pip install --no-cache-dir -r /srv/requirements.txt
