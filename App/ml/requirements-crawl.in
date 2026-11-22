@@ -6,4 +6,4 @@ pydantic>=2.14.3
 # The gate's structural PDF inspection.
 pypdfium2>=5.15.2
 # GHSA-mmhr-3c5m-f64f / CVE-2026-126190: fixed in 4.0.0 (beautifulsoup4 pulls it in).
-soupsieve>=4.0.0
+soupsieve>=4.1.1
